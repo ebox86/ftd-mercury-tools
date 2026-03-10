@@ -4,7 +4,7 @@
 // @version      0.2.0
 // @description  Adds a barcode-assisted delivery request tab to MercuryHQ and prepopulates the Single Request form from Mercury services.
 // @author       Evan
-// @match        *://*/delivery*
+// @match        https://mercuryhq.com/create-delivery-service-request*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @connect      localhost
@@ -240,9 +240,9 @@
     let banner = document.getElementById('mhq-barcode-banner');
     if (banner) return banner;
 
-    const anchor = getInput('referenceNumber')?.closest('.css-1dbjc4n[style]')?.parentElement?.parentElement
-      || qs('[data-testid="Single Request-tab"]')?.parentElement?.nextElementSibling
-      || qs('[data-testid="referenceNumber"]')?.closest('.css-1dbjc4n')
+    const referenceInput = getInput('referenceNumber');
+    const formRoot = referenceInput?.closest('[data-testid="referenceNumber"]')?.parentElement?.parentElement?.parentElement?.parentElement
+      || qs('[data-testid="Single Request-tab"]')?.parentElement?.parentElement
       || document.body;
 
     banner = createElement(`
@@ -252,8 +252,11 @@
       </div>
     `);
 
-    if (anchor?.parentElement) anchor.parentElement.insertBefore(banner, anchor);
-    else document.body.prepend(banner);
+    if (formRoot?.insertBefore) {
+      formRoot.insertBefore(banner, formRoot.firstChild);
+    } else {
+      document.body.prepend(banner);
+    }
     return banner;
   }
 
@@ -507,11 +510,21 @@
     if (qs('#mhq-single-request-barcode-tab')) return true;
 
     const singleRequestTab = qs(CONFIG.selectors.singleRequestTab);
-    if (!singleRequestTab || !singleRequestTab.parentElement) return false;
+    if (!singleRequestTab) {
+      log('singleRequestTab not found');
+      return false;
+    }
 
+    const tabRow = singleRequestTab.parentElement;
+    if (!tabRow) {
+      log('singleRequestTab parent missing');
+      return false;
+    }
+
+    const bulkRequestTab = qs(CONFIG.selectors.bulkRequestTab);
     const barcodeTab = createElement(`
-      <div id="mhq-single-request-barcode-tab" class="mhq-barcode-tab" tabindex="0" role="button" aria-label="Single Request Barcode-tab">
-        <div class="mhq-barcode-tab__text">${escapeHtml(CONFIG.labels.newTab)}</div>
+      <div id="mhq-single-request-barcode-tab" aria-label="Single Request Barcode-tab" data-focusable="true" tabindex="0" class="css-1dbjc4n r-1loqt21 r-1otgn73 r-1i6wzkk r-lrvibr mhq-barcode-tab" data-testid="Single Request Barcode-tab" style="border-bottom-color: rgb(22, 65, 88); margin: 5px 0px 5px 50px; padding-top: 8px; padding-bottom: 8px; transition-duration: 0s;">
+        <div dir="auto" class="css-901oao mhq-barcode-tab__text" style="color: rgb(65, 65, 65); font-family: Arial; font-size: 16px;">${escapeHtml(CONFIG.labels.newTab)}</div>
       </div>
     `);
 
@@ -523,11 +536,14 @@
       }
     });
 
-    singleRequestTab.addEventListener('click', () => {
-      setTimeout(activateNormalTab, 0);
-    });
+    singleRequestTab.addEventListener('click', () => setTimeout(activateNormalTab, 0));
 
-    singleRequestTab.parentElement.appendChild(barcodeTab);
+    if (bulkRequestTab && bulkRequestTab.parentElement === tabRow) {
+      tabRow.insertBefore(barcodeTab, bulkRequestTab.nextSibling);
+    } else {
+      tabRow.appendChild(barcodeTab);
+    }
+
     ensureBanner();
     updateBanner('Normal Single Request mode active.');
     log('Injected barcode tab');
@@ -540,22 +556,30 @@
 
   async function mount() {
     if (state.mounted) return;
-    for (let i = 0; i < 40; i++) {
+
+    for (let i = 0; i < 60; i++) {
       if (isDeliverySingleRequestPage()) {
-        injectBarcodeTab();
-        state.mounted = true;
-        return;
+        const injected = injectBarcodeTab();
+        if (injected) {
+          state.mounted = true;
+          log('Mount complete');
+          return;
+        }
       }
       await wait(500);
     }
+
+    log('Mount timed out');
   }
 
   const observer = new MutationObserver(() => {
     if (isDeliverySingleRequestPage() && !qs('#mhq-single-request-barcode-tab')) {
+      log('MutationObserver reinject attempt');
       injectBarcodeTab();
     }
   });
 
+  log('Userscript loaded', window.location.href);
   mount();
   observer.observe(document.documentElement, { childList: true, subtree: true });
 })();
