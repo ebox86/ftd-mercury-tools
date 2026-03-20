@@ -23,6 +23,12 @@
     olcByTicketPath: '/OrderLifeCycle.asmx/OLCGetByTicket',
     defaultDeliveryInstruction: 'LEAVE AT DOOR IF NOT AVAILABLE',
     defaultPhone: '4122810350',
+    oposBridge: {
+      enabled: true,
+      url: 'http://127.0.0.1:17331',
+      pollIntervalMs: 250,
+      autoLookupOnScan: true,
+    },
     debug: true,
     labels: {
       newTab: 'Single Request - Autocomplete',
@@ -915,6 +921,40 @@
     });
   }
 
+  function bridgeRequest({ method = 'GET', url, headers = {}, data = null }) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method,
+        url,
+        headers,
+        data,
+        onload: response => {
+          if (response.status >= 200 && response.status < 300) resolve(response.responseText);
+          else reject(new Error(`Bridge service returned HTTP ${response.status} for ${method} ${url}`));
+        },
+        onerror: () => reject(new Error(`Network error calling bridge service: ${method} ${url}`)),
+        ontimeout: () => reject(new Error(`Bridge service timed out: ${method} ${url}`)),
+      });
+    });
+  }
+
+  function getBridgeBaseUrl() {
+    const raw = String(CONFIG.oposBridge?.url || '').trim();
+    return raw.replace(/\/+$/, '');
+  }
+
+  async function fetchBridgeLatestScan() {
+    const baseUrl = getBridgeBaseUrl();
+    if (!baseUrl) return null;
+    const body = await bridgeRequest({ method: 'GET', url: `${baseUrl}/scan/latest` });
+    const parsed = JSON.parse(String(body || '{}'));
+    const scan = parsed?.scan || null;
+    if (!scan) return null;
+    const seq = Number(scan.seq || 0);
+    const value = String(scan.value || '').trim();
+    return { seq, value, at: String(scan.at || '') };
+  }
+
   async function fetchLifecycleByTicket(ticketId) {
     const url = buildApiUrl(CONFIG.olcByTicketPath);
     const serviceUrl = buildApiUrl('/OrderLifeCycle.asmx');
@@ -1800,7 +1840,18 @@
     const input = backdrop.querySelector('.mhq-modal__input');
     const statusEl = backdrop.querySelector('.mhq-modal__input-status');
     const errorEl = backdrop.querySelector('#mhq-modal-error');
+    let bridgeTimer = null;
+    let bridgeBusy = false;
+    let bridgeLastSeq = -1;
+
+    function stopBridgePolling() {
+      if (bridgeTimer) clearInterval(bridgeTimer);
+      bridgeTimer = null;
+      bridgeBusy = false;
+    }
+
     const close = ({ resetDecorations = false } = {}) => {
+      stopBridgePolling();
       clearVerificationState();
       if (resetDecorations) {
         clearBarcodeAutofillState();
@@ -1956,6 +2007,24 @@
       }
     }
 
+    async function pollBridgeScan() {
+      if (!CONFIG.oposBridge?.enabled || bridgeBusy) return;
+      bridgeBusy = true;
+      try {
+        const latest = await fetchBridgeLatestScan();
+        if (!latest || !latest.value || latest.seq <= bridgeLastSeq) return;
+        bridgeLastSeq = latest.seq;
+        input.value = latest.value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        if (CONFIG.oposBridge?.autoLookupOnScan) submit();
+      } catch (error) {
+        // Bridge is optional. Keep modal usable with manual or keyboard-wedge scans.
+        log('OPOS bridge poll failed', error);
+      } finally {
+        bridgeBusy = false;
+      }
+    }
+
     backdrop.addEventListener('click', event => {
       const target = event.target;
       if (!(target instanceof Element)) return;
@@ -1974,6 +2043,10 @@
     });
 
     setTimeout(() => input.focus(), 0);
+    if (CONFIG.oposBridge?.enabled) {
+      bridgeTimer = setInterval(pollBridgeScan, Math.max(100, Number(CONFIG.oposBridge?.pollIntervalMs || 250)));
+      pollBridgeScan();
+    }
   }
 
   function injectBarcodeTab() {
