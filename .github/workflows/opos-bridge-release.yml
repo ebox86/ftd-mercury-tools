@@ -1,0 +1,118 @@
+name: OPOS Bridge Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semantic version (example: 1.2.0)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "opos-bridge-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version metadata
+        id: meta
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}"
+          } else {
+            $refName = "${{ github.ref_name }}"
+            $prefix = "opos-bridge-v"
+            if (-not $refName.StartsWith($prefix)) {
+              throw "Tag must use prefix '$prefix'. Got: $refName"
+            }
+            $version = $refName.Substring($prefix.Length)
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') {
+            throw "Invalid version format: $version"
+          }
+
+          $tag = "opos-bridge-v$version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Version=$version"
+          Write-Host "Tag=$tag"
+
+      - name: Install Inno Setup compiler
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        run: |
+          $publisherUrl = "https://github.com/${{ github.repository }}"
+          .\opos-browser-bridge\tools\build-installer.ps1 -Version "${{ steps.meta.outputs.version }}" -Publisher "FTD" -PublisherUrl $publisherUrl
+
+      - name: Hash installer
+        id: hash
+        run: |
+          $version = "${{ steps.meta.outputs.version }}"
+          $installer = Join-Path $PWD "opos-browser-bridge\dist\FTD.OposBridge.Setup.$version.exe"
+          if (-not (Test-Path $installer)) {
+            throw "Installer not found: $installer"
+          }
+
+          $hash = (Get-FileHash -Path $installer -Algorithm SHA256).Hash.ToUpperInvariant()
+          $hashFile = "$installer.sha256.txt"
+          Set-Content -Path $hashFile -Value "$hash  $(Split-Path -Leaf $installer)"
+
+          "installer=$installer" >> $env:GITHUB_OUTPUT
+          "hash=$hash" >> $env:GITHUB_OUTPUT
+          "hash_file=$hashFile" >> $env:GITHUB_OUTPUT
+
+      - name: Generate winget manifests
+        id: manifests
+        run: |
+          $version = "${{ steps.meta.outputs.version }}"
+          $tag = "${{ steps.meta.outputs.tag }}"
+          $installerFile = "FTD.OposBridge.Setup.$version.exe"
+          $installerUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/$installerFile"
+          $outputRoot = Join-Path $PWD "opos-browser-bridge\artifacts\winget-manifests"
+
+          $manifestDir = .\opos-browser-bridge\tools\new-winget-manifests.ps1 `
+            -PackageVersion $version `
+            -InstallerUrl $installerUrl `
+            -InstallerSha256 "${{ steps.hash.outputs.hash }}" `
+            -OutputRoot $outputRoot
+
+          $zipPath = Join-Path $PWD "opos-browser-bridge\artifacts\winget-manifests.$version.zip"
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          Compress-Archive -Path (Join-Path $outputRoot "*") -DestinationPath $zipPath
+
+          "manifest_root=$outputRoot" >> $env:GITHUB_OUTPUT
+          "manifest_dir=$manifestDir" >> $env:GITHUB_OUTPUT
+          "manifest_zip=$zipPath" >> $env:GITHUB_OUTPUT
+
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: OPOS Bridge ${{ steps.meta.outputs.version }}
+          files: |
+            ${{ steps.hash.outputs.installer }}
+            ${{ steps.hash.outputs.hash_file }}
+            ${{ steps.manifests.outputs.manifest_zip }}
+
+      - name: Upload winget manifests artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winget-manifests-${{ steps.meta.outputs.version }}
+          path: ${{ steps.manifests.outputs.manifest_root }}
