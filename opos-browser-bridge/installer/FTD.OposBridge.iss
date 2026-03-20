@@ -82,7 +82,8 @@ function IsValidPort(const Value: string): Boolean;
 var
   PortNumber: Integer;
 begin
-  Result := TryStrToInt(Value, PortNumber) and (PortNumber > 0) and (PortNumber < 65536);
+  PortNumber := StrToIntDef(Value, -1);
+  Result := (PortNumber > 0) and (PortNumber < 65536);
 end;
 
 function InitializeSetup(): Boolean;
