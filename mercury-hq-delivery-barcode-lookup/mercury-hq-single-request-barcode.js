@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MercuryHQ - Single Request Barcode
 // @namespace    https://ebox86.com/
-// @version      0.3.52
+// @version      0.3.78
 // @description  Adds a barcode-assisted delivery request tab to MercuryHQ and prepopulates the Single Request form from Mercury services.
 // @author       Evan
 // @match        https://mercuryhq.com/create-delivery-service-request*
@@ -84,12 +84,9 @@
   const state = {
     mounted: false,
     activeMode: 'normal',
-    lastTicketId: null,
-    lastLifecycle: null,
-    lastTicket: null,
-    lastRecipient: null,
     submitWatchStop: null,
     lastSubmitHandledAt: 0,
+    addressVerificationCommitToken: 0,
     deliveryInstructionPreset: '',
     deliveryMenuCleanup: null,
     requestDefaults: { ...DEFAULT_REQUEST_CONFIG },
@@ -279,10 +276,16 @@
     .mhq-modal__body { padding: 16px; }
     .mhq-modal__input-wrap { position: relative; }
     .mhq-modal__input { width: 100%; box-sizing: border-box; font-size: 16px; padding: 10px 38px 10px 12px; border: 1px solid #cfcfcf; border-radius: 6px; }
+    .mhq-modal__input:disabled { background: #f4f6f8; color: #6b7785; cursor: not-allowed; }
     .mhq-modal__input-status { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); min-width: 20px; height: 20px; border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; user-select: none; pointer-events: none; display: none; }
     .mhq-modal__input-status--checking { display: inline-block; color: #4f5b66; background: #e8edf2; }
+    .mhq-modal__input-status--loading { display: inline-block; width: 20px; min-width: 20px; height: 20px; border: 2px solid #c7d4df; border-top-color: #1f4f7a; background: transparent; color: transparent; font-size: 0; line-height: 0; animation: mhq-spin .8s linear infinite; }
     .mhq-modal__input-status--valid { display: inline-block; color: #fff; background: #2e8b57; }
     .mhq-modal__input-status--invalid { display: inline-block; color: #fff; background: #c62828; }
+    /* Defensive override: never render spinner on Lookup button. */
+    .mhq-modal .mhq-btn.mhq-btn--loading::before { content: none !important; animation: none !important; border: 0 !important; }
+    .mhq-modal .mhq-btn[disabled] { opacity: .55; cursor: not-allowed; }
+    @keyframes mhq-spin { from { transform: translateY(-50%) rotate(0deg); } to { transform: translateY(-50%) rotate(360deg); } }
     .mhq-btn { appearance: none; border: 1px solid #c9d2d8; background: #fff; color: #1f2a33; border-radius: 6px; min-height: 34px; padding: 8px 12px; cursor: pointer; font-family: Arial; font-size: 12px; font-weight: 600; line-height: 1; }
     .mhq-btn:hover { background: #f6f9fb; }
     .mhq-btn--primary { border-color: rgb(22, 65, 88); background: rgb(22, 65, 88); color: #fff; }
@@ -319,23 +322,28 @@
     return sel ? qs(sel) : null;
   }
 
-  function setNativeValue(el, value) {
+  function setNativeValue(el, value, options = {}) {
+    const {
+      dispatchBlur = false,
+      dispatchInput = true,
+      dispatchChange = true,
+    } = options;
     if (!el) return;
     const proto = Object.getPrototypeOf(el);
     const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
     if (descriptor?.set) descriptor.set.call(el, value);
     else el.value = value;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
+    if (dispatchInput) el.dispatchEvent(new Event('input', { bubbles: true }));
+    if (dispatchChange) el.dispatchEvent(new Event('change', { bubbles: true }));
+    if (dispatchBlur) el.dispatchEvent(new Event('blur', { bubbles: true }));
   }
 
-  function setSelectByValueOrLabel(el, desired) {
+  function setSelectByValueOrLabel(el, desired, setOptions = {}) {
     if (!el || desired == null || desired === '') return false;
     const normalized = String(desired).trim().toLowerCase();
     const match = Array.from(el.options || []).find(opt => opt.value.trim().toLowerCase() === normalized || opt.text.trim().toLowerCase() === normalized || (opt.label || '').trim().toLowerCase() === normalized);
     if (!match) return false;
-    setNativeValue(el, match.value);
+    setNativeValue(el, match.value, setOptions);
     return true;
   }
 
@@ -609,10 +617,6 @@
     if (now - state.lastSubmitHandledAt < 1200) return;
     state.lastSubmitHandledAt = now;
     clearHighlights();
-    state.lastTicketId = null;
-    state.lastLifecycle = null;
-    state.lastTicket = null;
-    state.lastRecipient = null;
     state.deliveryInstructionPreset = '';
     if (state.activeMode === 'barcode' && !qs('.mhq-modal-backdrop')) {
       setTimeout(() => {
@@ -792,26 +796,38 @@
     return { ticketId: rows.find(r => r.ticketId)?.ticketId || '', latest: rows[0] || null, rows };
   }
 
-  function parseTicketsXml(xmlText) {
+  function parseTicketsXml(xmlText, { ticketReferenceHint = '' } = {}) {
     const xml = parseXmlDocument(xmlText, 'Unable to parse ticket XML response');
 
-    const parseTicketFromDoc = doc => {
-      const ticket = findDataRowNode(
-        doc,
-        ['Ticket', 'TICKET', 'Table', 'ROW'],
-        ['SALE_ID', 'saleID', 'SaleID', 'SALEID', 'RECIPIENT_ID', 'recipientID', 'RecipientID', 'ID'],
-      );
-      if (!ticket) return null;
-      return {
-        id: getXmlChildText(ticket, ['ID']),
-        saleId: getXmlChildText(ticket, ['SALE_ID', 'saleID', 'SaleID', 'SALEID']),
-        recipientId: getXmlChildText(ticket, ['RECIPIENT_ID', 'recipientID', 'RecipientID', 'RECIPIENTID']),
-        amount: getXmlChildText(ticket, ['AMT', 'amount']),
-        amountPaid: getXmlChildText(ticket, ['AMT_PAID']),
-        deliveryDate: getXmlChildText(ticket, ['DELIV_DATE', 'DELIVERY_DATE']),
-        specialInstructions: getXmlChildText(ticket, ['SPECIAL_INSTR', 'SPECIAL_INSTRUCTIONS']),
-        deliveryDateInstructions: getXmlChildText(ticket, ['DELIVERY_DATE_INSTR']),
-      };
+    const parseTicketNode = ticket => ({
+      id: getXmlChildText(ticket, ['ID']),
+      saleId: getXmlChildText(ticket, ['SALE_ID', 'saleID', 'SaleID', 'SALEID']),
+      recipientId: getXmlChildText(ticket, ['RECIPIENT_ID', 'recipientID', 'RecipientID', 'RECIPIENTID']),
+      amount: getXmlChildText(ticket, ['AMT', 'amount']),
+      amountPaid: getXmlChildText(ticket, ['AMT_PAID']),
+      deliveryDate: getXmlChildText(ticket, ['DELIV_DATE', 'DELIVERY_DATE']),
+      specialInstructions: getXmlChildText(ticket, ['SPECIAL_INSTR', 'SPECIAL_INSTRUCTIONS']),
+      deliveryDateInstructions: getXmlChildText(ticket, ['DELIVERY_DATE_INSTR']),
+      ticketPosition: getXmlChildText(ticket, ['TICKET_POSITION', 'ticketPosition']),
+      userReference: getXmlChildText(ticket, ['USER_REFERENCE', 'userReference']),
+    });
+
+    const hasTicketSignal = parsed => !!(parsed.saleId || parsed.recipientId || parsed.deliveryDate || parsed.amount || parsed.id);
+
+    const collectTicketRows = doc => {
+      const allowedRowNames = new Set(['ticket', 'table', 'row']);
+      const nodes = Array.from(doc.getElementsByTagName('*'));
+      const rows = [];
+      for (const node of nodes) {
+        if (!(node instanceof Element)) continue;
+        const ns = String(node.namespaceURI || '').toLowerCase();
+        if (ns.includes('www.w3.org/2001/xmlschema')) continue;
+        const local = String(node.localName || node.nodeName || '').trim().toLowerCase();
+        if (!allowedRowNames.has(local)) continue;
+        const parsed = parseTicketNode(node);
+        if (hasTicketSignal(parsed)) rows.push(parsed);
+      }
+      return rows;
     };
 
     const parseTicketFromLeafFields = doc => {
@@ -825,17 +841,84 @@
         deliveryDate: getLeafValue(fields, ['DELIV_DATE', 'DELIVERY_DATE']),
         specialInstructions: getLeafValue(fields, ['SPECIAL_INSTR', 'SPECIAL_INSTRUCTIONS']),
         deliveryDateInstructions: getLeafValue(fields, ['DELIVERY_DATE_INSTR']),
+        ticketPosition: getLeafValue(fields, ['TICKET_POSITION', 'ticketPosition']),
+        userReference: getLeafValue(fields, ['USER_REFERENCE', 'userReference']),
       };
-      const hasTicketSignal = !!(parsed.saleId || parsed.recipientId || parsed.deliveryDate || parsed.amount);
-      return hasTicketSignal ? parsed : null;
+      return hasTicketSignal(parsed) ? parsed : null;
     };
 
-    let parsed = parseTicketFromDoc(xml);
-    if (!parsed) parsed = parseTicketFromLeafFields(xml);
-    if (!parsed) {
+    const normalizeRef = value => String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+    const normalizeTicketRef = value => normalizeRef(value).replace(/^OR(?=\d)/i, '');
+    const normalizePos = value => {
+      const n = Number.parseInt(String(value || '').trim(), 10);
+      return Number.isFinite(n) ? String(n) : '';
+    };
+    const parseRefParts = value => {
+      const normalized = normalizeTicketRef(value);
+      const match = normalized.match(/^([A-Z0-9\-]+)\/(\d+)$/);
+      if (!match) return null;
+      const [, salePartRaw, posPartRaw] = match;
+      const salePart = String(salePartRaw || '').trim();
+      const posPart = normalizePos(posPartRaw);
+      if (!salePart || !posPart) return null;
+      return { full: normalized, salePart, posPart };
+    };
+
+    const selectTicketRow = rows => {
+      if (!rows.length) return null;
+      const hint = normalizeTicketRef(ticketReferenceHint);
+      if (!hint) return rows[0];
+      const hintParts = parseRefParts(hint);
+
+      const exact = rows.find(row => normalizeTicketRef(row.userReference) === hint || normalizeTicketRef(row.id) === hint);
+      if (exact) return exact;
+
+      if (!hintParts) return rows[0];
+
+      const byUserReferenceParts = rows.find(row => {
+        const rowParts = parseRefParts(row.userReference);
+        return !!rowParts && rowParts.salePart === hintParts.salePart && rowParts.posPart === hintParts.posPart;
+      });
+      if (byUserReferenceParts) return byUserReferenceParts;
+
+      const byIdParts = rows.find(row => {
+        const rowParts = parseRefParts(row.id);
+        return !!rowParts && rowParts.salePart === hintParts.salePart && rowParts.posPart === hintParts.posPart;
+      });
+      if (byIdParts) return byIdParts;
+
+      const bySaleAndPos = rows.find(row => normalizeTicketRef(row.saleId) === hintParts.salePart && normalizePos(row.ticketPosition) === hintParts.posPart);
+      if (bySaleAndPos) return bySaleAndPos;
+
+      const byPosOnlyMatches = rows.filter(row => normalizePos(row.ticketPosition) === hintParts.posPart);
+      if (byPosOnlyMatches.length === 1) return byPosOnlyMatches[0];
+      if (byPosOnlyMatches.length > 1) return byPosOnlyMatches[0];
+
+      // Some Mercury responses return multiple rows but omit USER_REFERENCE/TICKET_POSITION.
+      // In those cases ticket suffix "/N" usually maps to 1-based row position.
+      const rowIndex = Number.parseInt(hintParts.posPart, 10) - 1;
+      if (Number.isFinite(rowIndex) && rowIndex >= 0 && rowIndex < rows.length) {
+        return rows[rowIndex];
+      }
+
+      if (rows.length > 1) {
+        // Last-resort fallback so scanning still proceeds instead of stalling in modal.
+        return rows[0];
+      }
+
+      return rows[0];
+    };
+
+    let rows = collectTicketRows(xml);
+    if (!rows.length) {
       const embeddedXml = parseEmbeddedResultXml(xml, ['GetTicketsResult', 'string']);
-      if (embeddedXml) parsed = parseTicketFromDoc(embeddedXml) || parseTicketFromLeafFields(embeddedXml);
+      if (embeddedXml) rows = collectTicketRows(embeddedXml);
     }
+    if (!rows.length) {
+      const leafParsed = parseTicketFromLeafFields(xml);
+      if (leafParsed) rows = [leafParsed];
+    }
+    const parsed = selectTicketRow(rows);
 
     if (!parsed) {
       const tagPreview = Array.from(xml.getElementsByTagName('*'))
@@ -861,13 +944,14 @@
       return {
         id: getXmlChildText(recipient, ['ID', 'RECIPIENT_ID', 'RECIPIENTID']),
         name: getXmlChildText(recipient, ['NAME']),
-        address: getXmlChildText(recipient, ['ADDRESS']),
-        city: getXmlChildText(recipient, ['CITY']),
-        state: getXmlChildText(recipient, ['STATE_PROV', 'STATE']),
+        address: getXmlChildText(recipient, ['ADDRESS', 'ADDRESS1', 'ADDR1', 'STREET', 'STREET1', 'STREET_ADDRESS', 'DELIV_ADDR', 'DELIVERY_ADDRESS']),
+        address2: getXmlChildText(recipient, ['ADDRESS2', 'ADDR2', 'STREET2']),
+        city: getXmlChildText(recipient, ['CITY', 'CITY_NAME', 'TOWN']),
+        state: getXmlChildText(recipient, ['STATE_PROV', 'STATE', 'STATE_CD']),
         country: getXmlChildText(recipient, ['COUNTRY']),
-        postalCode: getXmlChildText(recipient, ['POSTAL_CODE', 'ZIP']),
+        postalCode: getXmlChildText(recipient, ['POSTAL_CODE', 'ZIP', 'ZIP_CODE', 'POSTCODE']),
         phone: getXmlChildText(recipient, ['PHONE']),
-        firmName: getXmlChildText(recipient, ['FIRM_NAME']).trim(),
+        firmName: getXmlChildText(recipient, ['FIRM_NAME', 'BUSINESS_NAME', 'COMPANY']).trim(),
       };
     };
 
@@ -876,13 +960,14 @@
       const parsed = {
         id: getLeafValue(fields, ['ID', 'RECIPIENT_ID', 'RECIPIENTID']),
         name: getLeafValue(fields, ['NAME']),
-        address: getLeafValue(fields, ['ADDRESS']),
-        city: getLeafValue(fields, ['CITY']),
-        state: getLeafValue(fields, ['STATE_PROV', 'STATE']),
+        address: getLeafValue(fields, ['ADDRESS', 'ADDRESS1', 'ADDR1', 'STREET', 'STREET1', 'STREET_ADDRESS', 'DELIV_ADDR', 'DELIVERY_ADDRESS']),
+        address2: getLeafValue(fields, ['ADDRESS2', 'ADDR2', 'STREET2']),
+        city: getLeafValue(fields, ['CITY', 'CITY_NAME', 'TOWN']),
+        state: getLeafValue(fields, ['STATE_PROV', 'STATE', 'STATE_CD']),
         country: getLeafValue(fields, ['COUNTRY']),
-        postalCode: getLeafValue(fields, ['POSTAL_CODE', 'ZIP']),
+        postalCode: getLeafValue(fields, ['POSTAL_CODE', 'ZIP', 'ZIP_CODE', 'POSTCODE']),
         phone: getLeafValue(fields, ['PHONE']),
-        firmName: getLeafValue(fields, ['FIRM_NAME']).trim(),
+        firmName: getLeafValue(fields, ['FIRM_NAME', 'BUSINESS_NAME', 'COMPANY']).trim(),
       };
       const hasRecipientSignal = !!(parsed.name || parsed.address || parsed.id);
       return hasRecipientSignal ? parsed : null;
@@ -955,6 +1040,28 @@
     return { seq, value, at: String(scan.at || '') };
   }
 
+  async function bridgeRearmScanner() {
+    const baseUrl = getBridgeBaseUrl();
+    if (!baseUrl) return null;
+    const body = await bridgeRequest({ method: 'GET', url: `${baseUrl}/scanner/rearm` });
+    try {
+      return JSON.parse(String(body || '{}'));
+    } catch {
+      return null;
+    }
+  }
+
+  async function bridgeClearScan() {
+    const baseUrl = getBridgeBaseUrl();
+    if (!baseUrl) return null;
+    const body = await bridgeRequest({ method: 'GET', url: `${baseUrl}/scan/clear` });
+    try {
+      return JSON.parse(String(body || '{}'));
+    } catch {
+      return null;
+    }
+  }
+
   async function fetchLifecycleByTicket(ticketId) {
     const url = buildApiUrl(CONFIG.olcByTicketPath);
     const serviceUrl = buildApiUrl('/OrderLifeCycle.asmx');
@@ -1004,7 +1111,7 @@
     throw new Error(`OLCGetByTicket failed for ticket ${ticketId}. Attempts: ${errors.join(' | ')}`);
   }
 
-  async function fetchTicket(ticketId) {
+  async function fetchTicket(ticketId, options = {}) {
     const methodUrl = buildApiUrl('/OrderEntry.asmx/GetTickets');
     const serviceUrl = buildApiUrl('/OrderEntry.asmx');
     const attempts = [];
@@ -1094,7 +1201,7 @@
       try {
         log('Trying ticket lookup', attempt.label, attempt);
         const xmlText = await mercuryRequest(attempt);
-        return parseTicketsXml(xmlText);
+        return parseTicketsXml(xmlText, options);
       } catch (error) {
         errors.push(`${attempt.label}: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -1203,6 +1310,28 @@
     return country || defaultCountry;
   }
 
+  function normalizeUsZip5(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const explicit = text.match(/\b(\d{5})(?:-\d{4})?\b/);
+    if (explicit?.[1]) return explicit[1];
+    const digits = text.replace(/\D/g, '');
+    return digits.length >= 5 ? digits.slice(0, 5) : '';
+  }
+
+  function deriveRecipientZip(recipient = {}) {
+    const candidates = [
+      recipient?.postalCode,
+      recipient?.address,
+      `${recipient?.city || ''} ${recipient?.state || ''} ${recipient?.postalCode || ''}`,
+    ];
+    for (const candidate of candidates) {
+      const zip = normalizeUsZip5(candidate);
+      if (zip) return zip;
+    }
+    return '';
+  }
+
   function readElementValue(el) {
     if (!el) return '';
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
@@ -1281,6 +1410,164 @@
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
   }
 
+  function normalizeInlineWhitespace(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function splitAddressLines(address) {
+    const raw = String(address || '')
+      // Some payloads concatenate business name and street without a separator.
+      .replace(/([A-Za-z\)])(\d{2,}\s+[A-Za-z])/g, '$1\n$2')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/[;|]+/g, '\n');
+    return raw
+      .split(/[\r\n]+/)
+      .map(normalizeInlineWhitespace)
+      .filter(Boolean);
+  }
+
+  function looksLikeStreetAddressLine(line) {
+    const value = normalizeInlineWhitespace(line);
+    if (!value) return false;
+    if (/\b(?:P\.?\s*O\.?\s*BOX|POST OFFICE BOX)\b/i.test(value)) return true;
+    if (/^\d+[A-Z]?\b/i.test(value)) return true;
+    if (/\b\d+\b/.test(value) && /\b(?:ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|BOULEVARD|DR|DRIVE|LN|LANE|CT|COURT|CIR|CIRCLE|WAY|PKWY|PARKWAY|HWY|HIGHWAY|TRL|TRAIL|TER|TERRACE|PL|PLACE)\b/i.test(value)) return true;
+    return false;
+  }
+
+  function looksLikeUnitLine(line) {
+    return /\b(?:APT|APARTMENT|UNIT|SUITE|STE|ROOM|RM|FLOOR|FL)\b/i.test(normalizeInlineWhitespace(line));
+  }
+
+  function looksLikeCityStatePostalLine(line, recipient = {}) {
+    const value = normalizeInlineWhitespace(line);
+    if (!value) return false;
+
+    const city = normalizeInlineWhitespace(recipient?.city || '').toLowerCase();
+    const state = normalizeInlineWhitespace(recipient?.state || '').toLowerCase();
+    const zip = String(recipient?.postalCode || '').trim();
+    const lower = value.toLowerCase();
+
+    const hasZip = /\b\d{5}(?:-\d{4})?\b/.test(value);
+    const hasCity = !!(city && lower.includes(city));
+    const hasState = !!(state && lower.includes(state));
+    const hasCommaStateZip = /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?$/i.test(value);
+
+    if (hasCommaStateZip) return true;
+    if (hasZip && (hasCity || hasState)) return true;
+    if (hasCity && hasState) return true;
+    if (zip && value.includes(zip)) return true;
+    return false;
+  }
+
+  function scoreStreetAddressLine(line, recipient = {}) {
+    const value = normalizeInlineWhitespace(line);
+    if (!value) return -1000;
+
+    let score = 0;
+    if (/\b(?:P\.?\s*O\.?\s*BOX|POST OFFICE BOX)\b/i.test(value)) score += 120;
+    if (/^\d+[A-Z]?\b/i.test(value)) score += 90;
+    if (/\b\d+\b/.test(value)) score += 30;
+    if (/\b(?:ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|BOULEVARD|DR|DRIVE|LN|LANE|CT|COURT|CIR|CIRCLE|WAY|PKWY|PARKWAY|HWY|HIGHWAY|TRL|TRAIL|TER|TERRACE|PL|PLACE)\b/i.test(value)) score += 60;
+    if (/\b(?:N|S|E|W|NE|NW|SE|SW)\b/i.test(value)) score += 8;
+    if (looksLikeUnitLine(value)) score -= 35;
+    if (looksLikeCityStatePostalLine(value, recipient)) score -= 80;
+    if (!/\d/.test(value) && /^[A-Z0-9 '&.-]+$/i.test(value)) score -= 15;
+    return score;
+  }
+
+  function looksLikeBusinessNameLine(line) {
+    const value = normalizeInlineWhitespace(line);
+    if (!value) return false;
+    if (/\b(?:INC|LLC|LTD|CORP|CORPORATION|CO|COMPANY|HOSPITAL|CLINIC|MEDICAL|SCHOOL|UNIVERSITY|COLLEGE|FUNERAL|CHURCH|TEMPLE|SYNAGOGUE|CENTER|CENTRE|OFFICE|DEPARTMENT|DEPT|HOTEL|INN|RESTAURANT)\b/i.test(value)) return true;
+    if (!/\d/.test(value) && /^[A-Z0-9 '&.-]+$/i.test(value)) return true;
+    return false;
+  }
+
+  function extractStreetSegmentFromBlob(addressBlob) {
+    const value = normalizeInlineWhitespace(addressBlob);
+    if (!value) return '';
+
+    const poBox = value.match(/\b(?:P\.?\s*O\.?\s*BOX\s+\d+[A-Z0-9-]*)\b/i);
+    if (poBox?.[0]) return normalizeInlineWhitespace(poBox[0]);
+
+    const streetPattern = /\b\d+[A-Z]?(?:\s+[A-Z0-9#.'-]+){0,8}\s+(?:ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|BOULEVARD|DR|DRIVE|LN|LANE|CT|COURT|CIR|CIRCLE|WAY|PKWY|PARKWAY|HWY|HIGHWAY|TRL|TRAIL|TER|TERRACE|PL|PLACE)\b(?:\s+(?:N|S|E|W|NE|NW|SE|SW))?(?:\s+[A-Z0-9#.'-]+){0,3}/i;
+    const match = value.match(streetPattern);
+    return match?.[0] ? normalizeInlineWhitespace(match[0]) : '';
+  }
+
+  function splitStreetAndBusiness(address, firmName, recipient = {}) {
+    const lines = splitAddressLines(address);
+    const rawAddress = normalizeInlineWhitespace(address);
+    const providedBusiness = normalizeInlineWhitespace(firmName);
+
+    if (!lines.length) {
+      return {
+        street: '',
+        business: providedBusiness,
+        rawAddress,
+      };
+    }
+
+    const streetFromBlob = extractStreetSegmentFromBlob(rawAddress);
+
+    if (lines.length === 1) {
+      const line = lines[0];
+      const street = streetFromBlob || line;
+      let business = providedBusiness;
+      if (!business) {
+        const remainder = normalizeInlineWhitespace(line.replace(street, ' '));
+        if (remainder && !looksLikeUnitLine(remainder) && !looksLikeCityStatePostalLine(remainder, recipient)) {
+          business = remainder;
+        }
+      }
+      return {
+        street,
+        business,
+        rawAddress,
+      };
+    }
+
+    const scoredLines = lines.map((line, index) => ({
+      line,
+      index,
+      score: scoreStreetAddressLine(line, recipient),
+    }));
+    const ranked = scoredLines.slice().sort((a, b) => b.score - a.score);
+    const best = ranked[0] || { index: lines.length - 1, score: -1000, line: lines[lines.length - 1] };
+    let streetIndex = best.index;
+
+    if (best.score < 20) {
+      const withNumbers = scoredLines.find(row => /\d/.test(row.line) && !looksLikeCityStatePostalLine(row.line, recipient));
+      if (withNumbers) streetIndex = withNumbers.index;
+    }
+
+    let street = normalizeInlineWhitespace(lines[streetIndex] || '');
+    if (streetFromBlob && street.includes(streetFromBlob)) street = streetFromBlob;
+    else if (streetFromBlob && best.score < 20) street = streetFromBlob;
+
+    const nonStreetLines = lines.filter((_, i) => i !== streetIndex);
+    const businessCandidates = nonStreetLines.filter(line => !looksLikeUnitLine(line) && !looksLikeCityStatePostalLine(line, recipient));
+    let business = providedBusiness;
+    if (!business) {
+      const explicitBusiness = businessCandidates.filter(looksLikeBusinessNameLine);
+      const picked = explicitBusiness.length ? explicitBusiness : businessCandidates;
+      business = normalizeInlineWhitespace(picked.join(' '));
+    }
+    if (!business && streetFromBlob) {
+      const remainder = normalizeInlineWhitespace(rawAddress.replace(streetFromBlob, ' '));
+      if (remainder && !looksLikeCityStatePostalLine(remainder, recipient) && !looksLikeUnitLine(remainder)) {
+        business = remainder;
+      }
+    }
+
+    return {
+      street,
+      business,
+      rawAddress,
+    };
+  }
+
   function extractUnit(addressLine1, specialInstructions) {
     const combined = `${addressLine1 || ''} || ${specialInstructions || ''}`;
     const patterns = [/\b(?:APT|APARTMENT)\s*#?\s*([A-Z0-9-]+)/i, /\b(?:UNIT)\s*#?\s*([A-Z0-9-]+)/i, /\b(?:SUITE|STE)\s*#?\s*([A-Z0-9-]+)/i, /\b(?:ROOM|RM|ROIOM)\s*#?\s*([A-Z0-9-]+)/i, /\b#\s*([A-Z0-9-]+)/i];
@@ -1292,10 +1579,10 @@
   }
 
   function stripUnitFromAddress(addressLine1, extractedUnit) {
-    let address = String(addressLine1 || '').trim();
+    let address = normalizeInlineWhitespace(addressLine1 || '');
     if (!address || !extractedUnit) return address;
     const escaped = extractedUnit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return address.replace(new RegExp(`\\s*,?\\s*${escaped}`, 'i'), '').replace(/\s{2,}/g, ' ').trim();
+    return normalizeInlineWhitespace(address.replace(new RegExp(`\\s*,?\\s*${escaped}`, 'i'), ''));
   }
 
   function inferLocationType(recipientName, firmName) {
@@ -1308,8 +1595,10 @@
     const latest = lifecycle?.latest || {};
     const nameParts = splitRecipientName(recipient?.name || '');
     const specialInstructions = [ticket?.specialInstructions, ticket?.deliveryDateInstructions].map(v => String(v || '').trim()).filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i).join(' | ');
-    const unit = extractUnit(recipient?.address || '', specialInstructions);
-    const street = stripUnitFromAddress(recipient?.address || '', unit);
+    const recipientAddress = uniqueNonEmpty([recipient?.address, recipient?.address2]).join('\n');
+    const addressParts = splitStreetAndBusiness(recipientAddress, recipient?.firmName || '', recipient || {});
+    const unit = extractUnit(addressParts.rawAddress || recipientAddress || recipient?.address || '', specialInstructions);
+    const street = stripUnitFromAddress(addressParts.street || extractStreetSegmentFromBlob(addressParts.rawAddress || recipientAddress) || recipientAddress || recipient?.address || '', unit);
     const isToday = isSameLocalDay(ticket?.deliveryDate);
 
     return {
@@ -1323,10 +1612,10 @@
       addressLine2: unit,
       city: recipient?.city || '',
       state: recipient?.state || '',
-      zip: recipient?.postalCode || '',
+      zip: deriveRecipientZip(recipient),
       country: mapCountry(recipient?.country || 'US'),
-      locationType: inferLocationType(recipient?.name || '', recipient?.firmName || ''),
-      locationName: recipient?.firmName || '',
+      locationType: inferLocationType(recipient?.name || '', addressParts.business || recipient?.firmName || ''),
+      locationName: addressParts.business || recipient?.firmName || '',
       specialDeliveryInstructions: specialInstructions || getRequestDefault('defaultDeliveryInstruction'),
       undeliverableAction: getRequestDefault('defaultUndeliverableAction'),
       deliveryDate: formatDateMMDDYYYY(ticket?.deliveryDate),
@@ -1344,23 +1633,29 @@
   }
 
   function fillField(name, value, reviewReason = '', options = {}) {
-    const { source = 'manual', maxLength = null } = options;
+    const {
+      source = 'manual',
+      maxLength = null,
+      dispatchInput = true,
+      dispatchChange = true,
+    } = options;
     const el = getInput(name);
     if (!el) { log('Missing field selector for', name); return null; }
-    const hasValue = value != null && String(value) !== '';
-    let finalValue = hasValue ? String(value) : '';
+    const rawValue = value == null ? '' : String(value);
+    const hasValue = rawValue.trim() !== '';
+    let finalValue = hasValue ? rawValue : '';
     let truncated = false;
     if (hasValue && maxLength && finalValue.length > maxLength) { finalValue = finalValue.slice(0, maxLength); truncated = true; }
 
     if (el.tagName === 'SELECT') {
       if (hasValue) {
-        const ok = setSelectByValueOrLabel(el, finalValue);
+        const ok = setSelectByValueOrLabel(el, finalValue, { dispatchInput, dispatchChange });
         if (ok) { if (source === 'service') markFilled(el, `Mapped from service${truncated ? ' (truncated/review suggested)' : ''}`); }
         else markReview(el, reviewReason || `Could not select ${finalValue}`);
       } else if (reviewReason) markReview(el, reviewReason);
     } else {
       if (hasValue) {
-        setNativeValue(el, finalValue);
+        setNativeValue(el, finalValue, { dispatchInput, dispatchChange });
         if (source === 'service') markFilled(el, `Mapped from service${truncated ? ' (truncated)' : ''}`);
       }
       if (!hasValue && reviewReason) markReview(el, reviewReason);
@@ -1371,18 +1666,19 @@
 
   function applyOrderData(orderData) {
     clearHighlights();
+    const addressCommitToken = ++state.addressVerificationCommitToken;
     fillField('referenceNumber', orderData.referenceNumber, 'Mapped from sale id', { source: 'service', maxLength: 50 });
     fillField('totalItemValue', orderData.totalItemValue, 'Mapped from AMT on ticket', { source: orderData.totalItemValue ? 'service' : 'manual', maxLength: 20 });
     fillField('itemDescription', orderData.itemDescription, 'Fixed business rule', { source: 'service', maxLength: 500 });
     fillField('recipient_name', orderData.recipient_name, 'Mapped from recipient name split', { source: orderData.recipient_name ? 'service' : 'manual', maxLength: 100 });
     fillField('lastName', orderData.lastName, 'Mapped from recipient name split', { source: orderData.lastName ? 'service' : 'manual', maxLength: 100 });
     fillField('phone', orderData.phone, 'Mapped from recipient phone', { source: orderData.phone ? 'service' : 'manual', maxLength: 18 });
-    fillField('addressLine1', orderData.addressLine1, 'Mapped from recipient address', { source: orderData.addressLine1 ? 'service' : 'manual', maxLength: 120 });
-    fillField('addressLine2', orderData.addressLine2, 'Extracted from address or instructions; verify', { source: orderData.addressLine2 ? 'service' : 'manual', maxLength: 120 });
-    fillField('city', orderData.city, 'Mapped from recipient city', { source: orderData.city ? 'service' : 'manual', maxLength: 100 });
-    fillField('state', orderData.state, 'Mapped from recipient state', { source: orderData.state ? 'service' : 'manual' });
-    fillField('zip', orderData.zip, 'Mapped from recipient postal code', { source: orderData.zip ? 'service' : 'manual', maxLength: 5 });
-    fillField('country', orderData.country, 'Mapped from recipient country', { source: orderData.country ? 'service' : 'manual' });
+    fillField('addressLine1', orderData.addressLine1, 'Mapped from recipient address', { source: orderData.addressLine1 ? 'service' : 'manual', maxLength: 120, dispatchInput: true, dispatchChange: false });
+    fillField('addressLine2', orderData.addressLine2, 'Extracted from address or instructions; verify', { source: orderData.addressLine2 ? 'service' : 'manual', maxLength: 120, dispatchInput: true, dispatchChange: false });
+    fillField('city', orderData.city, 'Mapped from recipient city', { source: orderData.city ? 'service' : 'manual', maxLength: 100, dispatchInput: true, dispatchChange: false });
+    fillField('state', orderData.state, 'Mapped from recipient state', { source: orderData.state ? 'service' : 'manual', dispatchInput: true, dispatchChange: false });
+    fillField('zip', orderData.zip, 'Mapped from recipient postal code', { source: orderData.zip ? 'service' : 'manual', maxLength: 5, dispatchInput: true, dispatchChange: false });
+    fillField('country', orderData.country, 'Mapped from recipient country', { source: orderData.country ? 'service' : 'manual', dispatchInput: true, dispatchChange: false });
     enforceCountryDefault(orderData.country);
     setTimeout(() => enforceCountryDefault(orderData.country), 180);
     setTimeout(() => enforceCountryDefault(orderData.country), 650);
@@ -1398,6 +1694,7 @@
     } else {
       fillField('pickUpDateTime', orderData.pickUpDateTime, 'Future delivery: defaulted by configuration', { source: orderData.pickUpDateTime ? 'service' : 'manual', maxLength: 20 });
     }
+    scheduleAddressVerificationCommit(addressCommitToken);
   }
 
   const AUTO_FILLED_FIELD_KEYS = [
@@ -1421,6 +1718,59 @@
     'pickUpDateTime',
   ];
 
+  const ADDRESS_VERIFICATION_FIELD_KEYS = [
+    'addressLine1',
+    'addressLine2',
+    'city',
+    'state',
+    'zip',
+    'country',
+  ];
+
+  function dispatchInputAndChange(el) {
+    if (!el) return;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function dispatchChangeOnly(el) {
+    if (!el) return;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function commitAddressVerificationState(token) {
+    if (token !== state.addressVerificationCommitToken) return;
+    for (const key of ADDRESS_VERIFICATION_FIELD_KEYS) {
+      const el = getInput(key);
+      dispatchChangeOnly(el);
+    }
+  }
+
+  function removeBadgesForField(el) {
+    const labelNode = findFieldLabelNode(el);
+    if (!labelNode) return;
+    qsa('.mhq-field-badge', labelNode).forEach(node => node.remove());
+  }
+
+  function reconcileAddressLine1VisualState(token) {
+    if (token !== state.addressVerificationCommitToken) return;
+    const addressLine1 = getInput('addressLine1');
+    if (!addressLine1) return;
+    if (readElementValue(addressLine1)) return;
+    // Mercury may clear/replace address asynchronously after autofill.
+    // If value is now empty, clear stale visual "filled" state.
+    addressLine1.classList.remove('mhq-filled', 'mhq-review');
+    addressLine1.removeAttribute('title');
+    removeBadgesForField(addressLine1);
+  }
+
+  function scheduleAddressVerificationCommit(token) {
+    // Commit once after all address fields are filled, then once later to beat stale async responses.
+    setTimeout(() => commitAddressVerificationState(token), 90);
+    setTimeout(() => commitAddressVerificationState(token), 420);
+    setTimeout(() => reconcileAddressLine1VisualState(token), 950);
+  }
+
   function clearFieldValue(fieldKey) {
     const el = getInput(fieldKey);
     if (!el) return;
@@ -1437,14 +1787,11 @@
   }
 
   function clearBarcodeAutofillState() {
+    state.addressVerificationCommitToken += 1;
     for (const key of AUTO_FILLED_FIELD_KEYS) clearFieldValue(key);
     const pickerInput = qs('#mhq-delivery-template-input');
     if (pickerInput instanceof HTMLInputElement) pickerInput.value = '';
     clearHighlights();
-    state.lastTicketId = null;
-    state.lastLifecycle = null;
-    state.lastTicket = null;
-    state.lastRecipient = null;
     state.deliveryInstructionPreset = '';
   }
 
@@ -1835,14 +2182,20 @@
   }
 
   function showScanModal() {
-    const backdrop = createElement(`<div class="mhq-modal-backdrop" role="dialog" aria-modal="true"><div class="mhq-modal"><div class="mhq-modal__header"><strong>${escapeHtml(CONFIG.labels.modalTitle)}</strong></div><div class="mhq-modal__body"><p style="margin-top:0">Enter the Order ID manually or scan the ticket into the input below. Most barcode scanners will type the value and send Enter.</p><div class="mhq-modal__input-wrap"><input class="mhq-modal__input" type="text" placeholder="${escapeHtml(CONFIG.labels.modalPlaceholder)}" autofocus /><span class="mhq-modal__input-status" aria-hidden="true"></span></div><div id="mhq-modal-error" style="display:none;color:#b00020;margin-top:10px"></div></div><div class="mhq-modal__footer"><button type="button" class="mhq-btn" data-action="cancel">Cancel</button><button type="button" class="mhq-btn mhq-btn--primary" data-action="lookup">Lookup</button></div></div></div>`);
+    // Always start clean for a new lookup session.
+    clearBarcodeAutofillState();
+    const backdrop = createElement(`<div class="mhq-modal-backdrop" role="dialog" aria-modal="true"><div class="mhq-modal"><div class="mhq-modal__header"><strong>${escapeHtml(CONFIG.labels.modalTitle)}</strong></div><div class="mhq-modal__body"><p style="margin-top:0">Scan a ticket or type the order ID below. When a valid code is scanned, lookup starts automatically.</p><div class="mhq-modal__input-wrap"><input class="mhq-modal__input" type="text" placeholder="${escapeHtml(CONFIG.labels.modalPlaceholder)}" autofocus /><span class="mhq-modal__input-status" aria-hidden="true"></span></div><div id="mhq-modal-error" style="display:none;color:#b00020;margin-top:10px"></div></div><div class="mhq-modal__footer"><button type="button" class="mhq-btn" data-action="cancel">Cancel</button><button type="button" class="mhq-btn mhq-btn--primary" data-action="lookup">Lookup</button></div></div></div>`);
     document.body.appendChild(backdrop);
     const input = backdrop.querySelector('.mhq-modal__input');
     const statusEl = backdrop.querySelector('.mhq-modal__input-status');
     const errorEl = backdrop.querySelector('#mhq-modal-error');
+    const lookupButton = backdrop.querySelector('[data-action="lookup"]');
     let bridgeTimer = null;
     let bridgeBusy = false;
     let bridgeLastSeq = -1;
+    let bridgeInputWrite = false;
+    let manualEntryActive = false;
+    let submitBusy = false;
 
     function stopBridgePolling() {
       if (bridgeTimer) clearInterval(bridgeTimer);
@@ -1850,8 +2203,24 @@
       bridgeBusy = false;
     }
 
+    function setSubmitting(isSubmitting) {
+      submitBusy = !!isSubmitting;
+      if (input instanceof HTMLInputElement) input.disabled = submitBusy;
+      if (lookupButton instanceof HTMLButtonElement) {
+        lookupButton.disabled = submitBusy;
+        lookupButton.classList.remove('mhq-btn--loading');
+      }
+      backdrop.setAttribute('aria-busy', submitBusy ? 'true' : 'false');
+      if (submitBusy) {
+        setInputStatus('loading', '', 'Loading order details');
+      } else if (statusEl && statusEl.classList.contains('mhq-modal__input-status--loading')) {
+        setInputStatus('');
+      }
+    }
+
     const close = ({ resetDecorations = false } = {}) => {
       stopBridgePolling();
+      setSubmitting(false);
       clearVerificationState();
       if (resetDecorations) {
         clearBarcodeAutofillState();
@@ -1859,13 +2228,14 @@
       backdrop.remove();
     };
     const setError = msg => { errorEl.textContent = msg; errorEl.style.display = msg ? 'block' : 'none'; };
-    const statusClasses = ['mhq-modal__input-status--checking', 'mhq-modal__input-status--valid', 'mhq-modal__input-status--invalid'];
+    const statusClasses = ['mhq-modal__input-status--checking', 'mhq-modal__input-status--loading', 'mhq-modal__input-status--valid', 'mhq-modal__input-status--invalid'];
     let verifyTimer = null;
     let verifySeq = 0;
     let verifyState = { normalizedTicketId: '', status: 'idle', lifecycle: null };
 
     function setInputStatus(kind, text = '', title = '') {
       if (!statusEl) return;
+      if (submitBusy && kind !== 'loading' && kind !== 'invalid') return;
       statusEl.classList.remove(...statusClasses);
       if (!kind) {
         statusEl.textContent = '';
@@ -1879,8 +2249,34 @@
       statusEl.style.display = 'inline-block';
     }
 
+    function sanitizeTicketInput(raw) {
+      return String(raw || '').replace(/[^0-9A-Za-z\-\/]/g, '').trim();
+    }
+
+    function normalizeTicketId(raw) {
+      const cleaned = sanitizeTicketInput(raw);
+      // OPOS ScanDataLabel may include symbology/type prefix "OR" before numeric order IDs.
+      // Keep suffixes like "/1", "/2", "/3" because they identify the ticket variant.
+      if (/^OR(?=\d)/i.test(cleaned)) return cleaned.slice(2);
+      return cleaned;
+    }
+
+    function isLikelyTicketId(raw) {
+      const normalized = normalizeTicketId(raw);
+      if (!normalized) return false;
+      // Common forms:
+      //  - 6 digit order id
+      //  - 6 digit with ticket suffix (e.g. 369687/1)
+      //  - alphanumeric ticket with suffix (e.g. ABC123/2)
+      return /^\d{6}$/.test(normalized)
+        || /^\d{6}\/\d+$/.test(normalized)
+        || /^[A-Za-z0-9\-]+\/\d+$/.test(normalized);
+    }
+
     function normalizeSixDigit(raw) {
-      const digits = String(raw || '').replace(/\D/g, '');
+      const normalized = normalizeTicketId(raw);
+      const primary = String(normalized || '').split('/')[0];
+      const digits = String(primary || '').replace(/\D/g, '');
       return /^\d{6}$/.test(digits) ? digits : '';
     }
 
@@ -1893,14 +2289,10 @@
     }
 
     function scheduleVerification() {
+      if (submitBusy) return;
       const normalized = normalizeSixDigit(input.value);
       if (!normalized) {
         clearVerificationState();
-        return;
-      }
-
-      if (verifyState.status === 'valid' && verifyState.normalizedTicketId === normalized) {
-        setInputStatus('valid', '\u2713', 'Order number verified');
         return;
       }
 
@@ -1926,68 +2318,72 @@
     }
 
     async function submit() {
+      if (submitBusy) return;
       const raw = String(input.value || '').trim();
       if (!raw) { setError('Scan a ticket first.'); return; }
-      const scannedTicketId = raw.replace(/[^0-9A-Za-z\-]/g, '');
-      const normalizedSixDigit = normalizeSixDigit(raw);
+      const scannedTicketId = normalizeTicketId(raw);
+      if (!scannedTicketId) { setError('Scanned value is not a valid ticket format.'); return; }
+      const normalizedSixDigit = normalizeSixDigit(scannedTicketId);
+      const scanPrimaryToken = String(scannedTicketId || '').split('/')[0].trim();
+      const serviceTicketId = normalizedSixDigit || scanPrimaryToken;
 
       errorEl.style.display = 'none';
+      setSubmitting(true);
 
       try {
         let lifecycle = null;
 
         if (normalizedSixDigit) {
-          const hasVerifiedLifecycle = verifyState.normalizedTicketId === normalizedSixDigit && verifyState.status === 'valid' && !!verifyState.lifecycle;
-          if (hasVerifiedLifecycle) {
-            lifecycle = verifyState.lifecycle;
-          } else {
-            if (verifyTimer) {
-              clearTimeout(verifyTimer);
-              verifyTimer = null;
-            }
-            const seq = ++verifySeq;
-            verifyState = { normalizedTicketId: normalizedSixDigit, status: 'verifying', lifecycle: null };
-            setInputStatus('checking', '...', 'Checking order number');
-            try {
-              lifecycle = await fetchLifecycleByTicket(normalizedSixDigit);
-              if (seq !== verifySeq) return;
-              verifyState = { normalizedTicketId: normalizedSixDigit, status: 'valid', lifecycle };
-              setInputStatus('valid', '\u2713', 'Order number verified');
-            } catch (error) {
-              if (seq !== verifySeq) return;
-              verifyState = { normalizedTicketId: normalizedSixDigit, status: 'invalid', lifecycle: null };
-              setInputStatus('invalid', '\u00d7', 'Order number not found');
-              // Do not hard-stop here. Some environments fail OLC endpoint but still return
-              // valid data through GetTickets/GetRecipient.
-              setError('Could not verify this 6-digit order number via OLC. Trying fallback lookup...');
-            }
+          if (verifyTimer) {
+            clearTimeout(verifyTimer);
+            verifyTimer = null;
+          }
+          const seq = ++verifySeq;
+          verifyState = { normalizedTicketId: normalizedSixDigit, status: 'verifying', lifecycle: null };
+          setInputStatus('checking', '...', 'Checking order number');
+          try {
+            lifecycle = await fetchLifecycleByTicket(normalizedSixDigit);
+            if (seq !== verifySeq) return;
+            verifyState = { normalizedTicketId: normalizedSixDigit, status: 'valid', lifecycle };
+            setInputStatus('valid', '\u2713', 'Order number verified');
+          } catch (error) {
+            if (seq !== verifySeq) return;
+            verifyState = { normalizedTicketId: normalizedSixDigit, status: 'invalid', lifecycle: null };
+            setInputStatus('invalid', '\u00d7', 'Order number not found');
+            // Do not hard-stop here. Some environments fail OLC endpoint but still return
+            // valid data through GetTickets/GetRecipient.
+            setError('Could not verify this 6-digit order number via OLC. Trying fallback lookup...');
           }
         }
 
         if (!lifecycle) {
-          try {
-            lifecycle = await fetchLifecycleByTicket(scannedTicketId);
-          } catch (lifecycleError) {
-            log('Lifecycle lookup failed, continuing with ticket fallback', lifecycleError);
+          const lifecycleCandidates = uniqueNonEmpty([serviceTicketId, scannedTicketId]);
+          for (const candidate of lifecycleCandidates) {
+            try {
+              lifecycle = await fetchLifecycleByTicket(candidate);
+              if (lifecycle) break;
+            } catch (lifecycleError) {
+              log('Lifecycle lookup failed for candidate', { candidate, error: lifecycleError });
+            }
           }
         }
-        const resolvedTicketId = lifecycle?.ticketId || scannedTicketId;
-        let ticket = null;
-        try {
-          ticket = await fetchTicket(scannedTicketId);
-        } catch (primaryError) {
-          if (resolvedTicketId && resolvedTicketId !== scannedTicketId) {
-            ticket = await fetchTicket(resolvedTicketId);
-          } else {
-            throw primaryError;
-          }
-        }
-        const recipient = ticket.recipientId ? await fetchRecipient(ticket.recipientId) : null;
 
-        state.lastTicketId = resolvedTicketId;
-        state.lastLifecycle = lifecycle;
-        state.lastTicket = ticket;
-        state.lastRecipient = recipient;
+        const resolvedTicketId = lifecycle?.ticketId || serviceTicketId || scannedTicketId;
+        let ticket = null;
+        let ticketLookupError = null;
+        const ticketLookupCandidates = uniqueNonEmpty([scannedTicketId, serviceTicketId, resolvedTicketId]);
+        for (const candidate of ticketLookupCandidates) {
+          try {
+            ticket = await fetchTicket(candidate, { ticketReferenceHint: scannedTicketId });
+            ticketLookupError = null;
+            break;
+          } catch (candidateError) {
+            ticketLookupError = candidateError;
+            log('Ticket lookup failed for candidate', { candidate, error: candidateError });
+          }
+        }
+        if (!ticket && ticketLookupError) throw ticketLookupError;
+        const recipient = ticket.recipientId ? await fetchRecipient(ticket.recipientId) : null;
 
         log('Lookup chain', {
           scannedTicketId,
@@ -2004,23 +2400,32 @@
         log(error);
         const message = error instanceof Error ? error.message : String(error);
         setError(message);
+        setInputStatus('invalid', '\u00d7', 'Lookup failed');
+      } finally {
+        if (backdrop.isConnected) setSubmitting(false);
       }
     }
 
     async function pollBridgeScan() {
-      if (!CONFIG.oposBridge?.enabled || bridgeBusy) return;
+      if (!CONFIG.oposBridge?.enabled || bridgeBusy || submitBusy) return;
+      if (manualEntryActive && String(input.value || '').trim()) return;
       bridgeBusy = true;
       try {
         const latest = await fetchBridgeLatestScan();
         if (!latest || !latest.value || latest.seq <= bridgeLastSeq) return;
         bridgeLastSeq = latest.seq;
-        input.value = latest.value;
+        const normalizedScanValue = normalizeTicketId(latest.value);
+        if (!normalizedScanValue) return;
+        bridgeInputWrite = true;
+        input.value = normalizedScanValue;
         input.dispatchEvent(new Event('input', { bubbles: true }));
-        if (CONFIG.oposBridge?.autoLookupOnScan) submit();
+        bridgeInputWrite = false;
+        if (CONFIG.oposBridge?.autoLookupOnScan && isLikelyTicketId(normalizedScanValue)) submit();
       } catch (error) {
         // Bridge is optional. Keep modal usable with manual or keyboard-wedge scans.
         log('OPOS bridge poll failed', error);
       } finally {
+        bridgeInputWrite = false;
         bridgeBusy = false;
       }
     }
@@ -2033,6 +2438,9 @@
     });
 
     input.addEventListener('input', () => {
+      if (!bridgeInputWrite) {
+        manualEntryActive = String(input.value || '').trim().length > 0;
+      }
       setError('');
       scheduleVerification();
     });
@@ -2044,8 +2452,21 @@
 
     setTimeout(() => input.focus(), 0);
     if (CONFIG.oposBridge?.enabled) {
-      bridgeTimer = setInterval(pollBridgeScan, Math.max(100, Number(CONFIG.oposBridge?.pollIntervalMs || 250)));
-      pollBridgeScan();
+      // Reset bridge scan snapshot when modal opens so a new scan is always treated as new.
+      (async () => {
+        try {
+          await bridgeRearmScanner();
+          await wait(75);
+          const cleared = await bridgeClearScan();
+          const baselineSeq = Number(cleared?.lastSeq || 0);
+          if (Number.isFinite(baselineSeq)) bridgeLastSeq = Math.max(bridgeLastSeq, baselineSeq);
+        } catch (error) {
+          log('OPOS bridge baseline read failed', error);
+        } finally {
+          bridgeTimer = setInterval(pollBridgeScan, Math.max(100, Number(CONFIG.oposBridge?.pollIntervalMs || 250)));
+          pollBridgeScan();
+        }
+      })();
     }
   }
 
