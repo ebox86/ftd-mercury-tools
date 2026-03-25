@@ -36,6 +36,23 @@ param(
   [string]$StartMode = 'auto',
 
   [Parameter()]
+  [ValidateSet('localservice', 'networkservice', 'localsystem', 'current-user', 'custom')]
+  [string]$ServiceAccount = 'localservice',
+
+  [Parameter()]
+  [string]$ServiceUser = '',
+
+  [Parameter()]
+  [PSCredential]$Credential,
+
+  [Parameter()]
+  [switch]$PromptForCredential,
+
+  [Parameter()]
+  [ValidateRange(1000, 600000)]
+  [int]$ServiceRestartDelayMs = 60000,
+
+  [Parameter()]
   [switch]$SkipPublish,
 
   [Parameter()]
@@ -124,6 +141,90 @@ function Publish-ServiceBinary([string]$projectFile, [string]$outputDir) {
   }
 }
 
+function ConvertTo-PlainText([Security.SecureString]$secure) {
+  if ($null -eq $secure) { return '' }
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+  try {
+    return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+  }
+  finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+  }
+}
+
+function Resolve-ServiceIdentity {
+  $resolvedAccount = [string]$ServiceAccount
+  $resolvedUser = ''
+  $resolvedPassword = $null
+
+  switch ($resolvedAccount) {
+    'localservice' { return @{ StartName = 'NT AUTHORITY\LocalService'; StartPassword = '' } }
+    'networkservice' { return @{ StartName = 'NT AUTHORITY\NetworkService'; StartPassword = '' } }
+    'localsystem' { return @{ StartName = 'LocalSystem'; StartPassword = $null } }
+    'current-user' {
+      $resolvedUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    }
+    'custom' {
+      $resolvedUser = [string]$ServiceUser
+      if ([string]::IsNullOrWhiteSpace($resolvedUser)) {
+        throw "ServiceUser is required when ServiceAccount=custom."
+      }
+    }
+    default {
+      throw "Unsupported ServiceAccount value: $resolvedAccount"
+    }
+  }
+
+  $cred = $Credential
+  if ($null -eq $cred -and $PromptForCredential.IsPresent) {
+    $promptUser = if ([string]::IsNullOrWhiteSpace($resolvedUser)) { $null } else { $resolvedUser }
+    $cred = Get-Credential -UserName $promptUser -Message "Enter service credential for $resolvedUser"
+  }
+  if ($null -eq $cred) {
+    throw "Credential is required for ServiceAccount=$resolvedAccount. Pass -Credential or -PromptForCredential."
+  }
+
+  $resolvedPassword = ConvertTo-PlainText $cred.Password
+  if ([string]::IsNullOrWhiteSpace($resolvedPassword)) {
+    throw "Credential password cannot be empty for ServiceAccount=$resolvedAccount."
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($resolvedUser) -and $cred.UserName -and ($cred.UserName -ne $resolvedUser)) {
+    Write-Warning "Credential username '$($cred.UserName)' does not match requested '$resolvedUser'. Using credential username."
+    $resolvedUser = $cred.UserName
+  } elseif ([string]::IsNullOrWhiteSpace($resolvedUser)) {
+    $resolvedUser = $cred.UserName
+  }
+
+  return @{ StartName = $resolvedUser; StartPassword = $resolvedPassword }
+}
+
+function Apply-ServiceIdentity([string]$name, [hashtable]$identity) {
+  $service = Get-ServiceWmi -name $name
+  if ($null -eq $service) {
+    throw "Service '$name' not found while applying identity."
+  }
+
+  $args = @{
+    StartName = $identity.StartName
+  }
+  if ($identity.ContainsKey('StartPassword')) {
+    $args.StartPassword = $identity.StartPassword
+  }
+
+  $result = Invoke-CimMethod -InputObject $service -MethodName Change -Arguments $args
+  if ($null -eq $result -or $result.ReturnValue -ne 0) {
+    $rv = if ($null -ne $result) { $result.ReturnValue } else { '<null>' }
+    throw "Failed to set service account identity. Win32_Service.Change ReturnValue=$rv"
+  }
+}
+
+function Configure-ServiceRecovery([string]$name, [int]$restartDelayMs) {
+  $delay = [Math]::Max(1000, [Math]::Min(600000, $restartDelayMs))
+  Invoke-Sc @('failure', $name, 'reset= 86400', "actions= restart/$delay/restart/$delay/restart/$delay")
+  Invoke-Sc @('failureflag', $name, '1')
+}
+
 function Start-ServiceAndVerify([string]$name, [int]$port) {
   Invoke-Sc @('start', $name)
   if (-not (Wait-ServiceState -name $name -desiredState 'Running' -timeoutSeconds 25)) {
@@ -165,6 +266,7 @@ function Install-OrUpdateService {
     throw "Service executable not found: $resolvedExe"
   }
 
+  $identity = Resolve-ServiceIdentity
   $binPath = ('"{0}" --port={1} --logical-name={2} --scanner-mode={3} --claim-timeout-ms={4}' -f $resolvedExe, $Port, $LogicalName, $ScannerMode, $ClaimTimeoutMs)
   $service = Get-ServiceWmi -name $ServiceName
 
@@ -196,6 +298,8 @@ function Install-OrUpdateService {
     )
   }
 
+  Apply-ServiceIdentity -name $ServiceName -identity $identity
+  Configure-ServiceRecovery -name $ServiceName -restartDelayMs $ServiceRestartDelayMs
   Start-ServiceAndVerify -name $ServiceName -port $Port
 }
 
@@ -233,6 +337,7 @@ function Show-Status {
   Write-Host ("Name: {0}" -f $service.Name)
   Write-Host ("State: {0}" -f $service.State)
   Write-Host ("StartMode: {0}" -f $service.StartMode)
+  Write-Host ("StartName: {0}" -f $service.StartName)
   Write-Host ("PathName: {0}" -f $service.PathName)
   try {
     $health = Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/health" -f $Port) -TimeoutSec 2

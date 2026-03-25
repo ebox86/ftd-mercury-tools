@@ -24,6 +24,9 @@ public sealed class OposComScannerDriver : IScannerDriver
   private bool? _deviceEnabled;
   private bool? _autoDisable;
   private string _lastError = "";
+  private int _lastOpenResult = -1;
+  private string _comProgId = "";
+  private bool _eventSinkAttached;
   private DataEventComHandler? _dataEventSink;
   private ErrorEventComHandler? _errorEventSink;
 
@@ -50,6 +53,7 @@ public sealed class OposComScannerDriver : IScannerDriver
 
       _scanner = CreateScannerComObjectUnsafe();
       var openResult = InvokeIntUnsafe("Open", _options.LogicalName);
+      _lastOpenResult = openResult;
       if (openResult != 0)
       {
         throw new InvalidOperationException($"Open({_options.LogicalName}) failed with OPOS result {openResult}");
@@ -108,6 +112,9 @@ public sealed class OposComScannerDriver : IScannerDriver
       _deviceEnabled = false;
       _autoDisable = false;
       _lastError = "";
+      _lastOpenResult = -1;
+      _eventSinkAttached = false;
+      _comProgId = "";
       while (_eventSnapshots.TryDequeue(out _)) { }
     }, cancellationToken);
 
@@ -192,6 +199,22 @@ public sealed class OposComScannerDriver : IScannerDriver
     }, cancellationToken);
   }
 
+  public Task<ScannerStartupDiagnostics> GetStartupDiagnosticsAsync(CancellationToken cancellationToken)
+  {
+    return _dispatcher.InvokeAsync(() =>
+    {
+      return new ScannerStartupDiagnostics(
+        Mode: "opos",
+        LogicalName: _options.LogicalName,
+        Initialized: _started,
+        Claimed: _claimed,
+        OpenResult: _lastOpenResult,
+        ComProgId: _comProgId,
+        EventSinkAttached: _eventSinkAttached,
+        LastError: _lastError);
+    }, cancellationToken);
+  }
+
   public Task<ScannerSnapshot?> ReadEventSnapshotAsync(CancellationToken cancellationToken)
   {
     return _dispatcher.InvokeAsync(() =>
@@ -260,6 +283,7 @@ public sealed class OposComScannerDriver : IScannerDriver
         if (instance is not null)
         {
           _logger.LogInformation("Created OPOS scanner COM object via ProgID {ProgId}.", progId);
+          _comProgId = progId;
           return instance;
         }
       }
@@ -281,6 +305,7 @@ public sealed class OposComScannerDriver : IScannerDriver
           if (instance is not null)
           {
             _logger.LogInformation("Created OPOS scanner object from interop DLL {InteropDllPath}.", _options.InteropDllPath);
+            _comProgId = "interop-dll";
             return instance;
           }
         }
@@ -339,10 +364,13 @@ public sealed class OposComScannerDriver : IScannerDriver
         _errorEventSink = OnComErrorEvent;
         ComEventsHelper.Combine(_scanner, ScannerEventsGuid, ErrorEventDispId, _errorEventSink);
       }
+
+      _eventSinkAttached = _dataEventSink is not null && _errorEventSink is not null;
     }
     catch (Exception ex)
     {
       _lastError = $"Failed to attach COM event sinks: {ex.Message}";
+      _eventSinkAttached = false;
       _logger.LogWarning(ex, "OPOS COM event sink attach failed.");
     }
   }
@@ -379,6 +407,8 @@ public sealed class OposComScannerDriver : IScannerDriver
     {
       // Ignore sink detach failures on shutdown.
     }
+
+    _eventSinkAttached = false;
   }
 
   private void OnComDataEvent(int status)

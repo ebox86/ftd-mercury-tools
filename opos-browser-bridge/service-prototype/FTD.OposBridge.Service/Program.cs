@@ -24,6 +24,13 @@ if (OperatingSystem.IsWindows())
 }
 
 builder.WebHost.UseUrls($"http://127.0.0.1:{options.Port}/");
+builder.Services.AddCors(cors =>
+{
+  cors.AddPolicy("bridge-cors", policy =>
+  {
+    policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
+  });
+});
 
 builder.Logging.ClearProviders();
 builder.Logging.AddSimpleConsole(console =>
@@ -32,7 +39,19 @@ builder.Logging.AddSimpleConsole(console =>
   console.SingleLine = true;
 });
 
+BridgeInstanceLock instanceLock;
+try
+{
+  instanceLock = BridgeInstanceLock.Acquire(options.Port);
+}
+catch (Exception ex)
+{
+  Console.Error.WriteLine(ex.Message);
+  return 2;
+}
+
 builder.Services.AddSingleton(options);
+builder.Services.AddSingleton(instanceLock);
 builder.Services.AddSingleton<BridgeObservability>();
 builder.Services.AddSingleton<IScannerDriver>(sp =>
 {
@@ -43,6 +62,7 @@ builder.Services.AddSingleton<BridgeRuntime>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BridgeRuntime>());
 
 var app = builder.Build();
+app.UseCors("bridge-cors");
 
 app.MapGet("/", async (BridgeRuntime runtime, CancellationToken ct) =>
 {
@@ -53,6 +73,12 @@ app.MapGet("/", async (BridgeRuntime runtime, CancellationToken ct) =>
 app.MapGet("/health", async (BridgeRuntime runtime, CancellationToken ct) =>
 {
   var body = await runtime.GetHealthAsync(ct);
+  return Results.Json(body);
+});
+
+app.MapGet("/diagnostics/startup", async (BridgeRuntime runtime, CancellationToken ct) =>
+{
+  var body = await runtime.GetStartupDiagnosticsAsync(ct);
   return Results.Json(body);
 });
 

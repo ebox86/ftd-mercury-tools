@@ -19,6 +19,7 @@ Scope in this prototype:
 
 - `GET /`
 - `GET /health`
+- `GET /diagnostics/startup`
 - `GET /scan/latest`
 - `GET /scan/next?owner=...`
 - `GET /scan/clear`
@@ -84,6 +85,12 @@ dotnet publish -c Release -r win-x86 --self-contained true -o ..\artifacts\win-x
 ..\artifacts\win-x86-self-contained\FTD.OposBridge.Service.exe --service-install --service-name=FTD.OposBridge.Prototype --port=17331 --logical-name=ZEBRA_SCANNER --scanner-mode=opos
 ```
 
+Optional service install args:
+
+- `--service-account=localservice|networkservice|localsystem|current-user|<domain\user>`
+- `--service-password=<password>` (required for `current-user` or named user)
+- `--service-restart-delay-ms=60000` (restart-on-failure delay, default 60s)
+
 Direct service control:
 
 ```powershell
@@ -103,7 +110,20 @@ The wrapper script will:
 
 1. publish win-x86 self-contained binaries to `C:\FTDTools\OposBridgePrototype` (unless `-SkipPublish`)
 2. create or update service `FTD.OposBridge.Prototype` (equivalent to `--service-install`)
-3. start service and verify `http://127.0.0.1:<port>/health`
+3. set service identity and recovery policy
+4. start service and verify `http://127.0.0.1:<port>/health`
+
+Secure account selection in wrapper script:
+
+```powershell
+cd .\opos-browser-bridge\service-prototype
+.\install-opos-bridge-prototype-service.ps1 `
+  -Action install `
+  -ServiceAccount current-user `
+  -PromptForCredential `
+  -LogicalName ZEBRA_SCANNER `
+  -Port 17331
+```
 
 Manual `sc.exe` example (if needed):
 
@@ -137,8 +157,26 @@ It runs on changes to `opos-browser-bridge/service-prototype/**` and does:
 5. pack NuGet package (`FTD.OposBridge.Service`) with CI version
 6. publish package to GitHub Packages NuGet feed (`https://nuget.pkg.github.com/<owner>/index.json`) on non-PR events
 
+## Live Hardware Regression
+
+Manual hardware acceptance runner:
+
+```powershell
+cd .\opos-browser-bridge\service-prototype
+.\run-live-hardware-regression.ps1 -BaseUrl "http://127.0.0.1:17331" -Owner "regression-modal" -ScanCount 10
+```
+
+What it verifies:
+
+1. 10 sequential browser-modal scans are delivered with timing capture
+2. Mercury fat-client context scan does not leak into modal owner stream
+3. return-from-context browser scan is accepted without requiring a second scan
+
 ## Notes
 
 1. This prototype intentionally does not replace the production PowerShell bridge yet.
 2. It uses an STA dispatcher thread for COM calls, which is required for many OPOS stacks.
 3. `DataEvent` and `ErrorEvent` COM callbacks are wired in the service; polling remains as fallback hardening.
+4. Single-instance lock parity is enforced using mutex name `Global\FTD.OposBridge.Port<port>` (with `Local\` fallback).
+5. HTTP CORS parity is enabled (`Access-Control-Allow-Origin: *`) to match browser fallback behavior.
+6. Structured JSON log events include `owner`, `seq`, `source`, and delivery `latencyMs` fields for troubleshooting.

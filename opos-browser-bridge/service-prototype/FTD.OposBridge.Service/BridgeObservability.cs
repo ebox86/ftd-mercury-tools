@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Principal;
+using System.Text.Json;
 
 namespace FTD.OposBridge.Service;
 
@@ -55,6 +56,15 @@ public sealed class BridgeObservability
   public void Info(string message, int eventId = 1000) => Write("INFO", message, eventId);
   public void Warn(string message, int eventId = 1000) => Write("WARN", message, eventId);
   public void Error(string message, int eventId = 1000) => Write("ERROR", message, eventId);
+
+  public void StructuredInfo(string eventName, IReadOnlyDictionary<string, object?> fields, int eventId = 1000)
+    => WriteStructured("INFO", eventName, fields, eventId);
+
+  public void StructuredWarn(string eventName, IReadOnlyDictionary<string, object?> fields, int eventId = 1000)
+    => WriteStructured("WARN", eventName, fields, eventId);
+
+  public void StructuredError(string eventName, IReadOnlyDictionary<string, object?> fields, int eventId = 1000)
+    => WriteStructured("ERROR", eventName, fields, eventId);
 
   private void InitializeLogging()
   {
@@ -164,6 +174,27 @@ public sealed class BridgeObservability
     }
   }
 
+  private void WriteStructured(string level, string eventName, IReadOnlyDictionary<string, object?> fields, int eventId)
+  {
+    var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+    {
+      ["event"] = eventName,
+      ["level"] = level,
+      ["at"] = DateTimeOffset.Now.ToString("o"),
+    };
+
+    if (fields is not null)
+    {
+      foreach (var pair in fields)
+      {
+        payload[pair.Key] = pair.Value;
+      }
+    }
+
+    var json = JsonSerializer.Serialize(payload);
+    Write(level, json, eventId);
+  }
+
   private void RotateLogIfNeededUnsafe()
   {
     if (string.IsNullOrWhiteSpace(_logFilePath))
@@ -234,4 +265,3 @@ public sealed class BridgeObservability
     }
   }
 }
-

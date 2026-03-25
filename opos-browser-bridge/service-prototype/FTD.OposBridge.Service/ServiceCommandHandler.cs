@@ -39,13 +39,16 @@ internal static class ServiceCommandHandler
     var displayName = ResolveArg(args, "service-display-name", serviceName);
     var startMode = ResolveStartMode(ResolveArg(args, "service-start-mode", "auto"));
     var exePath = ResolveExecutablePath(args);
+    var serviceAccount = ResolveArg(args, "service-account", "localservice");
+    var servicePassword = ResolveArg(args, "service-password", "");
+    var restartDelayMs = ResolveIntArg(args, "service-restart-delay-ms", 60000, 1000, 600000);
 
     try
     {
       switch (command)
       {
         case Install:
-          await InstallOrUpdateAsync(serviceName, displayName, startMode, exePath, options, cancellationToken);
+          await InstallOrUpdateAsync(serviceName, displayName, startMode, exePath, serviceAccount, servicePassword, restartDelayMs, options, cancellationToken);
           return 0;
         case Uninstall:
           await UninstallAsync(serviceName, cancellationToken);
@@ -80,28 +83,55 @@ internal static class ServiceCommandHandler
     string displayName,
     string startMode,
     string exePath,
+    string serviceAccount,
+    string servicePassword,
+    int restartDelayMs,
     BridgeOptions options,
     CancellationToken cancellationToken)
   {
     var binPath = BuildBinPath(exePath, options);
+    var identity = ResolveServiceIdentity(serviceAccount, servicePassword);
     var exists = await ServiceExistsAsync(serviceName, cancellationToken);
 
     if (!exists)
     {
       Console.WriteLine($"Creating service '{serviceName}' ...");
+      var create = $"create {EscapeArg(serviceName)} binPath= {EscapeArg(binPath)} start= {startMode} DisplayName= {EscapeArg(displayName)}";
+      if (!string.IsNullOrWhiteSpace(identity.ObjectName))
+      {
+        create += $" obj= {EscapeArg(identity.ObjectName)}";
+      }
+
+      if (identity.Password is not null)
+      {
+        create += $" password= {EscapeArg(identity.Password)}";
+      }
+
       await RunScCheckedAsync(
-        $"create {EscapeArg(serviceName)} binPath= {EscapeArg(binPath)} start= {startMode} DisplayName= {EscapeArg(displayName)}",
+        create,
         cancellationToken);
     }
     else
     {
       Console.WriteLine($"Updating service '{serviceName}' ...");
       await StopAsync(serviceName, cancellationToken);
+      var config = $"config {EscapeArg(serviceName)} binPath= {EscapeArg(binPath)} start= {startMode} DisplayName= {EscapeArg(displayName)}";
+      if (!string.IsNullOrWhiteSpace(identity.ObjectName))
+      {
+        config += $" obj= {EscapeArg(identity.ObjectName)}";
+      }
+
+      if (identity.Password is not null)
+      {
+        config += $" password= {EscapeArg(identity.Password)}";
+      }
+
       await RunScCheckedAsync(
-        $"config {EscapeArg(serviceName)} binPath= {EscapeArg(binPath)} start= {startMode} DisplayName= {EscapeArg(displayName)}",
+        config,
         cancellationToken);
     }
 
+    await ConfigureRecoveryAsync(serviceName, restartDelayMs, cancellationToken);
     await StartAsync(serviceName, cancellationToken);
     await VerifyHealthAsync(options.Port, options.LogicalName, cancellationToken);
   }
@@ -324,6 +354,61 @@ internal static class ServiceCommandHandler
     return string.Join(" ", parts);
   }
 
+  private static async Task ConfigureRecoveryAsync(string serviceName, int restartDelayMs, CancellationToken cancellationToken)
+  {
+    var delay = Math.Clamp(restartDelayMs, 1000, 600000);
+    await RunScCheckedAsync(
+      $"failure {EscapeArg(serviceName)} reset= 86400 actions= restart/{delay}/restart/{delay}/restart/{delay}",
+      cancellationToken);
+    await RunScCheckedAsync($"failureflag {EscapeArg(serviceName)} 1", cancellationToken);
+  }
+
+  private static ServiceIdentity ResolveServiceIdentity(string serviceAccount, string servicePassword)
+  {
+    var account = (serviceAccount ?? "").Trim();
+    if (string.IsNullOrWhiteSpace(account))
+    {
+      account = "localservice";
+    }
+
+    var normalized = account.ToLowerInvariant();
+    return normalized switch
+    {
+      "localservice" => new ServiceIdentity(@"NT AUTHORITY\LocalService", ""),
+      "networkservice" => new ServiceIdentity(@"NT AUTHORITY\NetworkService", ""),
+      "localsystem" => new ServiceIdentity("LocalSystem", null),
+      "current-user" => ResolveCurrentUserIdentity(servicePassword),
+      _ => ResolveNamedUserIdentity(account, servicePassword),
+    };
+  }
+
+  private static ServiceIdentity ResolveCurrentUserIdentity(string password)
+  {
+    using var identity = WindowsIdentity.GetCurrent();
+    var userName = identity.Name;
+    if (string.IsNullOrWhiteSpace(userName))
+    {
+      throw new InvalidOperationException("Could not resolve current user identity for service account.");
+    }
+
+    if (string.IsNullOrWhiteSpace(password))
+    {
+      throw new InvalidOperationException("service-password is required when service-account=current-user.");
+    }
+
+    return new ServiceIdentity(userName, password);
+  }
+
+  private static ServiceIdentity ResolveNamedUserIdentity(string account, string password)
+  {
+    if (string.IsNullOrWhiteSpace(password))
+    {
+      throw new InvalidOperationException("service-password is required when using a named service-account.");
+    }
+
+    return new ServiceIdentity(account, password);
+  }
+
   private static string ResolveExecutablePath(string[] args)
   {
     var fromArg = ResolveArg(args, "service-exe-path", "");
@@ -387,6 +472,17 @@ internal static class ServiceCommandHandler
     }
 
     return fallback;
+  }
+
+  private static int ResolveIntArg(string[] args, string key, int fallback, int min, int max)
+  {
+    var raw = ResolveArg(args, key, "");
+    if (!int.TryParse(raw, out var parsed))
+    {
+      return Math.Clamp(fallback, min, max);
+    }
+
+    return Math.Clamp(parsed, min, max);
   }
 
   private static string ResolveCommand(string[] args)
@@ -457,4 +553,5 @@ internal static class ServiceCommandHandler
   }
 
   private sealed record ScResult(int ExitCode, string Message);
+  private sealed record ServiceIdentity(string ObjectName, string? Password);
 }

@@ -78,6 +78,19 @@ public sealed class MockScannerDriver(ILogger logger) : IScannerDriver, IScanner
     return Task.FromResult(true);
   }
 
+  public Task<ScannerStartupDiagnostics> GetStartupDiagnosticsAsync(CancellationToken cancellationToken)
+  {
+    return Task.FromResult(new ScannerStartupDiagnostics(
+      Mode: "mock",
+      LogicalName: "mock",
+      Initialized: _started,
+      Claimed: _claimed,
+      OpenResult: 0,
+      ComProgId: "mock",
+      EventSinkAttached: false,
+      LastError: ""));
+  }
+
   public Task<ScannerSnapshot?> ReadEventSnapshotAsync(CancellationToken cancellationToken)
   {
     return Task.FromResult<ScannerSnapshot?>(null);

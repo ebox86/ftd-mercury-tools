@@ -1,4 +1,5 @@
 using System.Text;
+using System.Security.Principal;
 using FTD.OposBridge.Service.Scanner;
 
 namespace FTD.OposBridge.Service;
@@ -7,6 +8,7 @@ public sealed class BridgeRuntime : BackgroundService
 {
   private readonly BridgeOptions _options;
   private readonly IScannerDriver _driver;
+  private readonly BridgeInstanceLock _instanceLock;
   private readonly BridgeObservability _observability;
   private readonly ILogger<BridgeRuntime> _logger;
   private readonly SemaphoreSlim _gate = new(1, 1);
@@ -44,10 +46,16 @@ public sealed class BridgeRuntime : BackgroundService
   private int _lastEmittedDataCount = -1;
   private DateTimeOffset _lastEmittedAt = DateTimeOffset.MinValue;
 
-  public BridgeRuntime(BridgeOptions options, IScannerDriver driver, BridgeObservability observability, ILogger<BridgeRuntime> logger)
+  public BridgeRuntime(
+    BridgeOptions options,
+    IScannerDriver driver,
+    BridgeInstanceLock instanceLock,
+    BridgeObservability observability,
+    ILogger<BridgeRuntime> logger)
   {
     _options = options;
     _driver = driver;
+    _instanceLock = instanceLock;
     _observability = observability;
     _logger = logger;
     _duplicateEmitWindowMs = Math.Max(300, _options.PollingDebounceMs);
@@ -112,7 +120,7 @@ public sealed class BridgeRuntime : BackgroundService
         logFile = _observability.LogFilePath,
         eventLogEnabled = _observability.EventLogEnabled,
         eventLogSource = _observability.EventLogSourceResolved,
-        instanceLock = "",
+        instanceLock = _instanceLock.Name,
         replayGuardActive = !string.IsNullOrWhiteSpace(_replayGuardValue) && guardRemaining > 0,
         replayGuardRemainingMs = guardRemaining,
         replayGuardWindowMs = _replayGuardWindowMs,
@@ -125,6 +133,35 @@ public sealed class BridgeRuntime : BackgroundService
     {
       _gate.Release();
     }
+  }
+
+  public async Task<object> GetStartupDiagnosticsAsync(CancellationToken cancellationToken)
+  {
+    var scanner = await _driver.GetStartupDiagnosticsAsync(cancellationToken);
+    var serviceAccount = ResolveServiceAccount();
+    return new
+    {
+      ok = true,
+      processId = _processId,
+      startedAt = _startedAt.ToString("o"),
+      isUserInteractive = Environment.UserInteractive,
+      serviceAccount,
+      scanner = new
+      {
+        scanner.Mode,
+        scanner.LogicalName,
+        scanner.Initialized,
+        scanner.Claimed,
+        scanner.OpenResult,
+        scanner.ComProgId,
+        scanner.EventSinkAttached,
+        scanner.LastError,
+      },
+      lockInfo = new
+      {
+        name = _instanceLock.Name,
+      },
+    };
   }
 
   public async Task<object> GetLatestScanAsync(CancellationToken cancellationToken)
@@ -186,6 +223,21 @@ public sealed class BridgeRuntime : BackgroundService
           _replayGuardValue = deliveredValue;
           _replayGuardUntil = DateTimeOffset.UtcNow.AddMilliseconds(_replayGuardWindowMs);
         }
+
+        var latencyMs = 0;
+        if (DateTimeOffset.TryParse(scan.At, out var scanAt))
+        {
+          latencyMs = (int)Math.Max(0, (DateTimeOffset.Now - scanAt).TotalMilliseconds);
+        }
+
+        _observability.StructuredInfo("scan_delivered", new Dictionary<string, object?>
+        {
+          ["owner"] = owner,
+          ["seq"] = scan.Seq,
+          ["source"] = scan.Source,
+          ["latencyMs"] = latencyMs,
+          ["valueLength"] = deliveredValue.Length,
+        }, 2301);
 
         return new
         {
@@ -281,6 +333,12 @@ public sealed class BridgeRuntime : BackgroundService
       {
         _scannerLeaseOwner = owner;
         _scannerLeaseUntil = DateTimeOffset.UtcNow.AddMilliseconds(leaseMs);
+        _observability.StructuredInfo("lease_acquired", new Dictionary<string, object?>
+        {
+          ["owner"] = owner,
+          ["leaseMs"] = leaseMs,
+          ["scannerStatus"] = _scannerStatus,
+        }, 2200);
       }
 
       return new
@@ -319,6 +377,14 @@ public sealed class BridgeRuntime : BackgroundService
       {
         _lastDeliveredSeqByOwner.Remove(owner);
       }
+
+      _observability.StructuredInfo("lease_released", new Dictionary<string, object?>
+      {
+        ["owner"] = owner,
+        ["force"] = force,
+        ["released"] = released,
+        ["ownerAccepted"] = force || ownerMatches,
+      }, 2201);
 
       return new
       {
@@ -750,6 +816,14 @@ public sealed class BridgeRuntime : BackgroundService
     _lastEmittedDataCount = dataCount;
     _lastEmittedAt = now;
 
+    _observability.StructuredInfo("scan_captured", new Dictionary<string, object?>
+    {
+      ["seq"] = nextSeq,
+      ["source"] = source,
+      ["dataCount"] = dataCount,
+      ["valueLength"] = value.Length,
+    }, 2300);
+
     if (!string.Equals(value, _replayGuardValue, StringComparison.Ordinal))
     {
       _replayGuardValue = "";
@@ -927,6 +1001,29 @@ public sealed class BridgeRuntime : BackgroundService
     }
 
     return sb.ToString().Trim();
+  }
+
+  private static string ResolveServiceAccount()
+  {
+    if (!OperatingSystem.IsWindows())
+    {
+      return Environment.UserName;
+    }
+
+    try
+    {
+      using var identity = WindowsIdentity.GetCurrent();
+      if (!string.IsNullOrWhiteSpace(identity.Name))
+      {
+        return identity.Name;
+      }
+    }
+    catch
+    {
+      // Fallback to process user name.
+    }
+
+    return Environment.UserName;
   }
 
   public sealed record ScanPayload(

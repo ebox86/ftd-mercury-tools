@@ -13,6 +13,7 @@ public interface IScannerDriver
   Task<bool> EnsureClaimedAsync(int timeoutMs, string reason, CancellationToken cancellationToken);
   Task<bool> ReleaseClaimAsync(string reason, CancellationToken cancellationToken);
   Task<bool> RearmAsync(CancellationToken cancellationToken);
+  Task<ScannerStartupDiagnostics> GetStartupDiagnosticsAsync(CancellationToken cancellationToken);
   Task<ScannerSnapshot?> ReadEventSnapshotAsync(CancellationToken cancellationToken);
   Task<ScannerSnapshot> ReadSnapshotAsync(CancellationToken cancellationToken);
   Task<bool> ClearInputAsync(CancellationToken cancellationToken);
@@ -30,3 +31,13 @@ public sealed record ScannerSnapshot(
   int DataType,
   bool? DeviceEnabled,
   bool? AutoDisable);
+
+public sealed record ScannerStartupDiagnostics(
+  string Mode,
+  string LogicalName,
+  bool Initialized,
+  bool Claimed,
+  int OpenResult,
+  string ComProgId,
+  bool EventSinkAttached,
+  string LastError);
