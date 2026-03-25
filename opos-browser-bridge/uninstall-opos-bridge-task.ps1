@@ -8,13 +8,21 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "Stopping scheduled task (if running): $TaskName"
 try {
-  schtasks.exe /End /TN "$TaskName" | Out-Host
+  if (Get-Command Stop-ScheduledTask -ErrorAction SilentlyContinue) {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  } else {
+    schtasks.exe /End /TN "$TaskName" | Out-Host
+  }
 } catch {
 }
 
 Write-Host "Deleting scheduled task (if present): $TaskName"
 try {
-  schtasks.exe /Delete /F /TN "$TaskName" | Out-Host
+  if (Get-Command Unregister-ScheduledTask -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+  } else {
+    schtasks.exe /Delete /F /TN "$TaskName" | Out-Host
+  }
 } catch {
 }
 

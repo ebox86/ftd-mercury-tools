@@ -18,6 +18,7 @@ So we add:
 
 - `opos-scanner-bridge.ps1` - local bridge service
 - `install-opos-bridge-task.ps1` - creates a startup scheduled task
+- `uninstall-opos-bridge-task.ps1` - removes scheduled task and running bridge process
 - `bootstrap-opos-bridge.ps1` - one-command deploy helper (create folder, copy files, install task, verify health)
 - `install-opos-bridge.cmd` - one-click launcher that runs bootstrap with `ExecutionPolicy Bypass`
 
@@ -38,7 +39,7 @@ So we add:
    ```
    This does all of the following:
    - creates `C:\FTDTools\OposBridge\`
-   - copies `opos-scanner-bridge.ps1` and `install-opos-bridge-task.ps1`
+   - copies `opos-scanner-bridge.ps1`, `install-opos-bridge-task.ps1`, and `uninstall-opos-bridge-task.ps1`
    - installs/starts the scheduled task
    - checks `http://127.0.0.1:17331/health`
 
@@ -64,7 +65,7 @@ So we add:
    - Open in browser: `http://127.0.0.1:17331/health`
    - Expected JSON includes:
      - `"ok": true`
-     - `"scannerStatus": "ready"`
+     - `"scannerStatus": "open"` (idle/unclaimed) or `"ready"` (claimed by active modal)
 
 7. Update Tampermonkey script on that workstation:
    - Use updated script:
@@ -83,6 +84,20 @@ So we add:
 ## Operational Notes
 
 - The bridge binds only to `127.0.0.1` (local machine only).
+- Scanner ownership is lease-based:
+  - bridge opens the OPOS device at startup, but does not hold claim forever
+  - Mercury modal acquires a short lease while open, then releases on close/submit/tab change
+  - this prevents permanent context theft from other OPOS consumers (for example the fat client)
+- Bridge task is configured for reliability:
+  - logon trigger
+  - restart on failure (1 minute interval, high retry count)
+  - ignore new instance if one is already running
+  - no execution time limit
+  - start-when-available and battery-safe settings
+- Bridge runtime hardening:
+  - single-instance mutex per port
+  - rotating file logs under `C:\ProgramData\FTD\OposBridge\Logs\`
+  - Event Viewer logging to `Application` log (source `FTD.OposBridge` when available, safe fallback otherwise)
 - If bridge fails but modal is open, manual typing still works.
 - If your logical device name differs, pass it during install:
   - `-LogicalName "MOTOROLA_SCANNER"` (or whichever is used locally)
@@ -96,10 +111,14 @@ So we add:
    - Check logical name (`ZEBRA_SCANNER` vs other)
    - Confirm OPOS scanner is installed/registered
    - Confirm scanner is connected in a mode allowed by your OPOS logical device profile
+   - Check logs:
+     - file log: `C:\ProgramData\FTD\OposBridge\Logs\opos-scanner-bridge.log`
+     - Event Viewer: `Applications and Services Logs` / `Windows Logs > Application` (source `FTD.OposBridge` when present)
 
 2. Health works but scans do not arrive:
    - Verify scanner events reach OPOS by testing in OPOS-aware tool
-   - Confirm scanner can still be claimed by bridge and not blocked by another app policy
+   - Confirm scanner can be claimed by bridge while Mercury modal is open (lease endpoint)
+   - If another app currently owns OPOS claim, bridge lease calls will report `claimed: false` until ownership is released
 
 3. Bridge works but modal still does not react:
    - Confirm userscript is latest

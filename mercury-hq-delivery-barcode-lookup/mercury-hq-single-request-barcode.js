@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MercuryHQ - Single Request Barcode
 // @namespace    https://ebox86.com/
-// @version      0.3.78
+// @version      0.4.06
 // @description  Adds a barcode-assisted delivery request tab to MercuryHQ and prepopulates the Single Request form from Mercury services.
 // @author       Evan
 // @match        https://mercuryhq.com/create-delivery-service-request*
@@ -28,6 +28,9 @@
       url: 'http://127.0.0.1:17331',
       pollIntervalMs: 250,
       autoLookupOnScan: true,
+      leaseMs: 9000,
+      leaseKeepAliveMs: 2500,
+      allowKeyboardWedgeFallback: false,
     },
     debug: true,
     labels: {
@@ -94,6 +97,11 @@
     configHiddenRootDisplay: '',
     configHiddenButtons: [],
     cancelResetHooksBound: false,
+    formBaseline: null,
+    bridgeFlushChain: Promise.resolve(),
+    bridgeLeaseChain: Promise.resolve(),
+    scanModalClose: null,
+    scanModalNonce: 0,
   };
 
   function log(...args) {
@@ -279,13 +287,11 @@
     .mhq-modal__input:disabled { background: #f4f6f8; color: #6b7785; cursor: not-allowed; }
     .mhq-modal__input-status { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); min-width: 20px; height: 20px; border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; user-select: none; pointer-events: none; display: none; }
     .mhq-modal__input-status--checking { display: inline-block; color: #4f5b66; background: #e8edf2; }
-    .mhq-modal__input-status--loading { display: inline-block; width: 20px; min-width: 20px; height: 20px; border: 2px solid #c7d4df; border-top-color: #1f4f7a; background: transparent; color: transparent; font-size: 0; line-height: 0; animation: mhq-spin .8s linear infinite; }
+    .mhq-modal__input-status--loading { display: inline-block; width: 20px; min-width: 20px; height: 20px; border: 2px solid #c7d4df; border-top-color: #1f4f7a; background: transparent; color: transparent; font-size: 0; line-height: 0; animation: mhq-modal-spin .8s linear infinite; }
     .mhq-modal__input-status--valid { display: inline-block; color: #fff; background: #2e8b57; }
     .mhq-modal__input-status--invalid { display: inline-block; color: #fff; background: #c62828; }
-    /* Defensive override: never render spinner on Lookup button. */
-    .mhq-modal .mhq-btn.mhq-btn--loading::before { content: none !important; animation: none !important; border: 0 !important; }
     .mhq-modal .mhq-btn[disabled] { opacity: .55; cursor: not-allowed; }
-    @keyframes mhq-spin { from { transform: translateY(-50%) rotate(0deg); } to { transform: translateY(-50%) rotate(360deg); } }
+    @keyframes mhq-modal-spin { from { transform: translateY(-50%) rotate(0deg); } to { transform: translateY(-50%) rotate(360deg); } }
     .mhq-btn { appearance: none; border: 1px solid #c9d2d8; background: #fff; color: #1f2a33; border-radius: 6px; min-height: 34px; padding: 8px 12px; cursor: pointer; font-family: Arial; font-size: 12px; font-weight: 600; line-height: 1; }
     .mhq-btn:hover { background: #f6f9fb; }
     .mhq-btn--primary { border-color: rgb(22, 65, 88); background: rgb(22, 65, 88); color: #fff; }
@@ -589,7 +595,28 @@
     }
   }
 
+  const SUBMIT_SIGNAL_SELECTOR = '[role="alert"], [aria-live], [class*="toast"], [class*="alert"], [class*="snack"], [class*="notification"], [class*="message"]';
+
+  function getMainRequestForm() {
+    return getInput('referenceNumber')?.closest('form') || null;
+  }
+
+  function isMainRequestFormElement(target) {
+    if (!(target instanceof Element)) return false;
+    const mainForm = getMainRequestForm();
+    if (!mainForm) return true;
+    const candidateForm = target.closest('form');
+    // Some Mercury cancel controls render outside the actual form element.
+    // Allow those through and rely on cancel-specific text/testid checks.
+    if (!candidateForm) return true;
+    return candidateForm === mainForm;
+  }
+
   function getSubmitButton() {
+    const form = getMainRequestForm();
+    if (form) {
+      return qs('[data-testid="Submit"]', form) || qsa('button', form).find(btn => /submit/i.test((btn.textContent || '').trim()));
+    }
     return qs('[data-testid="Submit"]') || qsa('button').find(btn => /submit/i.test((btn.textContent || '').trim()));
   }
 
@@ -598,30 +625,58 @@
     const candidate = target.closest('button, [role="button"], [data-testid]');
     if (!(candidate instanceof HTMLElement)) return false;
     if (candidate.closest('.mhq-modal-backdrop') || candidate.closest('#mhq-default-config-screen')) return false;
+    if (!isMainRequestFormElement(candidate)) return false;
     const text = String(candidate.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
     const testId = String(candidate.getAttribute('data-testid') || '').trim().toLowerCase();
     const ariaLabel = String(candidate.getAttribute('aria-label') || '').trim().toLowerCase();
     return text === 'cancel' || /\bcancel\b/.test(testId) || /\bcancel\b/.test(ariaLabel);
   }
 
-  function hasSuccessfulSubmitSignal() {
-    const candidates = qsa('[role="alert"], [aria-live], [class*="toast"], [class*="alert"], [class*="snack"], [class*="notification"], [class*="message"]');
-    return candidates.some(node => {
-      const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
-      return !!text && /(success|submitted|created|completed)/i.test(text) && /(request|delivery|order)/i.test(text);
-    });
+  function isSubmitSuccessText(rawText = '') {
+    const text = String(rawText || '').replace(/\s+/g, ' ').trim();
+    if (!text) return false;
+    if (/(error|failed|failure|invalid|unable|denied|required|missing|duplicate)/i.test(text)) return false;
+    return /(success|submitted|created|completed)/i.test(text) && /(request|delivery|order)/i.test(text);
   }
 
-  function handleSuccessfulSubmit() {
+  function getSubmitSuccessSignals() {
+    const out = [];
+    for (const node of qsa(SUBMIT_SIGNAL_SELECTOR)) {
+      const text = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!isSubmitSuccessText(text)) continue;
+      out.push(text);
+    }
+    return out;
+  }
+
+  function hasSuccessfulSubmitSignal(baselineSignals = null) {
+    const currentSignals = getSubmitSuccessSignals();
+    if (!currentSignals.length) return false;
+    if (!(baselineSignals instanceof Set) || !baselineSignals.size) return true;
+    return currentSignals.some(text => !baselineSignals.has(String(text || '').toLowerCase()));
+  }
+
+  function nodeContainsSubmitSuccessSignal(node) {
+    if (!(node instanceof Node)) return false;
+    if (node.nodeType === Node.TEXT_NODE) {
+      return isSubmitSuccessText(node.textContent || '');
+    }
+    if (!(node instanceof Element)) return false;
+    if (isSubmitSuccessText(node.textContent || '')) return true;
+    return qsa(SUBMIT_SIGNAL_SELECTOR, node).some(candidate => isSubmitSuccessText(candidate.textContent || ''));
+  }
+
+  async function handleSuccessfulSubmit() {
     const now = Date.now();
     if (now - state.lastSubmitHandledAt < 1200) return;
     state.lastSubmitHandledAt = now;
-    clearHighlights();
-    state.deliveryInstructionPreset = '';
-    if (state.activeMode === 'barcode' && !qs('.mhq-modal-backdrop')) {
+    resetFormToBaseline();
+    await bridgeFlushScanner('submit-success');
+    await bridgeReleaseScanner('submit-success', true);
+    if (state.activeMode === 'barcode' && typeof state.scanModalClose !== 'function' && !qs('.mhq-modal-backdrop')) {
       setTimeout(() => {
-        if (state.activeMode === 'barcode' && !qs('.mhq-modal-backdrop')) showScanModal();
-      }, 250);
+        if (state.activeMode === 'barcode' && typeof state.scanModalClose !== 'function' && !qs('.mhq-modal-backdrop')) showScanModal();
+      }, 120);
     }
   }
 
@@ -630,64 +685,102 @@
     const startedAt = Date.now();
     const maxMs = 30000;
     const expected = String(expectedReference || '').trim();
-    const timer = setInterval(() => {
+    const baselineSignals = new Set(getSubmitSuccessSignals().map(text => String(text || '').toLowerCase()));
+    let stopped = false;
+    let observer = null;
+    let timer = null;
+
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      if (timer) clearInterval(timer);
+      timer = null;
+      if (observer) observer.disconnect();
+      observer = null;
+      if (state.submitWatchStop === stop) state.submitWatchStop = null;
+    };
+
+    const complete = () => {
+      if (stopped) return;
+      stop();
+      void handleSuccessfulSubmit();
+    };
+
+    timer = setInterval(() => {
       if (Date.now() - startedAt > maxMs) {
-        clearInterval(timer);
-        state.submitWatchStop = null;
+        stop();
         return;
       }
-
-      const refInput = getInput('referenceNumber');
-      const currentReference = String(refInput?.value || '').trim();
-      const formReset = !!expected && currentReference === '';
-      if (hasSuccessfulSubmitSignal() || formReset) {
-        clearInterval(timer);
-        state.submitWatchStop = null;
-        handleSuccessfulSubmit();
+      if (expected && state.activeMode !== 'barcode') {
+        stop();
+        return;
+      }
+      if (hasSuccessfulSubmitSignal(baselineSignals)) {
+        complete();
       }
     }, 350);
 
-    state.submitWatchStop = () => {
-      clearInterval(timer);
-      state.submitWatchStop = null;
-    };
+    if (document.body || document.documentElement) {
+      observer = new MutationObserver(mutations => {
+        if (stopped) return;
+        for (const mutation of mutations) {
+          if (mutation.type === 'characterData' && nodeContainsSubmitSuccessSignal(mutation.target)) {
+            complete();
+            return;
+          }
+          for (const added of Array.from(mutation.addedNodes || [])) {
+            if (!nodeContainsSubmitSuccessSignal(added)) continue;
+            complete();
+            return;
+          }
+        }
+      });
+      observer.observe(document.body || document.documentElement, { childList: true, subtree: true, characterData: true });
+    }
+
+    state.submitWatchStop = stop;
   }
 
   function bindSubmitSuccessHooks() {
     const submitButton = getSubmitButton();
+    const startWatchIfNeeded = () => {
+      enforceCountryDefault();
+      if (state.activeMode !== 'barcode') return;
+      const expectedReference = String(getInput('referenceNumber')?.value || '').trim();
+      if (expectedReference) startSubmitSuccessWatch(expectedReference);
+    };
+
     if (submitButton && submitButton.dataset.mhqSubmitWatchBound !== '1') {
       submitButton.dataset.mhqSubmitWatchBound = '1';
       submitButton.addEventListener('click', () => {
-        enforceCountryDefault();
-        const expectedReference = String(getInput('referenceNumber')?.value || '').trim();
-        if (expectedReference) startSubmitSuccessWatch(expectedReference);
+        startWatchIfNeeded();
       });
     }
 
     if (!state.cancelResetHooksBound) {
       state.cancelResetHooksBound = true;
       const maybeResetFromCancel = event => {
+        if (state.activeMode !== 'barcode') return;
         if (!isMainCancelControl(event.target)) return;
         clearBarcodeAutofillState();
       };
-      // Capture early so Mercury button rerenders/navigation do not skip cleanup.
+      // Capture early so rerender/navigation from cancel cannot skip cleanup.
       document.addEventListener('pointerdown', maybeResetFromCancel, true);
-      document.addEventListener('click', event => {
-        if (!isMainCancelControl(event.target)) return;
-        clearBarcodeAutofillState();
-      }, true);
-      document.addEventListener('reset', () => {
+      document.addEventListener('click', maybeResetFromCancel, true);
+      document.addEventListener('reset', event => {
+        if (state.activeMode !== 'barcode') return;
+        const form = event.target instanceof HTMLFormElement ? event.target : null;
+        const mainForm = getMainRequestForm();
+        if (mainForm && form && form !== mainForm) return;
         clearBarcodeAutofillState();
       }, true);
     }
 
-    const form = submitButton?.closest('form');
+    const form = submitButton?.closest('form') || getMainRequestForm();
     if (form && form.dataset.mhqSubmitWatchBound !== '1') {
       form.dataset.mhqSubmitWatchBound = '1';
       form.addEventListener('submit', () => {
-        enforceCountryDefault();
-        const expectedReference = String(getInput('referenceNumber')?.value || '').trim();
-        if (expectedReference) startSubmitSuccessWatch(expectedReference);
+        startWatchIfNeeded();
       });
     }
   }
@@ -796,26 +889,39 @@
     return { ticketId: rows.find(r => r.ticketId)?.ticketId || '', latest: rows[0] || null, rows };
   }
 
-  function parseTicketsXml(xmlText, { ticketReferenceHint = '' } = {}) {
+  function parseTicketsXml(xmlText, requiredTicketToken = '') {
     const xml = parseXmlDocument(xmlText, 'Unable to parse ticket XML response');
 
-    const parseTicketNode = ticket => ({
-      id: getXmlChildText(ticket, ['ID']),
-      saleId: getXmlChildText(ticket, ['SALE_ID', 'saleID', 'SaleID', 'SALEID']),
-      recipientId: getXmlChildText(ticket, ['RECIPIENT_ID', 'recipientID', 'RecipientID', 'RECIPIENTID']),
-      amount: getXmlChildText(ticket, ['AMT', 'amount']),
-      amountPaid: getXmlChildText(ticket, ['AMT_PAID']),
-      deliveryDate: getXmlChildText(ticket, ['DELIV_DATE', 'DELIVERY_DATE']),
-      specialInstructions: getXmlChildText(ticket, ['SPECIAL_INSTR', 'SPECIAL_INSTRUCTIONS']),
-      deliveryDateInstructions: getXmlChildText(ticket, ['DELIVERY_DATE_INSTR']),
-      ticketPosition: getXmlChildText(ticket, ['TICKET_POSITION', 'ticketPosition']),
-      userReference: getXmlChildText(ticket, ['USER_REFERENCE', 'userReference']),
+    const normalizeTicketRef = value => String(value || '').trim().replace(/\s+/g, '').toUpperCase();
+    const normalizeDigits = value => String(value || '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    const parseRequiredToken = token => {
+      const normalized = normalizeTicketRef(token);
+      if (!normalized) return null;
+      const m = normalized.match(/^(\d+)\/(\d+)$/);
+      if (!m) return null;
+      return {
+        normalized,
+        saleId: normalizeDigits(m[1]),
+        ticketNumber: normalizeDigits(m[2]),
+      };
+    };
+    const required = parseRequiredToken(requiredTicketToken);
+
+    const parseTicketFromNode = node => ({
+      id: getXmlChildText(node, ['ID']),
+      ticketId: getXmlChildText(node, ['TICKET_ID', 'ticketID', 'TicketID', 'TICKETID', 'ticketId']),
+      userReference: getXmlChildText(node, ['USER_REFERENCE', 'UserReference', 'userReference']),
+      ticketPosition: getXmlChildText(node, ['TICKET_POSITION', 'TicketPosition', 'ticketPosition']),
+      saleId: getXmlChildText(node, ['SALE_ID', 'saleID', 'SaleID', 'SALEID']),
+      recipientId: getXmlChildText(node, ['RECIPIENT_ID', 'recipientID', 'RecipientID', 'RECIPIENTID']),
+      amount: getXmlChildText(node, ['AMT', 'amount']),
+      amountPaid: getXmlChildText(node, ['AMT_PAID']),
+      deliveryDate: getXmlChildText(node, ['DELIV_DATE', 'DELIVERY_DATE']),
+      specialInstructions: getXmlChildText(node, ['SPECIAL_INSTR', 'SPECIAL_INSTRUCTIONS']),
+      deliveryDateInstructions: getXmlChildText(node, ['DELIVERY_DATE_INSTR']),
     });
 
-    const hasTicketSignal = parsed => !!(parsed.saleId || parsed.recipientId || parsed.deliveryDate || parsed.amount || parsed.id);
-
     const collectTicketRows = doc => {
-      const allowedRowNames = new Set(['ticket', 'table', 'row']);
       const nodes = Array.from(doc.getElementsByTagName('*'));
       const rows = [];
       for (const node of nodes) {
@@ -823,17 +929,66 @@
         const ns = String(node.namespaceURI || '').toLowerCase();
         if (ns.includes('www.w3.org/2001/xmlschema')) continue;
         const local = String(node.localName || node.nodeName || '').trim().toLowerCase();
-        if (!allowedRowNames.has(local)) continue;
-        const parsed = parseTicketNode(node);
-        if (hasTicketSignal(parsed)) rows.push(parsed);
+        if (!['ticket', 'table', 'row'].includes(local)) continue;
+        const parsed = parseTicketFromNode(node);
+        if (!(parsed.saleId || parsed.recipientId || parsed.deliveryDate || parsed.amount || parsed.ticketId || parsed.id)) continue;
+        rows.push(parsed);
       }
       return rows;
+    };
+
+    const selectExactTicket = rows => {
+      if (!Array.isArray(rows) || !rows.length) return null;
+      if (!required) return rows[0];
+
+      const direct = rows.find(row => normalizeTicketRef(row.ticketId) === required.normalized);
+      if (direct) return direct;
+      const byUserReference = rows.find(row => normalizeTicketRef(row.userReference) === required.normalized);
+      if (byUserReference) return byUserReference;
+
+      const saleRows = rows.filter(row => normalizeDigits(row.saleId) === required.saleId);
+      if (saleRows.length) {
+        const byPosition = saleRows.find(row => normalizeDigits(row.ticketPosition) === required.ticketNumber);
+        if (byPosition) return byPosition;
+
+        const byId = saleRows.find((row) => {
+          const idNorm = normalizeTicketRef(row.id);
+          if (!idNorm) return false;
+          if (idNorm === required.normalized) return true;
+          const slashTicket = String(row.id || '').match(/\/\s*(\d+)\s*$/);
+          if (slashTicket && normalizeDigits(slashTicket[1]) === required.ticketNumber) return true;
+          return normalizeDigits(row.id) === required.ticketNumber;
+        });
+        if (byId) return byId;
+
+        const hasPerTicketIdentity = saleRows.some(row =>
+          normalizeTicketRef(row.ticketId) ||
+          normalizeTicketRef(row.userReference) ||
+          normalizeDigits(row.ticketPosition),
+        );
+        if (!hasPerTicketIdentity) {
+          const idx = Math.max(Number(required.ticketNumber) - 1, -1);
+          if (idx >= 0 && idx < saleRows.length) return saleRows[idx];
+        }
+      }
+
+      // Some responses omit SALE_ID per row; if so, fall back to deterministic row index.
+      const allRowsMissingSaleId = rows.every(row => !normalizeDigits(row.saleId));
+      if (allRowsMissingSaleId) {
+        const idx = Math.max(Number(required.ticketNumber) - 1, -1);
+        if (idx >= 0 && idx < rows.length) return rows[idx];
+      }
+
+      return null;
     };
 
     const parseTicketFromLeafFields = doc => {
       const fields = collectXmlLeafFieldValues(doc);
       const parsed = {
         id: getLeafValue(fields, ['ID']),
+        ticketId: getLeafValue(fields, ['TICKET_ID', 'ticketID', 'TicketID', 'TICKETID', 'ticketId']),
+        userReference: getLeafValue(fields, ['USER_REFERENCE', 'UserReference', 'userReference']),
+        ticketPosition: getLeafValue(fields, ['TICKET_POSITION', 'TicketPosition', 'ticketPosition']),
         saleId: getLeafValue(fields, ['SALE_ID', 'saleID', 'SaleID', 'SALEID']),
         recipientId: getLeafValue(fields, ['RECIPIENT_ID', 'recipientID', 'RecipientID', 'RECIPIENTID']),
         amount: getLeafValue(fields, ['AMT', 'amount']),
@@ -844,81 +999,45 @@
         ticketPosition: getLeafValue(fields, ['TICKET_POSITION', 'ticketPosition']),
         userReference: getLeafValue(fields, ['USER_REFERENCE', 'userReference']),
       };
-      return hasTicketSignal(parsed) ? parsed : null;
+      const hasTicketSignal = !!(
+        parsed.saleId || parsed.recipientId || parsed.deliveryDate || parsed.amount || parsed.ticketId || parsed.userReference || parsed.ticketPosition
+      );
+      return hasTicketSignal ? parsed : null;
     };
 
-    const normalizeRef = value => String(value || '').trim().toUpperCase().replace(/\s+/g, '');
-    const normalizeTicketRef = value => normalizeRef(value).replace(/^OR(?=\d)/i, '');
-    const normalizePos = value => {
-      const n = Number.parseInt(String(value || '').trim(), 10);
-      return Number.isFinite(n) ? String(n) : '';
-    };
-    const parseRefParts = value => {
-      const normalized = normalizeTicketRef(value);
-      const match = normalized.match(/^([A-Z0-9\-]+)\/(\d+)$/);
-      if (!match) return null;
-      const [, salePartRaw, posPartRaw] = match;
-      const salePart = String(salePartRaw || '').trim();
-      const posPart = normalizePos(posPartRaw);
-      if (!salePart || !posPart) return null;
-      return { full: normalized, salePart, posPart };
+    const selectFromLeaf = parsedLeaf => {
+      if (!parsedLeaf) return null;
+      if (!required) return parsedLeaf;
+
+      if (normalizeTicketRef(parsedLeaf.ticketId) === required.normalized) return parsedLeaf;
+      if (normalizeTicketRef(parsedLeaf.userReference) === required.normalized) return parsedLeaf;
+      const saleId = normalizeDigits(parsedLeaf.saleId);
+      const ticketNumber = normalizeDigits(parsedLeaf.id);
+      const ticketPosition = normalizeDigits(parsedLeaf.ticketPosition);
+      if (saleId && saleId === required.saleId && ticketPosition && ticketPosition === required.ticketNumber) return parsedLeaf;
+      if (saleId && saleId === required.saleId && ticketNumber && ticketNumber === required.ticketNumber) return parsedLeaf;
+      if (saleId && saleId === required.saleId && !ticketNumber && required.ticketNumber === '1') return parsedLeaf;
+      return null;
     };
 
-    const selectTicketRow = rows => {
-      if (!rows.length) return null;
-      const hint = normalizeTicketRef(ticketReferenceHint);
-      if (!hint) return rows[0];
-      const hintParts = parseRefParts(hint);
-
-      const exact = rows.find(row => normalizeTicketRef(row.userReference) === hint || normalizeTicketRef(row.id) === hint);
-      if (exact) return exact;
-
-      if (!hintParts) return rows[0];
-
-      const byUserReferenceParts = rows.find(row => {
-        const rowParts = parseRefParts(row.userReference);
-        return !!rowParts && rowParts.salePart === hintParts.salePart && rowParts.posPart === hintParts.posPart;
-      });
-      if (byUserReferenceParts) return byUserReferenceParts;
-
-      const byIdParts = rows.find(row => {
-        const rowParts = parseRefParts(row.id);
-        return !!rowParts && rowParts.salePart === hintParts.salePart && rowParts.posPart === hintParts.posPart;
-      });
-      if (byIdParts) return byIdParts;
-
-      const bySaleAndPos = rows.find(row => normalizeTicketRef(row.saleId) === hintParts.salePart && normalizePos(row.ticketPosition) === hintParts.posPart);
-      if (bySaleAndPos) return bySaleAndPos;
-
-      const byPosOnlyMatches = rows.filter(row => normalizePos(row.ticketPosition) === hintParts.posPart);
-      if (byPosOnlyMatches.length === 1) return byPosOnlyMatches[0];
-      if (byPosOnlyMatches.length > 1) return byPosOnlyMatches[0];
-
-      // Some Mercury responses return multiple rows but omit USER_REFERENCE/TICKET_POSITION.
-      // In those cases ticket suffix "/N" usually maps to 1-based row position.
-      const rowIndex = Number.parseInt(hintParts.posPart, 10) - 1;
-      if (Number.isFinite(rowIndex) && rowIndex >= 0 && rowIndex < rows.length) {
-        return rows[rowIndex];
-      }
-
-      if (rows.length > 1) {
-        // Last-resort fallback so scanning still proceeds instead of stalling in modal.
-        return rows[0];
-      }
-
-      return rows[0];
+    const selectFromDoc = doc => {
+      const fromRows = selectExactTicket(collectTicketRows(doc));
+      if (fromRows) return fromRows;
+      return selectFromLeaf(parseTicketFromLeafFields(doc));
     };
 
-    let rows = collectTicketRows(xml);
-    if (!rows.length) {
+    let parsed = selectFromDoc(xml);
+    if (!parsed) {
       const embeddedXml = parseEmbeddedResultXml(xml, ['GetTicketsResult', 'string']);
-      if (embeddedXml) rows = collectTicketRows(embeddedXml);
+      if (embeddedXml) parsed = selectFromDoc(embeddedXml);
     }
     if (!rows.length) {
       const leafParsed = parseTicketFromLeafFields(xml);
       if (leafParsed) rows = [leafParsed];
     }
     const parsed = selectTicketRow(rows);
+
+    if (!parsed && requiredTicketToken) throw new Error(`Ticket ${requiredTicketToken} not found in GetTickets response`);
 
     if (!parsed) {
       const tagPreview = Array.from(xml.getElementsByTagName('*'))
@@ -986,46 +1105,155 @@
 
   function mercuryRequest({ method = 'GET', url, headers = {}, data = null }) {
     return new Promise((resolve, reject) => {
-      log('Mercury request', { method, url, data });
-      GM_xmlhttpRequest({
+      const gmRequest =
+        (typeof GM_xmlhttpRequest === 'function' && GM_xmlhttpRequest)
+        || (typeof GM !== 'undefined' && GM && typeof GM.xmlHttpRequest === 'function' && GM.xmlHttpRequest.bind(GM))
+        || null;
+      if (!gmRequest) {
+        reject(new Error('Userscript HTTP bridge is unavailable (GM_xmlhttpRequest missing).'));
+        return;
+      }
+      const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const requestUrl = String(url || '').includes('?')
+        ? `${url}&_mhqReq=${encodeURIComponent(requestId)}`
+        : `${url}?_mhqReq=${encodeURIComponent(requestId)}`;
+      const mergedHeaders = Object.assign({
+        'Cache-Control': 'no-cache, no-store, max-age=0',
+        Pragma: 'no-cache',
+      }, headers || {});
+      log('Mercury request', { method, url: requestUrl, data, requestId });
+      gmRequest({
         method,
-        url,
-        headers,
+        url: requestUrl,
+        headers: mergedHeaders,
         data,
         onload: response => {
-          log('Mercury response', { method, url, status: response.status, preview: String(response.responseText || '').slice(0, 400) });
+          log('Mercury response', { method, url: requestUrl, status: response.status, preview: String(response.responseText || '').slice(0, 400), requestId });
           if (response.status >= 200 && response.status < 300) resolve(response.responseText);
           else {
             const preview = String(response.responseText || '').replace(/\s+/g, ' ').trim().slice(0, 240);
-            reject(new Error(`Mercury service returned HTTP ${response.status} for ${method} ${url}${preview ? ` | Response: ${preview}` : ''}`));
+            reject(new Error(`Mercury service returned HTTP ${response.status} for ${method} ${requestUrl}${preview ? ` | Response: ${preview}` : ''}`));
           }
         },
-        onerror: () => reject(new Error(`Network error calling Mercury service: ${method} ${url}`)),
-        ontimeout: () => reject(new Error(`Mercury service timed out: ${method} ${url}`)),
+        onerror: () => reject(new Error(`Network error calling Mercury service: ${method} ${requestUrl}`)),
+        ontimeout: () => reject(new Error(`Mercury service timed out: ${method} ${requestUrl}`)),
       });
     });
   }
 
   function bridgeRequest({ method = 'GET', url, headers = {}, data = null }) {
     return new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
+      const gmRequest =
+        (typeof GM_xmlhttpRequest === 'function' && GM_xmlhttpRequest)
+        || (typeof GM !== 'undefined' && GM && typeof GM.xmlHttpRequest === 'function' && GM.xmlHttpRequest.bind(GM))
+        || null;
+      if (gmRequest) {
+        gmRequest({
+          method,
+          url,
+          headers,
+          data,
+          onload: response => {
+            if (response.status >= 200 && response.status < 300) resolve(response.responseText);
+            else reject(new Error(`Bridge service returned HTTP ${response.status} for ${method} ${url}`));
+          },
+          onerror: () => reject(new Error(`Network error calling bridge service: ${method} ${url}`)),
+          ontimeout: () => reject(new Error(`Bridge service timed out: ${method} ${url}`)),
+        });
+        return;
+      }
+
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timeoutMs = 3000;
+      const timeoutId = controller
+        ? setTimeout(() => {
+          try { controller.abort(); } catch {}
+        }, timeoutMs)
+        : null;
+
+      const fetchHeaders = Object.assign({}, headers || {});
+      fetch(url, {
         method,
-        url,
-        headers,
-        data,
-        onload: response => {
-          if (response.status >= 200 && response.status < 300) resolve(response.responseText);
-          else reject(new Error(`Bridge service returned HTTP ${response.status} for ${method} ${url}`));
-        },
-        onerror: () => reject(new Error(`Network error calling bridge service: ${method} ${url}`)),
-        ontimeout: () => reject(new Error(`Bridge service timed out: ${method} ${url}`)),
-      });
+        headers: fetchHeaders,
+        body: data,
+        signal: controller?.signal,
+        cache: 'no-store',
+      })
+        .then(async response => {
+          const text = await response.text();
+          if (response.status >= 200 && response.status < 300) {
+            resolve(text);
+            return;
+          }
+          reject(new Error(`Bridge service returned HTTP ${response.status} for ${method} ${url}`));
+        })
+        .catch(error => {
+          const msg = error && error.name === 'AbortError'
+            ? `Bridge service timed out: ${method} ${url}`
+            : `Network error calling bridge service: ${method} ${url}`;
+          reject(new Error(msg));
+        })
+        .finally(() => {
+          if (timeoutId) clearTimeout(timeoutId);
+        });
     });
   }
 
   function getBridgeBaseUrl() {
     const raw = String(CONFIG.oposBridge?.url || '').trim();
     return raw.replace(/\/+$/, '');
+  }
+
+  function queueBridgeLeaseOperation(operation, reason = '') {
+    const run = async () => {
+      try {
+        return await operation();
+      } catch (error) {
+        log(`Bridge lease op failed (${reason || 'unspecified'})`, error);
+        return null;
+      }
+    };
+    state.bridgeLeaseChain = Promise.resolve(state.bridgeLeaseChain)
+      .catch(() => null)
+      .then(run);
+    return state.bridgeLeaseChain;
+  }
+
+  function sanitizeBridgeOwner(rawOwner = '') {
+    const cleaned = String(rawOwner || '').replace(/[^\w\-.:]/g, '').trim();
+    if (!cleaned) return `mhq-${Date.now()}`;
+    return cleaned.slice(0, 80);
+  }
+
+  async function bridgeLeaseScanner(owner = '', leaseMs = 0) {
+    const baseUrl = getBridgeBaseUrl();
+    if (!baseUrl) return null;
+    const safeOwner = sanitizeBridgeOwner(owner);
+    const requestedMs = Math.max(500, Number(leaseMs || CONFIG.oposBridge?.leaseMs || 3500));
+    const url = `${baseUrl}/scanner/lease?owner=${encodeURIComponent(safeOwner)}&ms=${encodeURIComponent(requestedMs)}`;
+    return queueBridgeLeaseOperation(async () => {
+      const body = await bridgeRequest({ method: 'GET', url });
+      try {
+        return JSON.parse(String(body || '{}'));
+      } catch {
+        return null;
+      }
+    }, `lease:${safeOwner}`);
+  }
+
+  async function bridgeReleaseScanner(owner = '', force = false) {
+    const baseUrl = getBridgeBaseUrl();
+    if (!baseUrl) return null;
+    const safeOwner = sanitizeBridgeOwner(owner);
+    const url = `${baseUrl}/scanner/release?owner=${encodeURIComponent(safeOwner)}${force ? '&force=1' : ''}`;
+    return queueBridgeLeaseOperation(async () => {
+      const body = await bridgeRequest({ method: 'GET', url });
+      try {
+        return JSON.parse(String(body || '{}'));
+      } catch {
+        return null;
+      }
+    }, `release:${safeOwner}`);
   }
 
   async function fetchBridgeLatestScan() {
@@ -1038,6 +1266,47 @@
     const seq = Number(scan.seq || 0);
     const value = String(scan.value || '').trim();
     return { seq, value, at: String(scan.at || '') };
+  }
+
+  async function fetchBridgeNextScan(owner = '') {
+    const baseUrl = getBridgeBaseUrl();
+    if (!baseUrl) return null;
+    const ownerToken = String(owner || '').trim();
+    const ownerQuery = ownerToken ? `?owner=${encodeURIComponent(sanitizeBridgeOwner(ownerToken))}` : '';
+    const body = await bridgeRequest({ method: 'GET', url: `${baseUrl}/scan/next${ownerQuery}` });
+    const parsed = JSON.parse(String(body || '{}'));
+    const scan = parsed?.scan || null;
+    if (!scan) return null;
+    const seq = Number(scan.seq || 0);
+    const value = String(scan.value || '').trim();
+    return { seq, value, at: String(scan.at || '') };
+  }
+
+  function parseOrderTicketToken(raw) {
+    const token = String(raw || '').trim().toUpperCase();
+    const m = token.match(/^(\d+)[/-](\d+)$/);
+    if (!m) return null;
+    return { orderId: String(Number(m[1])), ticketNumber: String(Number(m[2])), token: `${String(Number(m[1]))}/${String(Number(m[2]))}` };
+  }
+
+  function validateTicketLookup(expectedToken, ticket) {
+    const expected = parseOrderTicketToken(expectedToken);
+    if (!expected) return;
+    const actualSaleId = String(ticket?.saleId || '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    if (actualSaleId && actualSaleId !== expected.orderId) {
+      throw new Error(`Ticket lookup mismatch: expected sale ${expected.orderId}, got ${actualSaleId}`);
+    }
+    const actualTicketPosition = String(ticket?.ticketPosition || '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    const actualId = String(ticket?.id || '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    const directRefs = [
+      String(ticket?.ticketId || '').trim().toUpperCase(),
+      String(ticket?.userReference || '').trim().toUpperCase(),
+    ].filter(Boolean);
+    if (directRefs.includes(expected.token)) return;
+    if (actualTicketPosition && actualTicketPosition === expected.ticketNumber) return;
+    if (actualId && actualId === expected.ticketNumber && actualSaleId === expected.orderId) return;
+    if (!directRefs.length && !actualTicketPosition && !actualId && actualSaleId === expected.orderId && expected.ticketNumber === '1') return;
+    throw new Error(`Ticket lookup mismatch: expected ${expected.token}, received non-matching ticket payload`);
   }
 
   async function bridgeRearmScanner() {
@@ -1060,6 +1329,24 @@
     } catch {
       return null;
     }
+  }
+
+  function bridgeFlushScanner(reason = '') {
+    if (!CONFIG.oposBridge?.enabled) return Promise.resolve(null);
+    const runFlush = async () => {
+      try {
+        await bridgeClearScan();
+        await bridgeRearmScanner();
+        return true;
+      } catch (error) {
+        log(`Bridge flush failed (${reason || 'unspecified'})`, error);
+        return false;
+      }
+    };
+    state.bridgeFlushChain = Promise.resolve(state.bridgeFlushChain)
+      .catch(() => null)
+      .then(runFlush);
+    return state.bridgeFlushChain;
   }
 
   async function fetchLifecycleByTicket(ticketId) {
@@ -1111,7 +1398,7 @@
     throw new Error(`OLCGetByTicket failed for ticket ${ticketId}. Attempts: ${errors.join(' | ')}`);
   }
 
-  async function fetchTicket(ticketId, options = {}) {
+  async function fetchTicket(orderId, requiredTicketToken = '') {
     const methodUrl = buildApiUrl('/OrderEntry.asmx/GetTickets');
     const serviceUrl = buildApiUrl('/OrderEntry.asmx');
     const attempts = [];
@@ -1125,7 +1412,7 @@
             'Content-Type': 'text/xml; charset=utf-8',
             SOAPAction: buildSoapAction('GetTickets', soapNamespace),
           },
-          data: buildSoapEnvelope('GetTickets', { [key]: ticketId }, soapNamespace),
+          data: buildSoapEnvelope('GetTickets', { [key]: orderId }, soapNamespace),
         });
       }
     }
@@ -1135,64 +1422,64 @@
         method: 'POST',
         url: methodUrl,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        data: `saleID=${encodeURIComponent(ticketId)}`,
+        data: `saleID=${encodeURIComponent(orderId)}`,
       },
       {
         label: 'POST SaleID',
         method: 'POST',
         url: methodUrl,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        data: `SaleID=${encodeURIComponent(ticketId)}`,
+        data: `SaleID=${encodeURIComponent(orderId)}`,
       },
       {
         label: 'POST saleId',
         method: 'POST',
         url: methodUrl,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        data: `saleId=${encodeURIComponent(ticketId)}`,
+        data: `saleId=${encodeURIComponent(orderId)}`,
       },
       {
         label: 'POST ticketID',
         method: 'POST',
         url: methodUrl,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        data: `ticketID=${encodeURIComponent(ticketId)}`,
+        data: `ticketID=${encodeURIComponent(orderId)}`,
       },
       {
         label: 'POST TicketID',
         method: 'POST',
         url: methodUrl,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        data: `TicketID=${encodeURIComponent(ticketId)}`,
+        data: `TicketID=${encodeURIComponent(orderId)}`,
       },
       {
         label: 'POST ticketId',
         method: 'POST',
         url: methodUrl,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        data: `ticketId=${encodeURIComponent(ticketId)}`,
+        data: `ticketId=${encodeURIComponent(orderId)}`,
       },
       {
         label: 'POST saleID to service root',
         method: 'POST',
         url: serviceUrl,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        data: `saleID=${encodeURIComponent(ticketId)}`,
+        data: `saleID=${encodeURIComponent(orderId)}`,
       },
       {
         label: 'GET saleID',
         method: 'GET',
-        url: `${methodUrl}?saleID=${encodeURIComponent(ticketId)}`,
+        url: `${methodUrl}?saleID=${encodeURIComponent(orderId)}`,
       },
       {
         label: 'GET SaleID',
         method: 'GET',
-        url: `${methodUrl}?SaleID=${encodeURIComponent(ticketId)}`,
+        url: `${methodUrl}?SaleID=${encodeURIComponent(orderId)}`,
       },
       {
         label: 'GET ticketID',
         method: 'GET',
-        url: `${methodUrl}?ticketID=${encodeURIComponent(ticketId)}`,
+        url: `${methodUrl}?ticketID=${encodeURIComponent(orderId)}`,
       },
     );
 
@@ -1201,13 +1488,13 @@
       try {
         log('Trying ticket lookup', attempt.label, attempt);
         const xmlText = await mercuryRequest(attempt);
-        return parseTicketsXml(xmlText, options);
+        return parseTicketsXml(xmlText, requiredTicketToken);
       } catch (error) {
         errors.push(`${attempt.label}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
-    throw new Error(`GetTickets failed for ticket ${ticketId}. Attempts: ${errors.join(' | ')}`);
+    throw new Error(`GetTickets failed for order ${orderId} ticket ${requiredTicketToken || '(unspecified)'}. Attempts: ${errors.join(' | ')}`);
   }
 
   async function fetchRecipient(recipientId) {
@@ -1293,7 +1580,8 @@
 
   function normalizePhone(phone) {
     const raw = String(phone || '').trim();
-    if (!raw) {
+    const marker = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    if (!raw || marker === 'NA') {
       const fallbackDigits = getRequestDefault('defaultPhone').replace(/\D/g, '');
       if (fallbackDigits.length === 10) return `${fallbackDigits.slice(0, 3)}-${fallbackDigits.slice(3, 6)}-${fallbackDigits.slice(6)}`;
       return getRequestDefault('defaultPhone');
@@ -1410,162 +1698,68 @@
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
   }
 
-  function normalizeInlineWhitespace(value) {
-    return String(value || '').replace(/\s+/g, ' ').trim();
+  function parseMeridianTimeToMinutes(raw) {
+    const text = String(raw || '').trim().toUpperCase();
+    const match = text.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/);
+    if (!match) return null;
+    const hour = Number(match[1]);
+    const minute = Number(match[2] || '0');
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+    if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
+    const hour24 = (hour % 12) + (match[3] === 'PM' ? 12 : 0);
+    return (hour24 * 60) + minute;
   }
 
-  function splitAddressLines(address) {
-    const raw = String(address || '')
-      // Some payloads concatenate business name and street without a separator.
-      .replace(/([A-Za-z\)])(\d{2,}\s+[A-Za-z])/g, '$1\n$2')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/[;|]+/g, '\n');
-    return raw
-      .split(/[\r\n]+/)
-      .map(normalizeInlineWhitespace)
-      .filter(Boolean);
+  function getNextHalfHourMinuteOfDay(now = new Date()) {
+    const totalMinutes = (now.getHours() * 60) + now.getMinutes();
+    return Math.ceil(totalMinutes / 30) * 30;
   }
 
-  function looksLikeStreetAddressLine(line) {
-    const value = normalizeInlineWhitespace(line);
-    if (!value) return false;
-    if (/\b(?:P\.?\s*O\.?\s*BOX|POST OFFICE BOX)\b/i.test(value)) return true;
-    if (/^\d+[A-Z]?\b/i.test(value)) return true;
-    if (/\b\d+\b/.test(value) && /\b(?:ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|BOULEVARD|DR|DRIVE|LN|LANE|CT|COURT|CIR|CIRCLE|WAY|PKWY|PARKWAY|HWY|HIGHWAY|TRL|TRAIL|TER|TERRACE|PL|PLACE)\b/i.test(value)) return true;
-    return false;
-  }
-
-  function looksLikeUnitLine(line) {
-    return /\b(?:APT|APARTMENT|UNIT|SUITE|STE|ROOM|RM|FLOOR|FL)\b/i.test(normalizeInlineWhitespace(line));
-  }
-
-  function looksLikeCityStatePostalLine(line, recipient = {}) {
-    const value = normalizeInlineWhitespace(line);
-    if (!value) return false;
-
-    const city = normalizeInlineWhitespace(recipient?.city || '').toLowerCase();
-    const state = normalizeInlineWhitespace(recipient?.state || '').toLowerCase();
-    const zip = String(recipient?.postalCode || '').trim();
-    const lower = value.toLowerCase();
-
-    const hasZip = /\b\d{5}(?:-\d{4})?\b/.test(value);
-    const hasCity = !!(city && lower.includes(city));
-    const hasState = !!(state && lower.includes(state));
-    const hasCommaStateZip = /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?$/i.test(value);
-
-    if (hasCommaStateZip) return true;
-    if (hasZip && (hasCity || hasState)) return true;
-    if (hasCity && hasState) return true;
-    if (zip && value.includes(zip)) return true;
-    return false;
-  }
-
-  function scoreStreetAddressLine(line, recipient = {}) {
-    const value = normalizeInlineWhitespace(line);
-    if (!value) return -1000;
-
-    let score = 0;
-    if (/\b(?:P\.?\s*O\.?\s*BOX|POST OFFICE BOX)\b/i.test(value)) score += 120;
-    if (/^\d+[A-Z]?\b/i.test(value)) score += 90;
-    if (/\b\d+\b/.test(value)) score += 30;
-    if (/\b(?:ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|BOULEVARD|DR|DRIVE|LN|LANE|CT|COURT|CIR|CIRCLE|WAY|PKWY|PARKWAY|HWY|HIGHWAY|TRL|TRAIL|TER|TERRACE|PL|PLACE)\b/i.test(value)) score += 60;
-    if (/\b(?:N|S|E|W|NE|NW|SE|SW)\b/i.test(value)) score += 8;
-    if (looksLikeUnitLine(value)) score -= 35;
-    if (looksLikeCityStatePostalLine(value, recipient)) score -= 80;
-    if (!/\d/.test(value) && /^[A-Z0-9 '&.-]+$/i.test(value)) score -= 15;
-    return score;
-  }
-
-  function looksLikeBusinessNameLine(line) {
-    const value = normalizeInlineWhitespace(line);
-    if (!value) return false;
-    if (/\b(?:INC|LLC|LTD|CORP|CORPORATION|CO|COMPANY|HOSPITAL|CLINIC|MEDICAL|SCHOOL|UNIVERSITY|COLLEGE|FUNERAL|CHURCH|TEMPLE|SYNAGOGUE|CENTER|CENTRE|OFFICE|DEPARTMENT|DEPT|HOTEL|INN|RESTAURANT)\b/i.test(value)) return true;
-    if (!/\d/.test(value) && /^[A-Z0-9 '&.-]+$/i.test(value)) return true;
-    return false;
-  }
-
-  function extractStreetSegmentFromBlob(addressBlob) {
-    const value = normalizeInlineWhitespace(addressBlob);
-    if (!value) return '';
-
-    const poBox = value.match(/\b(?:P\.?\s*O\.?\s*BOX\s+\d+[A-Z0-9-]*)\b/i);
-    if (poBox?.[0]) return normalizeInlineWhitespace(poBox[0]);
-
-    const streetPattern = /\b\d+[A-Z]?(?:\s+[A-Z0-9#.'-]+){0,8}\s+(?:ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|BOULEVARD|DR|DRIVE|LN|LANE|CT|COURT|CIR|CIRCLE|WAY|PKWY|PARKWAY|HWY|HIGHWAY|TRL|TRAIL|TER|TERRACE|PL|PLACE)\b(?:\s+(?:N|S|E|W|NE|NW|SE|SW))?(?:\s+[A-Z0-9#.'-]+){0,3}/i;
-    const match = value.match(streetPattern);
-    return match?.[0] ? normalizeInlineWhitespace(match[0]) : '';
-  }
-
-  function splitStreetAndBusiness(address, firmName, recipient = {}) {
-    const lines = splitAddressLines(address);
-    const rawAddress = normalizeInlineWhitespace(address);
-    const providedBusiness = normalizeInlineWhitespace(firmName);
-
-    if (!lines.length) {
-      return {
-        street: '',
-        business: providedBusiness,
-        rawAddress,
-      };
+  function clearPickupTimeFieldForToday() {
+    const pickup = getInput('pickUpDateTime');
+    if (!pickup) return;
+    // Clear any prefilled "current time" style value first. We only want to
+    // keep values selected from enabled, valid dropdown options.
+    if (pickup instanceof HTMLSelectElement) {
+      const blank = Array.from(pickup.options || []).find(opt => String(opt.value || '').trim() === '');
+      if (blank) setNativeValue(pickup, blank.value);
+      else setNativeValue(pickup, '');
+      return;
     }
-
-    const streetFromBlob = extractStreetSegmentFromBlob(rawAddress);
-
-    if (lines.length === 1) {
-      const line = lines[0];
-      const street = streetFromBlob || line;
-      let business = providedBusiness;
-      if (!business) {
-        const remainder = normalizeInlineWhitespace(line.replace(street, ' '));
-        if (remainder && !looksLikeUnitLine(remainder) && !looksLikeCityStatePostalLine(remainder, recipient)) {
-          business = remainder;
-        }
-      }
-      return {
-        street,
-        business,
-        rawAddress,
-      };
+    if (pickup instanceof HTMLInputElement || pickup instanceof HTMLTextAreaElement) {
+      setNativeValue(pickup, '');
     }
+  }
 
-    const scoredLines = lines.map((line, index) => ({
-      line,
-      index,
-      score: scoreStreetAddressLine(line, recipient),
-    }));
-    const ranked = scoredLines.slice().sort((a, b) => b.score - a.score);
-    const best = ranked[0] || { index: lines.length - 1, score: -1000, line: lines[lines.length - 1] };
-    let streetIndex = best.index;
+  function selectNextAvailablePickupTimeForToday() {
+    const pickup = getInput('pickUpDateTime');
+    if (!(pickup instanceof HTMLSelectElement)) return false;
+    const thresholdMinutes = getNextHalfHourMinuteOfDay(new Date());
 
-    if (best.score < 20) {
-      const withNumbers = scoredLines.find(row => /\d/.test(row.line) && !looksLikeCityStatePostalLine(row.line, recipient));
-      if (withNumbers) streetIndex = withNumbers.index;
-    }
+    const candidates = Array.from(pickup.options || [])
+      .map(opt => {
+        const text = String(opt.textContent || opt.label || opt.value || '').trim();
+        const value = String(opt.value || '').trim();
+        const disabled = !!opt.disabled || String(opt.getAttribute('aria-disabled') || '').toLowerCase() === 'true';
+        const looksPlaceholder = !text || /^select\b/i.test(text) || /^choose\b/i.test(text);
+        const minutes = parseMeridianTimeToMinutes(text);
+        return { opt, text, value, disabled, looksPlaceholder, minutes };
+      })
+      .filter(entry => !entry.disabled && !entry.looksPlaceholder && !!entry.value && Number.isFinite(entry.minutes));
 
-    let street = normalizeInlineWhitespace(lines[streetIndex] || '');
-    if (streetFromBlob && street.includes(streetFromBlob)) street = streetFromBlob;
-    else if (streetFromBlob && best.score < 20) street = streetFromBlob;
+    if (!candidates.length) return false;
 
-    const nonStreetLines = lines.filter((_, i) => i !== streetIndex);
-    const businessCandidates = nonStreetLines.filter(line => !looksLikeUnitLine(line) && !looksLikeCityStatePostalLine(line, recipient));
-    let business = providedBusiness;
-    if (!business) {
-      const explicitBusiness = businessCandidates.filter(looksLikeBusinessNameLine);
-      const picked = explicitBusiness.length ? explicitBusiness : businessCandidates;
-      business = normalizeInlineWhitespace(picked.join(' '));
-    }
-    if (!business && streetFromBlob) {
-      const remainder = normalizeInlineWhitespace(rawAddress.replace(streetFromBlob, ' '));
-      if (remainder && !looksLikeCityStatePostalLine(remainder, recipient) && !looksLikeUnitLine(remainder)) {
-        business = remainder;
-      }
-    }
-
-    return {
-      street,
-      business,
-      rawAddress,
-    };
+    const selected = candidates.find(entry => entry.minutes >= thresholdMinutes) || candidates[0];
+    if (!selected) return false;
+    setNativeValue(pickup, selected.value);
+    const selectedOption = pickup.options[pickup.selectedIndex] || null;
+    if (!selectedOption) return false;
+    const selectedDisabled = !!selectedOption.disabled || String(selectedOption.getAttribute('aria-disabled') || '').toLowerCase() === 'true';
+    if (selectedDisabled) return false;
+    const selectedText = String(selectedOption.textContent || selectedOption.label || selectedOption.value || '').trim();
+    if (!selectedText || /^select\b/i.test(selectedText) || /^choose\b/i.test(selectedText)) return false;
+    markFilled(pickup, `Today delivery: auto-selected next available pickup time (${selectedText})`);
+    return true;
   }
 
   function extractUnit(addressLine1, specialInstructions) {
@@ -1576,6 +1770,28 @@
       if (match?.[0]) return match[0].replace(/\s+/g, ' ').trim();
     }
     return '';
+  }
+
+  function splitBusinessAndStreetAddress(addressLine1, firmName = '') {
+    const normalizedAddress = String(addressLine1 || '').trim().replace(/\s+/g, ' ');
+    const normalizedFirm = String(firmName || '').trim().replace(/\s+/g, ' ');
+    if (!normalizedAddress) return { street: '', businessName: normalizedFirm };
+    if (normalizedFirm) return { street: normalizedAddress, businessName: normalizedFirm };
+
+    // Handle concatenated values such as:
+    // "CHILDREN'S HOSPITAL OF PITTSBURGH4401 PENN AVE"
+    const match = normalizedAddress.match(/^(.+?)(\d{1,6}\s*[A-Za-z0-9].*)$/);
+    if (match) {
+      const candidateBusiness = String(match[1] || '').trim().replace(/[,\-;:]+$/, '').trim();
+      const candidateStreet = String(match[2] || '').trim();
+      const hasBusinessSignal = /[A-Za-z]{3,}/.test(candidateBusiness) && !/\d/.test(candidateBusiness);
+      const hasStreetSignal = /^\d{1,6}\b/.test(candidateStreet) && /[A-Za-z]{2,}/.test(candidateStreet);
+      if (hasBusinessSignal && hasStreetSignal) {
+        return { street: candidateStreet, businessName: candidateBusiness };
+      }
+    }
+
+    return { street: normalizedAddress, businessName: normalizedFirm };
   }
 
   function stripUnitFromAddress(addressLine1, extractedUnit) {
@@ -1595,14 +1811,22 @@
     const latest = lifecycle?.latest || {};
     const nameParts = splitRecipientName(recipient?.name || '');
     const specialInstructions = [ticket?.specialInstructions, ticket?.deliveryDateInstructions].map(v => String(v || '').trim()).filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i).join(' | ');
-    const recipientAddress = uniqueNonEmpty([recipient?.address, recipient?.address2]).join('\n');
-    const addressParts = splitStreetAndBusiness(recipientAddress, recipient?.firmName || '', recipient || {});
-    const unit = extractUnit(addressParts.rawAddress || recipientAddress || recipient?.address || '', specialInstructions);
-    const street = stripUnitFromAddress(addressParts.street || extractStreetSegmentFromBlob(addressParts.rawAddress || recipientAddress) || recipientAddress || recipient?.address || '', unit);
+    const splitAddress = splitBusinessAndStreetAddress(recipient?.address || '', recipient?.firmName || '');
+    const unit = extractUnit(splitAddress.street || '', specialInstructions);
+    const street = stripUnitFromAddress(splitAddress.street || '', unit);
+    const businessName = splitAddress.businessName || '';
     const isToday = isSameLocalDay(ticket?.deliveryDate);
+    const scannedToken = parseOrderTicketToken(scannedTicketId);
+    const fallbackOrderId = String(ticket?.saleId || lifecycle?.ticketId || '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    const fallbackTicketNumber = String(ticket?.ticketPosition || ticket?.id || '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    const referenceOrderId = scannedToken?.orderId || fallbackOrderId;
+    const referenceTicketNumber = scannedToken?.ticketNumber || fallbackTicketNumber || '1';
+    const referenceNumber = referenceOrderId
+      ? `${referenceOrderId}-${referenceTicketNumber}`
+      : (ticket?.saleId || lifecycle?.ticketId || scannedTicketId);
 
     return {
-      referenceNumber: ticket?.saleId || lifecycle?.ticketId || scannedTicketId,
+      referenceNumber,
       totalItemValue: formatMoney(ticket?.amount),
       itemDescription: getRequestDefault('defaultItemDescription'),
       recipient_name: nameParts.firstName,
@@ -1614,8 +1838,8 @@
       state: recipient?.state || '',
       zip: deriveRecipientZip(recipient),
       country: mapCountry(recipient?.country || 'US'),
-      locationType: inferLocationType(recipient?.name || '', addressParts.business || recipient?.firmName || ''),
-      locationName: addressParts.business || recipient?.firmName || '',
+      locationType: inferLocationType(recipient?.name || '', businessName),
+      locationName: businessName,
       specialDeliveryInstructions: specialInstructions || getRequestDefault('defaultDeliveryInstruction'),
       undeliverableAction: getRequestDefault('defaultUndeliverableAction'),
       deliveryDate: formatDateMMDDYYYY(ticket?.deliveryDate),
@@ -1651,14 +1875,30 @@
       if (hasValue) {
         const ok = setSelectByValueOrLabel(el, finalValue, { dispatchInput, dispatchChange });
         if (ok) { if (source === 'service') markFilled(el, `Mapped from service${truncated ? ' (truncated/review suggested)' : ''}`); }
-        else markReview(el, reviewReason || `Could not select ${finalValue}`);
-      } else if (reviewReason) markReview(el, reviewReason);
+        else {
+          const options = Array.from(el.options || []);
+          const blank = options.find(opt => String(opt.value || '').trim() === '');
+          if (blank) setNativeValue(el, blank.value);
+          else if (options.length) setNativeValue(el, options[0].value);
+          else setNativeValue(el, '');
+          markReview(el, reviewReason || `Could not select ${finalValue}`);
+        }
+      } else {
+        const options = Array.from(el.options || []);
+        const blank = options.find(opt => String(opt.value || '').trim() === '');
+        if (blank) setNativeValue(el, blank.value);
+        else if (options.length) setNativeValue(el, options[0].value);
+        else setNativeValue(el, '');
+        if (reviewReason) markReview(el, reviewReason);
+      }
     } else {
       if (hasValue) {
         setNativeValue(el, finalValue, { dispatchInput, dispatchChange });
         if (source === 'service') markFilled(el, `Mapped from service${truncated ? ' (truncated)' : ''}`);
+      } else {
+        setNativeValue(el, '');
+        if (reviewReason) markReview(el, reviewReason);
       }
-      if (!hasValue && reviewReason) markReview(el, reviewReason);
       if (truncated) markReview(el, 'Value was too long and was truncated');
     }
     return el;
@@ -1666,8 +1906,7 @@
 
   function applyOrderData(orderData) {
     clearHighlights();
-    const addressCommitToken = ++state.addressVerificationCommitToken;
-    fillField('referenceNumber', orderData.referenceNumber, 'Mapped from sale id', { source: 'service', maxLength: 50 });
+    fillField('referenceNumber', orderData.referenceNumber, 'Mapped from scanned order/ticket', { source: 'service', maxLength: 50 });
     fillField('totalItemValue', orderData.totalItemValue, 'Mapped from AMT on ticket', { source: orderData.totalItemValue ? 'service' : 'manual', maxLength: 20 });
     fillField('itemDescription', orderData.itemDescription, 'Fixed business rule', { source: 'service', maxLength: 500 });
     fillField('recipient_name', orderData.recipient_name, 'Mapped from recipient name split', { source: orderData.recipient_name ? 'service' : 'manual', maxLength: 100 });
@@ -1689,8 +1928,17 @@
     fillField('undeliverableAction', orderData.undeliverableAction, 'Fixed business rule', { source: 'service' });
     fillField('deliveryDate', orderData.deliveryDate, 'Mapped from ticket delivery date', { source: orderData.deliveryDate ? 'service' : 'manual', maxLength: 10 });
     if (orderData.meta?.isToday) {
-      const pickup = getInput('pickUpDateTime');
-      if (pickup) markReview(pickup, 'Today delivery: choose the next available pickup time manually');
+      clearPickupTimeFieldForToday();
+      const selectedNow = selectNextAvailablePickupTimeForToday();
+      if (!selectedNow) {
+        setTimeout(() => {
+          const selectedLate = selectNextAvailablePickupTimeForToday();
+          if (selectedLate) return;
+          const pickup = getInput('pickUpDateTime');
+          if (pickup) markReview(pickup, 'Today delivery: choose the next available pickup time manually');
+        }, 220);
+        setTimeout(() => { selectNextAvailablePickupTimeForToday(); }, 700);
+      }
     } else {
       fillField('pickUpDateTime', orderData.pickUpDateTime, 'Future delivery: defaulted by configuration', { source: orderData.pickUpDateTime ? 'service' : 'manual', maxLength: 20 });
     }
@@ -1787,8 +2035,60 @@
   }
 
   function clearBarcodeAutofillState() {
-    state.addressVerificationCommitToken += 1;
-    for (const key of AUTO_FILLED_FIELD_KEYS) clearFieldValue(key);
+    resetFormToBaseline();
+  }
+
+  function captureFormBaseline(force = false) {
+    if (state.formBaseline && !force) return state.formBaseline;
+    const baseline = {};
+    for (const fieldKey of Object.keys(CONFIG.selectors.formInputs || {})) {
+      const el = getInput(fieldKey);
+      if (!el) continue;
+      baseline[fieldKey] = { value: String(el.value ?? '') };
+    }
+    state.formBaseline = baseline;
+    return baseline;
+  }
+
+  function getResetValueForField(fieldKey, baselineValue = '') {
+    const clearAlways = new Set([
+      'referenceNumber',
+      'totalItemValue',
+      'recipient_name',
+      'lastName',
+      'phone',
+      'addressLine1',
+      'addressLine2',
+      'city',
+      'state',
+      'zip',
+      'locationName',
+    ]);
+    if (clearAlways.has(fieldKey)) return '';
+
+    if (fieldKey === 'itemDescription') return getRequestDefault('defaultItemDescription') || '';
+    if (fieldKey === 'specialDeliveryInstructions') return getRequestDefault('defaultDeliveryInstruction') || '';
+    if (fieldKey === 'undeliverableAction') return getRequestDefault('defaultUndeliverableAction') || '';
+    if (fieldKey === 'locationType') return getRequestDefault('defaultLocationType') || 'Residence';
+    if (fieldKey === 'country') return mapCountry(getRequestDefault('defaultCountry') || 'US');
+
+    return baselineValue;
+  }
+
+  function resetFormToBaseline() {
+    const baseline = captureFormBaseline();
+    for (const fieldKey of Object.keys(CONFIG.selectors.formInputs || {})) {
+      const el = getInput(fieldKey);
+      if (!el) continue;
+      const baselineValue = baseline?.[fieldKey]?.value ?? '';
+      const nextValue = getResetValueForField(fieldKey, baselineValue);
+      if (el.tagName === 'SELECT') {
+        const ok = setSelectByValueOrLabel(el, nextValue);
+        if (!ok) setNativeValue(el, nextValue);
+      } else {
+        setNativeValue(el, nextValue);
+      }
+    }
     const pickerInput = qs('#mhq-delivery-template-input');
     if (pickerInput instanceof HTMLInputElement) pickerInput.value = '';
     clearHighlights();
@@ -2055,9 +2355,24 @@
     }, 0);
   }
 
+  function closeActiveScanModal(options = {}) {
+    if (typeof state.scanModalClose === 'function') {
+      state.scanModalClose(options);
+      return true;
+    }
+    const existing = qs('.mhq-modal-backdrop');
+    if (existing) {
+      if (options?.flushBridge) void bridgeFlushScanner('modal-close-fallback');
+      void bridgeReleaseScanner('mhq-modal-fallback', true);
+      existing.remove();
+      return true;
+    }
+    return false;
+  }
+
   function activateConfigTab() {
     state.activeMode = 'config';
-    qsa('.mhq-modal-backdrop').forEach(el => el.remove());
+    closeActiveScanModal({ resetDecorations: true, flushBridge: true });
     state.requestDefaults = loadRequestDefaults();
     renderDefaultConfigScreenValues();
     const singleTab = qs(CONFIG.selectors.singleRequestTab);
@@ -2118,12 +2433,18 @@
     }
     setTabFontWeights({ single: '400', bulk: '400', barcode: '600', config: '400' });
     ensureDeliveryInstructionPicker();
-    showScanModal();
+    resetFormToBaseline();
+    closeActiveScanModal({ flushBridge: true });
+    setTimeout(() => {
+      if (state.activeMode !== 'barcode') return;
+      showScanModal();
+    }, 0);
   }
 
   function activateNormalTab() {
     hideDefaultConfigScreen();
     state.activeMode = 'normal';
+    closeActiveScanModal({ resetDecorations: true, flushBridge: false });
     const normalTab = qs(CONFIG.selectors.singleRequestTab);
     const barcodeTab = qs('#mhq-single-request-barcode-tab');
     const configTab = qs('#mhq-default-request-config-tab');
@@ -2149,11 +2470,15 @@
     }
     setTabFontWeights({ single: '600', bulk: '400', barcode: '400', config: '400' });
     removeDeliveryInstructionPicker();
+    resetFormToBaseline();
+    void bridgeReleaseScanner('switch-to-normal', true);
+    bridgeFlushScanner('switch-to-normal');
   }
 
   function activateBulkTab() {
     hideDefaultConfigScreen();
     state.activeMode = 'bulk';
+    closeActiveScanModal({ resetDecorations: true, flushBridge: false });
     const singleTab = qs(CONFIG.selectors.singleRequestTab);
     const barcodeTab = qs('#mhq-single-request-barcode-tab');
     const configTab = qs('#mhq-default-request-config-tab');
@@ -2179,12 +2504,15 @@
     }
     setTabFontWeights({ single: '400', bulk: '600', barcode: '400', config: '400' });
     removeDeliveryInstructionPicker();
+    resetFormToBaseline();
+    void bridgeReleaseScanner('switch-to-bulk', true);
+    bridgeFlushScanner('switch-to-bulk');
   }
 
   function showScanModal() {
-    // Always start clean for a new lookup session.
-    clearBarcodeAutofillState();
-    const backdrop = createElement(`<div class="mhq-modal-backdrop" role="dialog" aria-modal="true"><div class="mhq-modal"><div class="mhq-modal__header"><strong>${escapeHtml(CONFIG.labels.modalTitle)}</strong></div><div class="mhq-modal__body"><p style="margin-top:0">Scan a ticket or type the order ID below. When a valid code is scanned, lookup starts automatically.</p><div class="mhq-modal__input-wrap"><input class="mhq-modal__input" type="text" placeholder="${escapeHtml(CONFIG.labels.modalPlaceholder)}" autofocus /><span class="mhq-modal__input-status" aria-hidden="true"></span></div><div id="mhq-modal-error" style="display:none;color:#b00020;margin-top:10px"></div></div><div class="mhq-modal__footer"><button type="button" class="mhq-btn" data-action="cancel">Cancel</button><button type="button" class="mhq-btn mhq-btn--primary" data-action="lookup">Lookup</button></div></div></div>`);
+    closeActiveScanModal();
+    const modalNonce = ++state.scanModalNonce;
+    const backdrop = createElement(`<div class="mhq-modal-backdrop" role="dialog" aria-modal="true"><div class="mhq-modal"><div class="mhq-modal__header"><strong>${escapeHtml(CONFIG.labels.modalTitle)}</strong></div><div class="mhq-modal__body"><p style="margin-top:0">Enter the Order ID manually or scan the ticket into the input below.</p><div class="mhq-modal__input-wrap"><input class="mhq-modal__input" type="text" placeholder="${escapeHtml(CONFIG.labels.modalPlaceholder)}" autofocus /><span class="mhq-modal__input-status" aria-hidden="true"></span></div><div id="mhq-modal-error" style="display:none;color:#b00020;margin-top:10px"></div></div><div class="mhq-modal__footer"><button type="button" class="mhq-btn" data-action="cancel">Cancel</button><button type="button" class="mhq-btn mhq-btn--primary" data-action="lookup">Lookup</button></div></div></div>`);
     document.body.appendChild(backdrop);
     const input = backdrop.querySelector('.mhq-modal__input');
     const statusEl = backdrop.querySelector('.mhq-modal__input-status');
@@ -2193,9 +2521,28 @@
     let bridgeTimer = null;
     let bridgeBusy = false;
     let bridgeLastSeq = -1;
-    let bridgeInputWrite = false;
-    let manualEntryActive = false;
-    let submitBusy = false;
+    let isSubmitting = false;
+    let submitGeneration = 0;
+    const modalOpenedAtMs = Date.now();
+    let closed = false;
+    let autoLookupTimer = null;
+    let pendingAutoLookupToken = '';
+    let pendingInputSource = 'manual';
+    let lastInputSource = 'manual';
+    let rapidInputStreak = 0;
+    let rapidInputStartedAtMs = 0;
+    let lastInputAtMs = 0;
+    const bridgeLeaseOwner = sanitizeBridgeOwner(`mhq-modal-${modalNonce}-${Date.now()}`);
+    let bridgeLeaseTimer = null;
+    let bridgeLeaseHeld = false;
+    let bridgeLeaseRenewing = false;
+    let bridgeLeaseRetryAfterMs = 0;
+    let handleModalVisibility = null;
+    let handleWindowFocus = null;
+    let handleWindowBlur = null;
+    let scanAcceptAfterMs = modalOpenedAtMs;
+    let backgroundReleaseTimer = null;
+    let modalWasBackgrounded = false;
 
     function stopBridgePolling() {
       if (bridgeTimer) clearInterval(bridgeTimer);
@@ -2203,30 +2550,121 @@
       bridgeBusy = false;
     }
 
-    function setSubmitting(isSubmitting) {
-      submitBusy = !!isSubmitting;
-      if (input instanceof HTMLInputElement) input.disabled = submitBusy;
-      if (lookupButton instanceof HTMLButtonElement) {
-        lookupButton.disabled = submitBusy;
-        lookupButton.classList.remove('mhq-btn--loading');
-      }
-      backdrop.setAttribute('aria-busy', submitBusy ? 'true' : 'false');
-      if (submitBusy) {
-        setInputStatus('loading', '', 'Loading order details');
-      } else if (statusEl && statusEl.classList.contains('mhq-modal__input-status--loading')) {
-        setInputStatus('');
+    function stopBridgeLeaseHeartbeat() {
+      if (bridgeLeaseTimer) clearInterval(bridgeLeaseTimer);
+      bridgeLeaseTimer = null;
+    }
+
+    function stopBackgroundReleaseTimer() {
+      if (backgroundReleaseTimer) clearTimeout(backgroundReleaseTimer);
+      backgroundReleaseTimer = null;
+    }
+
+    function isModalForegroundActive() {
+      if (closed || !backdrop.isConnected || state.scanModalClose !== close) return false;
+      if (document.visibilityState !== 'visible') return false;
+      return !!document.hasFocus();
+    }
+
+    function markScanAcceptanceBoundary() {
+      scanAcceptAfterMs = Date.now();
+    }
+
+    function suspendBridgeLease(reason = 'background') {
+      stopBackgroundReleaseTimer();
+      markScanAcceptanceBoundary();
+      if (!CONFIG.oposBridge?.enabled) return;
+      if (!bridgeLeaseHeld && !bridgeLeaseRenewing) return;
+      bridgeLeaseHeld = false;
+      bridgeLeaseRetryAfterMs = Date.now() + 500;
+      void bridgeReleaseScanner(bridgeLeaseOwner).catch(error => {
+        log(`Bridge release during ${reason} failed`, error);
+      });
+    }
+
+    function scheduleBackgroundRelease(reason = 'background') {
+      modalWasBackgrounded = true;
+      stopBackgroundReleaseTimer();
+      backgroundReleaseTimer = setTimeout(() => {
+        if (closed || !backdrop.isConnected || state.scanModalClose !== close) return;
+        if (isModalForegroundActive()) return;
+        suspendBridgeLease(reason);
+      }, 500);
+    }
+
+    async function renewBridgeLease(reason = 'heartbeat') {
+      if (!CONFIG.oposBridge?.enabled) return false;
+      if (closed || !backdrop.isConnected) return false;
+      if (bridgeLeaseRenewing) return bridgeLeaseHeld;
+      bridgeLeaseRenewing = true;
+      const leaseMs = Math.max(1000, Number(CONFIG.oposBridge?.leaseMs || 3500));
+      try {
+        const leaseResult = await bridgeLeaseScanner(bridgeLeaseOwner, leaseMs);
+        bridgeLeaseHeld = !!(leaseResult?.claimed || leaseResult?.scannerClaimed);
+        if (!bridgeLeaseHeld) {
+          bridgeLeaseRetryAfterMs = Date.now() + 250;
+          if (reason === 'open') log('Bridge lease not acquired on modal open', leaseResult);
+          if (reason !== 'heartbeat') {
+            setError('Scanner is currently in use in Mercury. Close Mercury ticket entry, then scan again.');
+          }
+          return false;
+        }
+        bridgeLeaseRetryAfterMs = 0;
+        try {
+          await bridgeRearmScanner();
+        } catch (error) {
+          log('OPOS bridge rearm failed after lease', error);
+        }
+        if (/Scanner is currently in use in Mercury/i.test(String(errorEl.textContent || ''))) {
+          setError('');
+        }
+        return true;
+      } finally {
+        bridgeLeaseRenewing = false;
       }
     }
 
-    const close = ({ resetDecorations = false } = {}) => {
+    const close = ({ resetDecorations = false, flushBridge = false } = {}) => {
+      if (closed) return;
+      closed = true;
+      if (handleModalVisibility) {
+        document.removeEventListener('visibilitychange', handleModalVisibility);
+        handleModalVisibility = null;
+      }
+      if (handleWindowFocus) {
+        window.removeEventListener('focus', handleWindowFocus);
+        handleWindowFocus = null;
+      }
+      if (handleWindowBlur) {
+        window.removeEventListener('blur', handleWindowBlur);
+        handleWindowBlur = null;
+      }
+      stopBackgroundReleaseTimer();
+      submitGeneration += 1;
       stopBridgePolling();
-      setSubmitting(false);
+      stopBridgeLeaseHeartbeat();
       clearVerificationState();
       if (resetDecorations) {
         clearBarcodeAutofillState();
       }
-      backdrop.remove();
+      if (autoLookupTimer) clearTimeout(autoLookupTimer);
+      autoLookupTimer = null;
+      pendingAutoLookupToken = '';
+      rapidInputStreak = 0;
+      rapidInputStartedAtMs = 0;
+      lastInputAtMs = 0;
+      bridgeLeaseHeld = false;
+      if (flushBridge) {
+        void bridgeFlushScanner('modal-close').finally(() => bridgeReleaseScanner(bridgeLeaseOwner));
+      } else {
+        void bridgeReleaseScanner(bridgeLeaseOwner);
+      }
+      if (state.scanModalClose === close || state.scanModalNonce === modalNonce) {
+        state.scanModalClose = null;
+      }
+      if (backdrop.isConnected) backdrop.remove();
     };
+    state.scanModalClose = close;
     const setError = msg => { errorEl.textContent = msg; errorEl.style.display = msg ? 'block' : 'none'; };
     const statusClasses = ['mhq-modal__input-status--checking', 'mhq-modal__input-status--loading', 'mhq-modal__input-status--valid', 'mhq-modal__input-status--invalid'];
     let verifyTimer = null;
@@ -2249,35 +2687,146 @@
       statusEl.style.display = 'inline-block';
     }
 
-    function sanitizeTicketInput(raw) {
-      return String(raw || '').replace(/[^0-9A-Za-z\-\/]/g, '').trim();
+    function syncStatusFromVerifyState() {
+      if (isSubmitting) {
+        setInputStatus('loading', '', 'Loading order details');
+        updateLookupButtonState();
+        return;
+      }
+      if (verifyState.status === 'verifying') {
+        setInputStatus('checking', '...', 'Checking order number');
+        updateLookupButtonState();
+        return;
+      }
+      if (verifyState.status === 'valid') {
+        setInputStatus('valid', '\u2713', 'Order number verified');
+        updateLookupButtonState();
+        return;
+      }
+      if (verifyState.status === 'invalid') {
+        setInputStatus('invalid', '\u00d7', 'Order number not found');
+        updateLookupButtonState();
+        return;
+      }
+      setInputStatus('');
+      updateLookupButtonState();
     }
 
-    function normalizeTicketId(raw) {
-      const cleaned = sanitizeTicketInput(raw);
-      // OPOS ScanDataLabel may include symbology/type prefix "OR" before numeric order IDs.
-      // Keep suffixes like "/1", "/2", "/3" because they identify the ticket variant.
-      if (/^OR(?=\d)/i.test(cleaned)) return cleaned.slice(2);
-      return cleaned;
+    function updateLookupButtonState() {
+      if (!(lookupButton instanceof HTMLButtonElement)) return;
+      if (isSubmitting) {
+        lookupButton.disabled = true;
+        return;
+      }
+
+      const raw = String(input?.value || '').trim();
+      if (!raw) {
+        lookupButton.disabled = false;
+        return;
+      }
+
+      const parsed = parseOrderTicketInput(raw);
+      if (lastInputSource === 'scan') {
+        lookupButton.disabled = !parsed;
+        return;
+      }
+
+      if (!parsed) {
+        lookupButton.disabled = true;
+        return;
+      }
+
+      const normalized = normalizeSixDigit(raw);
+      if (!normalized) {
+        lookupButton.disabled = false;
+        return;
+      }
+
+      const hasCurrentVerify = verifyState.normalizedTicketId === normalized;
+      const verifyStatus = hasCurrentVerify ? verifyState.status : 'idle';
+      lookupButton.disabled = verifyStatus === 'idle' || verifyStatus === 'verifying';
     }
 
-    function isLikelyTicketId(raw) {
-      const normalized = normalizeTicketId(raw);
-      if (!normalized) return false;
-      // Common forms:
-      //  - 6 digit order id
-      //  - 6 digit with ticket suffix (e.g. 369687/1)
-      //  - alphanumeric ticket with suffix (e.g. ABC123/2)
-      return /^\d{6}$/.test(normalized)
-        || /^\d{6}\/\d+$/.test(normalized)
-        || /^[A-Za-z0-9\-]+\/\d+$/.test(normalized);
+    function setLoadingState(loading) {
+      isSubmitting = !!loading;
+      if (input instanceof HTMLInputElement) input.disabled = isSubmitting;
+      syncStatusFromVerifyState();
+    }
+
+    function normalizeTicketToken(raw) {
+      let value = String(raw || '')
+        .replace(/[\u0000-\u001F\u007F]/g, '')
+        .trim();
+      value = value.replace(/\s+/g, '');
+      // Accept scanner prefixes like OR, OR-, OR:, ORDER, etc.
+      value = value.replace(/^(?:ORDER|ORD|OR)(?:[-:#_]+)?(?=\d)/i, '');
+      value = value.replace(/[^0-9A-Za-z\/-]/g, '');
+      return value;
+    }
+
+    function parseOrderTicketInput(raw) {
+      const token = normalizeTicketToken(raw);
+      if (!token) return null;
+      const match = token.match(/^(\d+)(?:[/-](\d+))?$/);
+      if (!match) return null;
+      const orderId = String(match[1] || '').trim();
+      const ticketNumber = String(Number(match[2] || '1'));
+      if (!orderId || !/^\d+$/.test(orderId)) return null;
+      if (!ticketNumber || !/^\d+$/.test(ticketNumber)) return null;
+      if (Number(ticketNumber) < 1) return null;
+      return { orderId, ticketNumber, ticketToken: `${orderId}/${ticketNumber}` };
     }
 
     function normalizeSixDigit(raw) {
-      const normalized = normalizeTicketId(raw);
-      const primary = String(normalized || '').split('/')[0];
-      const digits = String(primary || '').replace(/\D/g, '');
+      const parsed = parseOrderTicketInput(raw);
+      const digits = String(parsed?.orderId || '').replace(/\D/g, '');
       return /^\d{6}$/.test(digits) ? digits : '';
+    }
+
+    function recordInputCadence() {
+      const now = Date.now();
+      if (!lastInputAtMs || (now - lastInputAtMs) > 70) {
+        rapidInputStreak = 1;
+        rapidInputStartedAtMs = now;
+      } else {
+        rapidInputStreak += 1;
+      }
+      lastInputAtMs = now;
+    }
+
+    function looksLikeScannerCadence() {
+      if (!rapidInputStartedAtMs) return false;
+      const burstAge = Date.now() - rapidInputStartedAtMs;
+      return rapidInputStreak >= 4 && burstAge <= 550;
+    }
+
+    function shouldUseKeyboardWedgeFallback() {
+      if (!CONFIG.oposBridge?.enabled) return true;
+      return !!CONFIG.oposBridge?.allowKeyboardWedgeFallback;
+    }
+
+    function canAutoSubmitScannedValue(rawValue = '', expectedToken = '') {
+      const currentToken = normalizeTicketToken(rawValue);
+      if (!currentToken) return false;
+      if (expectedToken && currentToken !== expectedToken) return false;
+      const parsed = parseOrderTicketInput(currentToken);
+      if (!parsed) return false;
+      // Scanner auto-submit should wait for a realistic full order id to avoid
+      // acting on partial fragments (for example "36-1" during key bursts).
+      const orderDigits = String(parsed.orderId || '').replace(/\D/g, '');
+      return orderDigits.length >= 6;
+    }
+
+    function scheduleAutoLookupFromScan(scannedValue = '') {
+      if (!CONFIG.oposBridge?.autoLookupOnScan) return;
+      pendingAutoLookupToken = normalizeTicketToken(scannedValue || input.value);
+      if (autoLookupTimer) clearTimeout(autoLookupTimer);
+      autoLookupTimer = setTimeout(() => {
+        if (closed || !backdrop.isConnected || isSubmitting || !isModalForegroundActive()) return;
+        const currentRaw = String(input.value || '').trim();
+        if (!canAutoSubmitScannedValue(currentRaw, pendingAutoLookupToken)) return;
+        submit({ source: 'scan' });
+      }, 180);
     }
 
     function clearVerificationState() {
@@ -2285,7 +2834,7 @@
       verifyTimer = null;
       verifySeq += 1;
       verifyState = { normalizedTicketId: '', status: 'idle', lifecycle: null };
-      setInputStatus('');
+      syncStatusFromVerifyState();
     }
 
     function scheduleVerification() {
@@ -2296,133 +2845,151 @@
         return;
       }
 
+      if (verifyState.status === 'valid' && verifyState.normalizedTicketId === normalized) {
+        syncStatusFromVerifyState();
+        return;
+      }
+
       if (verifyTimer) clearTimeout(verifyTimer);
       verifyTimer = setTimeout(() => {
         const seq = ++verifySeq;
         verifyState = { normalizedTicketId: normalized, status: 'verifying', lifecycle: null };
-        setInputStatus('checking', '...', 'Checking order number');
+        syncStatusFromVerifyState();
         (async () => {
           try {
             const lifecycle = await fetchLifecycleByTicket(normalized);
             if (seq !== verifySeq) return;
             verifyState = { normalizedTicketId: normalized, status: 'valid', lifecycle };
-            setInputStatus('valid', '\u2713', 'Order number verified');
+            syncStatusFromVerifyState();
             setError('');
           } catch (error) {
             if (seq !== verifySeq) return;
             verifyState = { normalizedTicketId: normalized, status: 'invalid', lifecycle: null };
-            setInputStatus('invalid', '\u00d7', 'Order number not found');
+            syncStatusFromVerifyState();
           }
         })();
       }, 220);
     }
 
-    async function submit() {
-      if (submitBusy) return;
+    async function submit(options = {}) {
+      if (isSubmitting) return;
+      const submitSource = options?.source === 'scan' ? 'scan' : 'manual';
+      const runGeneration = ++submitGeneration;
       const raw = String(input.value || '').trim();
-      if (!raw) { setError('Scan a ticket first.'); return; }
-      const scannedTicketId = normalizeTicketId(raw);
-      if (!scannedTicketId) { setError('Scanned value is not a valid ticket format.'); return; }
+      const parsedInput = parseOrderTicketInput(raw);
+      if (!parsedInput) { setError('Invalid ticket format. Use <orderId> or <orderId>/<ticket>.'); return; }
+      const scannedTicketId = parsedInput.ticketToken;
+      const scannedOrderId = parsedInput.orderId;
       const normalizedSixDigit = normalizeSixDigit(scannedTicketId);
-      const scanPrimaryToken = String(scannedTicketId || '').split('/')[0].trim();
-      const serviceTicketId = normalizedSixDigit || scanPrimaryToken;
 
       errorEl.style.display = 'none';
-      setSubmitting(true);
+      setLoadingState(true);
 
       try {
         let lifecycle = null;
 
-        if (normalizedSixDigit) {
-          if (verifyTimer) {
-            clearTimeout(verifyTimer);
-            verifyTimer = null;
-          }
-          const seq = ++verifySeq;
-          verifyState = { normalizedTicketId: normalizedSixDigit, status: 'verifying', lifecycle: null };
-          setInputStatus('checking', '...', 'Checking order number');
-          try {
-            lifecycle = await fetchLifecycleByTicket(normalizedSixDigit);
-            if (seq !== verifySeq) return;
-            verifyState = { normalizedTicketId: normalizedSixDigit, status: 'valid', lifecycle };
-            setInputStatus('valid', '\u2713', 'Order number verified');
-          } catch (error) {
-            if (seq !== verifySeq) return;
-            verifyState = { normalizedTicketId: normalizedSixDigit, status: 'invalid', lifecycle: null };
-            setInputStatus('invalid', '\u00d7', 'Order number not found');
-            // Do not hard-stop here. Some environments fail OLC endpoint but still return
-            // valid data through GetTickets/GetRecipient.
-            setError('Could not verify this 6-digit order number via OLC. Trying fallback lookup...');
-          }
-        }
-
-        if (!lifecycle) {
-          const lifecycleCandidates = uniqueNonEmpty([serviceTicketId, scannedTicketId]);
-          for (const candidate of lifecycleCandidates) {
+        if (submitSource !== 'scan' && normalizedSixDigit) {
+          const hasVerifiedLifecycle = verifyState.normalizedTicketId === normalizedSixDigit && verifyState.status === 'valid' && !!verifyState.lifecycle;
+          if (hasVerifiedLifecycle) {
+            lifecycle = verifyState.lifecycle;
+          } else {
+            if (verifyTimer) {
+              clearTimeout(verifyTimer);
+              verifyTimer = null;
+            }
+            const seq = ++verifySeq;
+            verifyState = { normalizedTicketId: normalizedSixDigit, status: 'verifying', lifecycle: null };
+            syncStatusFromVerifyState();
             try {
-              lifecycle = await fetchLifecycleByTicket(candidate);
-              if (lifecycle) break;
-            } catch (lifecycleError) {
-              log('Lifecycle lookup failed for candidate', { candidate, error: lifecycleError });
+              lifecycle = await fetchLifecycleByTicket(normalizedSixDigit);
+              if (runGeneration !== submitGeneration || !backdrop.isConnected) return;
+              if (seq !== verifySeq) return;
+              verifyState = { normalizedTicketId: normalizedSixDigit, status: 'valid', lifecycle };
+              syncStatusFromVerifyState();
+            } catch (error) {
+              if (seq !== verifySeq) return;
+              verifyState = { normalizedTicketId: normalizedSixDigit, status: 'invalid', lifecycle: null };
+              syncStatusFromVerifyState();
+              // Do not hard-stop here. Some environments fail OLC endpoint but
+              // still return valid data through GetTickets/GetRecipient.
+              setError('Could not verify this 6-digit order number via OLC. Continuing with direct ticket lookup...');
             }
           }
         }
 
-        const resolvedTicketId = lifecycle?.ticketId || serviceTicketId || scannedTicketId;
-        let ticket = null;
-        let ticketLookupError = null;
-        const ticketLookupCandidates = uniqueNonEmpty([scannedTicketId, serviceTicketId, resolvedTicketId]);
-        for (const candidate of ticketLookupCandidates) {
+        if (!lifecycle) {
           try {
-            ticket = await fetchTicket(candidate, { ticketReferenceHint: scannedTicketId });
-            ticketLookupError = null;
-            break;
-          } catch (candidateError) {
-            ticketLookupError = candidateError;
-            log('Ticket lookup failed for candidate', { candidate, error: candidateError });
+            lifecycle = await fetchLifecycleByTicket(scannedTicketId);
+            if (runGeneration !== submitGeneration || !backdrop.isConnected) return;
+          } catch (lifecycleError) {
+            log('Lifecycle lookup failed, continuing with direct ticket lookup', lifecycleError);
           }
         }
-        if (!ticket && ticketLookupError) throw ticketLookupError;
+        const ticket = await fetchTicket(scannedOrderId, scannedTicketId);
+        if (runGeneration !== submitGeneration || !backdrop.isConnected) return;
+        validateTicketLookup(scannedTicketId, ticket);
         const recipient = ticket.recipientId ? await fetchRecipient(ticket.recipientId) : null;
+        if (runGeneration !== submitGeneration || !backdrop.isConnected) return;
+
+        state.lastTicketId = scannedTicketId;
+        state.lastLifecycle = lifecycle;
+        state.lastTicket = ticket;
+        state.lastRecipient = recipient;
 
         log('Lookup chain', {
           scannedTicketId,
-          resolvedTicketId,
+          scannedOrderId,
           lifecycleTicketId: lifecycle?.ticketId,
           ticketResponse: ticket,
           recipientResponse: recipient,
         });
 
+        resetFormToBaseline();
         const orderData = deriveOrderData(scannedTicketId, lifecycle, ticket, recipient);
+        if (runGeneration !== submitGeneration || !backdrop.isConnected) return;
         applyOrderData(orderData);
-        close();
+        close({ flushBridge: true });
       } catch (error) {
+        if (runGeneration !== submitGeneration || !backdrop.isConnected) return;
         log(error);
         const message = error instanceof Error ? error.message : String(error);
         setError(message);
-        setInputStatus('invalid', '\u00d7', 'Lookup failed');
       } finally {
-        if (backdrop.isConnected) setSubmitting(false);
+        if (runGeneration === submitGeneration && backdrop.isConnected) setLoadingState(false);
       }
     }
 
     async function pollBridgeScan() {
-      if (!CONFIG.oposBridge?.enabled || bridgeBusy || submitBusy) return;
-      if (manualEntryActive && String(input.value || '').trim()) return;
+      if (!CONFIG.oposBridge?.enabled || bridgeBusy || isSubmitting) return;
+      if (!isModalForegroundActive()) {
+        return;
+      }
+      if (!bridgeLeaseHeld) {
+        if (!bridgeLeaseRenewing && Date.now() >= bridgeLeaseRetryAfterMs) {
+          bridgeLeaseRetryAfterMs = Date.now() + 250;
+          void renewBridgeLease('poll');
+        }
+        return;
+      }
+      if (closed || !backdrop.isConnected) return;
       bridgeBusy = true;
       try {
-        const latest = await fetchBridgeLatestScan();
-        if (!latest || !latest.value || latest.seq <= bridgeLastSeq) return;
+        const latest = await fetchBridgeNextScan(bridgeLeaseOwner);
+        if (!latest || !Number.isFinite(latest.seq) || latest.seq <= bridgeLastSeq) return;
         bridgeLastSeq = latest.seq;
-        const normalizedScanValue = normalizeTicketId(latest.value);
+        if (!latest.value) return;
+        const scanAtMs = Date.parse(String(latest.at || ''));
+        // Ignore scans captured before this modal was active in the foreground.
+        if (!Number.isFinite(scanAtMs) || scanAtMs < scanAcceptAfterMs) {
+          return;
+        }
+        const normalizedScanValue = normalizeTicketToken(latest.value);
         if (!normalizedScanValue) return;
-        bridgeInputWrite = true;
+        pendingInputSource = 'scan';
         input.value = normalizedScanValue;
         input.dispatchEvent(new Event('input', { bubbles: true }));
-        bridgeInputWrite = false;
-        if (CONFIG.oposBridge?.autoLookupOnScan && isLikelyTicketId(normalizedScanValue)) submit();
       } catch (error) {
-        // Bridge is optional. Keep modal usable with manual or keyboard-wedge scans.
+        // Bridge is optional. Keep modal usable with manual entry.
         log('OPOS bridge poll failed', error);
       } finally {
         bridgeInputWrite = false;
@@ -2433,41 +3000,117 @@
     backdrop.addEventListener('click', event => {
       const target = event.target;
       if (!(target instanceof Element)) return;
-      if (target === backdrop || target.getAttribute('data-action') === 'cancel') close({ resetDecorations: true });
-      if (target.getAttribute('data-action') === 'lookup') submit();
+      if (target === backdrop || target.getAttribute('data-action') === 'cancel') close({ resetDecorations: true, flushBridge: true });
+      if (target.getAttribute('data-action') === 'lookup') submit({ source: 'manual' });
     });
 
-    input.addEventListener('input', () => {
-      if (!bridgeInputWrite) {
-        manualEntryActive = String(input.value || '').trim().length > 0;
-      }
+    input.addEventListener('input', event => {
+      let source = pendingInputSource === 'scan' ? 'scan' : 'manual';
+      pendingInputSource = 'manual';
       setError('');
+      recordInputCadence();
+      const normalizedValue = normalizeTicketToken(input.value);
+      if (normalizedValue !== String(input.value || '')) {
+        input.value = normalizedValue;
+      }
+      const parsed = parseOrderTicketInput(normalizedValue);
+      if (source !== 'scan' && parsed) {
+        const inputEvent = event instanceof InputEvent ? event : null;
+        const fromPaste = inputEvent?.inputType === 'insertFromPaste';
+        if (!fromPaste && shouldUseKeyboardWedgeFallback() && looksLikeScannerCadence()) {
+          source = 'scan';
+        }
+      }
+      lastInputSource = source;
+      if (source === 'scan') {
+        clearVerificationState();
+        updateLookupButtonState();
+        scheduleAutoLookupFromScan(normalizedValue);
+        return;
+      }
       scheduleVerification();
+      updateLookupButtonState();
     });
 
     input.addEventListener('keydown', event => {
-      if (event.key === 'Enter') { event.preventDefault(); submit(); }
-      if (event.key === 'Escape') close({ resetDecorations: true });
+      if (event.key === 'Enter') { event.preventDefault(); submit({ source: 'manual' }); }
+      if (event.key === 'Escape') close({ resetDecorations: true, flushBridge: true });
     });
 
-    setTimeout(() => input.focus(), 0);
+    handleModalVisibility = () => {
+      if (closed || !backdrop.isConnected || state.scanModalClose !== close) return;
+      if (document.visibilityState !== 'visible') {
+        scheduleBackgroundRelease('visibility-hidden');
+        return;
+      }
+      stopBackgroundReleaseTimer();
+      if (modalWasBackgrounded) {
+        markScanAcceptanceBoundary();
+        modalWasBackgrounded = false;
+      }
+      if (document.visibilityState === 'visible') {
+        void renewBridgeLease('focus');
+      }
+    };
+    handleWindowFocus = () => {
+      if (closed || !backdrop.isConnected || state.scanModalClose !== close) return;
+      stopBackgroundReleaseTimer();
+      if (modalWasBackgrounded) {
+        markScanAcceptanceBoundary();
+        modalWasBackgrounded = false;
+      }
+      void renewBridgeLease('focus');
+    };
+    handleWindowBlur = () => {
+      if (closed || !backdrop.isConnected || state.scanModalClose !== close) return;
+      modalWasBackgrounded = true;
+      scheduleBackgroundRelease('window-blur');
+    };
+    document.addEventListener('visibilitychange', handleModalVisibility);
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('blur', handleWindowBlur);
+
+    setTimeout(() => {
+      if (closed) return;
+      if (input instanceof HTMLInputElement) input.focus();
+    }, 0);
+    if (input instanceof HTMLInputElement) input.value = '';
+    updateLookupButtonState();
     if (CONFIG.oposBridge?.enabled) {
-      // Reset bridge scan snapshot when modal opens so a new scan is always treated as new.
       (async () => {
+        let leaseAcquired = false;
         try {
-          await bridgeRearmScanner();
-          await wait(75);
-          const cleared = await bridgeClearScan();
-          const baselineSeq = Number(cleared?.lastSeq || 0);
-          if (Number.isFinite(baselineSeq)) bridgeLastSeq = Math.max(bridgeLastSeq, baselineSeq);
+          if (isModalForegroundActive()) {
+            leaseAcquired = await renewBridgeLease('open');
+            if (bridgeLeaseHeld) {
+              await bridgeRearmScanner();
+            }
+          }
         } catch (error) {
-          log('OPOS bridge baseline read failed', error);
+          log('OPOS bridge startup failed', error);
         } finally {
+          if (closed || !backdrop.isConnected || state.scanModalClose !== close) return;
+          if (isModalForegroundActive() && !leaseAcquired) {
+            setError('Scanner bridge did not connect. If scans beep but do not populate, reload the userscript and retry.');
+          }
+          const keepAliveEvery = Math.max(500, Number(CONFIG.oposBridge?.leaseKeepAliveMs || 1200));
+          bridgeLeaseTimer = setInterval(() => {
+            if (closed || !backdrop.isConnected || state.scanModalClose !== close) return;
+            if (!isModalForegroundActive()) {
+              return;
+            }
+            void renewBridgeLease('heartbeat').then(acquired => {
+              if (acquired && /Scanner bridge did not connect/i.test(String(errorEl.textContent || ''))) {
+                setError('');
+              }
+            });
+          }, keepAliveEvery);
           bridgeTimer = setInterval(pollBridgeScan, Math.max(100, Number(CONFIG.oposBridge?.pollIntervalMs || 250)));
           pollBridgeScan();
         }
       })();
     }
+
   }
 
   function injectBarcodeTab() {
@@ -2500,6 +3143,7 @@
     removeBannerIfPresent();
     setTabFontWeights({ single: '600', bulk: '400', barcode: '400', config: '400' });
     removeDeliveryInstructionPicker();
+    captureFormBaseline();
     bindSubmitSuccessHooks();
     return true;
   }

@@ -18,7 +18,8 @@ function Write-Step {
 $sourceRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $requiredFiles = @(
   "opos-scanner-bridge.ps1",
-  "install-opos-bridge-task.ps1"
+  "install-opos-bridge-task.ps1",
+  "uninstall-opos-bridge-task.ps1"
 )
 
 Write-Step "Source folder: $sourceRoot"
@@ -75,7 +76,7 @@ if (-not $SkipHealthCheck) {
   $scannerStatus = [string]$health.scannerStatus
   Write-Step ("Health OK. scannerStatus={0}, lastSeq={1}" -f $scannerStatus, $health.lastSeq)
 
-  if ($scannerStatus -ne "ready") {
+  if (@("ready", "open") -notcontains $scannerStatus) {
     Write-Warning "Bridge is reachable but scannerStatus is '$scannerStatus'. Check OPOS logical name and scanner availability."
   }
 } else {
