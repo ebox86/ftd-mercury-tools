@@ -996,8 +996,6 @@
         deliveryDate: getLeafValue(fields, ['DELIV_DATE', 'DELIVERY_DATE']),
         specialInstructions: getLeafValue(fields, ['SPECIAL_INSTR', 'SPECIAL_INSTRUCTIONS']),
         deliveryDateInstructions: getLeafValue(fields, ['DELIVERY_DATE_INSTR']),
-        ticketPosition: getLeafValue(fields, ['TICKET_POSITION', 'ticketPosition']),
-        userReference: getLeafValue(fields, ['USER_REFERENCE', 'userReference']),
       };
       const hasTicketSignal = !!(
         parsed.saleId || parsed.recipientId || parsed.deliveryDate || parsed.amount || parsed.ticketId || parsed.userReference || parsed.ticketPosition
@@ -1031,11 +1029,6 @@
       const embeddedXml = parseEmbeddedResultXml(xml, ['GetTicketsResult', 'string']);
       if (embeddedXml) parsed = selectFromDoc(embeddedXml);
     }
-    if (!rows.length) {
-      const leafParsed = parseTicketFromLeafFields(xml);
-      if (leafParsed) rows = [leafParsed];
-    }
-    const parsed = selectTicketRow(rows);
 
     if (!parsed && requiredTicketToken) throw new Error(`Ticket ${requiredTicketToken} not found in GetTickets response`);
 

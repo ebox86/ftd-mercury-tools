@@ -1,0 +1,121 @@
+name: OPOS Bridge Service Prototype CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "opos-browser-bridge/service-prototype/**"
+      - ".github/workflows/opos-bridge-service-prototype.yml"
+  pull_request:
+    paths:
+      - "opos-browser-bridge/service-prototype/**"
+      - ".github/workflows/opos-bridge-service-prototype.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-smoke-publish:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    env:
+      PROJECT: opos-browser-bridge/service-prototype/FTD.OposBridge.Service/FTD.OposBridge.Service.csproj
+      PUBLISH_DIR: artifacts/prototype/win-x86-self-contained
+      SMOKE_PORT: 17332
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore $env:PROJECT
+
+      - name: Build (Release)
+        run: dotnet build $env:PROJECT -c Release --no-restore
+
+      - name: Publish (win-x86 self-contained)
+        run: dotnet publish $env:PROJECT -c Release -r win-x86 --self-contained true -o $env:PUBLISH_DIR --no-restore
+
+      - name: Mock API smoke test
+        run: |
+          $ErrorActionPreference = "Stop"
+          $base = "http://127.0.0.1:$env:SMOKE_PORT"
+          $exe = Join-Path $PWD "$env:PUBLISH_DIR\FTD.OposBridge.Service.exe"
+          $outLog = Join-Path $env:RUNNER_TEMP "opos-service-proto-smoke-stdout.log"
+          $errLog = Join-Path $env:RUNNER_TEMP "opos-service-proto-smoke-stderr.log"
+          Remove-Item $outLog,$errLog -ErrorAction SilentlyContinue
+
+          if (-not (Test-Path $exe)) {
+            throw "Published executable missing: $exe"
+          }
+
+          $proc = Start-Process -FilePath $exe -ArgumentList @("--scanner-mode=mock","--port=$env:SMOKE_PORT") -PassThru -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+          try {
+            $health = $null
+            for ($i = 0; $i -lt 80; $i++) {
+              Start-Sleep -Milliseconds 250
+              if ($proc.HasExited) { break }
+              try {
+                $health = Invoke-RestMethod "$base/health" -TimeoutSec 2
+                if ($health.ok) { break }
+              } catch {}
+            }
+
+            if (-not $health -or -not $health.ok) {
+              Write-Host "Host failed to start."
+              if (Test-Path $outLog) {
+                Write-Host "---- stdout ----"
+                Get-Content $outLog -Tail 100 | Out-Host
+              }
+              if (Test-Path $errLog) {
+                Write-Host "---- stderr ----"
+                Get-Content $errLog -Tail 100 | Out-Host
+              }
+              throw "Smoke host startup failed."
+            }
+
+            $lease = Invoke-RestMethod "$base/scanner/lease?owner=gha-smoke&ms=4000" -TimeoutSec 3
+            $inject = Invoke-RestMethod "$base/debug/inject?value=OR369999/1" -TimeoutSec 3
+            Start-Sleep -Milliseconds 350
+            $next1 = Invoke-RestMethod "$base/scan/next?owner=gha-smoke" -TimeoutSec 3
+            $next2 = Invoke-RestMethod "$base/scan/next?owner=gha-smoke" -TimeoutSec 3
+            $clear = Invoke-RestMethod "$base/scan/clear" -TimeoutSec 3
+            $release = Invoke-RestMethod "$base/scanner/release?owner=gha-smoke" -TimeoutSec 3
+
+            if (-not $lease.claimed) { throw "Expected scanner lease to be claimed." }
+            if (-not $inject.injected) { throw "Expected debug inject to succeed." }
+            if ($next1.scan.value -ne "OR369999/1") { throw "Unexpected first scan value: '$($next1.scan.value)'" }
+            if (-not [string]::IsNullOrEmpty($next2.scan.value)) { throw "Expected second scan poll to be empty for same owner." }
+            if (-not $clear.cleared) { throw "Expected clear to report cleared=true." }
+            if (-not $release.released) { throw "Expected release to report released=true." }
+
+            [ordered]@{
+              healthStatus = $health.scannerStatus
+              leaseClaimed = $lease.claimed
+              firstScan = $next1.scan.value
+              secondScan = $next2.scan.value
+              clear = $clear.cleared
+              released = $release.released
+            } | ConvertTo-Json -Depth 4 | Write-Host
+          }
+          finally {
+            if ($proc -and -not $proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force
+            }
+          }
+
+      - name: Upload prototype artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ftd-opos-bridge-service-prototype-win-x86-self-contained
+          path: ${{ env.PUBLISH_DIR }}
