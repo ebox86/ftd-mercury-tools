@@ -598,15 +598,11 @@ $global:OposBridgeState = [hashtable]::Synchronized(@{
 
 $scanner = $null
 $listener = $null
-$subscriptions = @()
+$dataEventHandler = $null
+$errorEventHandler = $null
 
 function Cleanup {
   Write-Log "Cleaning up bridge resources..."
-  foreach ($sub in $subscriptions) {
-    try { Unregister-Event -SourceIdentifier $sub.Name -ErrorAction SilentlyContinue } catch {}
-    try { Remove-Job -Id $sub.Id -Force -ErrorAction SilentlyContinue } catch {}
-  }
-  $subscriptions = @()
 
   if ($scanner -ne $null) {
     [void](Release-ScannerClaim -Reason "shutdown")
@@ -638,7 +634,8 @@ try {
   Clear-LeaseTracking
   Write-Log "Scanner opened (unclaimed). LogicalName=$LogicalName, OpenResult=$($scanner.OpenResult)"
 
-  $subscriptions += Register-ObjectEvent -InputObject $scanner -EventName DataEvent -SourceIdentifier "OposBridge.DataEvent" -Action {
+  $dataEventHandler = [OposScanner_1_9_Lib._IOPOSScannerEvents_DataEventEventHandler]{
+    param([int]$Status)
     try {
       $s = $event.Sender
       if (-not $script:ScannerClaimed) { return }
@@ -661,20 +658,25 @@ try {
       if ($script:ScannerClaimed) { try { $event.Sender.DataEventEnabled = $true } catch {} }
     }
   }
+  $scanner.add_DataEvent($dataEventHandler)
 
-  $subscriptions += Register-ObjectEvent -InputObject $scanner -EventName ErrorEvent -SourceIdentifier "OposBridge.ErrorEvent" -Action {
+  $errorEventHandler = [OposScanner_1_9_Lib._IOPOSScannerEvents_ErrorEventEventHandler]{
+    param([int]$ResultCode, [int]$ResultCodeExtended, [int]$ErrorLocus, [ref]$pErrorResponse)
     try {
       $global:OposBridgeState.lastError = "Scanner ErrorEvent received at $((Get-Date).ToString('o'))"
       Write-Log $global:OposBridgeState.lastError -Level WARN -EventId 2102
       if ($script:ScannerClaimed) { try { $event.Sender.DataEventEnabled = $true } catch {} }
     } catch {}
   }
+  $scanner.add_ErrorEvent($errorEventHandler)
 
   $listener = New-Object System.Net.HttpListener
   $listener.Prefixes.Add("http://127.0.0.1:$Port/")
   $listener.Start()
   Write-Log "HTTP listener started at http://127.0.0.1:$Port/"
 
+  $lastMaintenanceAt = Get-Date
+  $pendingContext = $listener.BeginGetContext($null, $null)
   while ($listener.IsListening) {
     $pending = $listener.BeginGetContext($null, $null)
     while ($listener.IsListening -and -not $pending.AsyncWaitHandle.WaitOne(100)) {

@@ -87,12 +87,9 @@
   const state = {
     mounted: false,
     activeMode: 'normal',
-    lastTicketId: null,
-    lastLifecycle: null,
-    lastTicket: null,
-    lastRecipient: null,
     submitWatchStop: null,
     lastSubmitHandledAt: 0,
+    addressVerificationCommitToken: 0,
     deliveryInstructionPreset: '',
     deliveryMenuCleanup: null,
     requestDefaults: { ...DEFAULT_REQUEST_CONFIG },
@@ -331,23 +328,28 @@
     return sel ? qs(sel) : null;
   }
 
-  function setNativeValue(el, value) {
+  function setNativeValue(el, value, options = {}) {
+    const {
+      dispatchBlur = false,
+      dispatchInput = true,
+      dispatchChange = true,
+    } = options;
     if (!el) return;
     const proto = Object.getPrototypeOf(el);
     const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
     if (descriptor?.set) descriptor.set.call(el, value);
     else el.value = value;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
+    if (dispatchInput) el.dispatchEvent(new Event('input', { bubbles: true }));
+    if (dispatchChange) el.dispatchEvent(new Event('change', { bubbles: true }));
+    if (dispatchBlur) el.dispatchEvent(new Event('blur', { bubbles: true }));
   }
 
-  function setSelectByValueOrLabel(el, desired) {
+  function setSelectByValueOrLabel(el, desired, setOptions = {}) {
     if (!el || desired == null || desired === '') return false;
     const normalized = String(desired).trim().toLowerCase();
     const match = Array.from(el.options || []).find(opt => opt.value.trim().toLowerCase() === normalized || opt.text.trim().toLowerCase() === normalized || (opt.label || '').trim().toLowerCase() === normalized);
     if (!match) return false;
-    setNativeValue(el, match.value);
+    setNativeValue(el, match.value, setOptions);
     return true;
   }
 
@@ -994,6 +996,8 @@
         deliveryDate: getLeafValue(fields, ['DELIV_DATE', 'DELIVERY_DATE']),
         specialInstructions: getLeafValue(fields, ['SPECIAL_INSTR', 'SPECIAL_INSTRUCTIONS']),
         deliveryDateInstructions: getLeafValue(fields, ['DELIVERY_DATE_INSTR']),
+        ticketPosition: getLeafValue(fields, ['TICKET_POSITION', 'ticketPosition']),
+        userReference: getLeafValue(fields, ['USER_REFERENCE', 'userReference']),
       };
       const hasTicketSignal = !!(
         parsed.saleId || parsed.recipientId || parsed.deliveryDate || parsed.amount || parsed.ticketId || parsed.userReference || parsed.ticketPosition
@@ -1027,6 +1031,11 @@
       const embeddedXml = parseEmbeddedResultXml(xml, ['GetTicketsResult', 'string']);
       if (embeddedXml) parsed = selectFromDoc(embeddedXml);
     }
+    if (!rows.length) {
+      const leafParsed = parseTicketFromLeafFields(xml);
+      if (leafParsed) rows = [leafParsed];
+    }
+    const parsed = selectTicketRow(rows);
 
     if (!parsed && requiredTicketToken) throw new Error(`Ticket ${requiredTicketToken} not found in GetTickets response`);
 
@@ -1054,13 +1063,14 @@
       return {
         id: getXmlChildText(recipient, ['ID', 'RECIPIENT_ID', 'RECIPIENTID']),
         name: getXmlChildText(recipient, ['NAME']),
-        address: getXmlChildText(recipient, ['ADDRESS']),
-        city: getXmlChildText(recipient, ['CITY']),
-        state: getXmlChildText(recipient, ['STATE_PROV', 'STATE']),
+        address: getXmlChildText(recipient, ['ADDRESS', 'ADDRESS1', 'ADDR1', 'STREET', 'STREET1', 'STREET_ADDRESS', 'DELIV_ADDR', 'DELIVERY_ADDRESS']),
+        address2: getXmlChildText(recipient, ['ADDRESS2', 'ADDR2', 'STREET2']),
+        city: getXmlChildText(recipient, ['CITY', 'CITY_NAME', 'TOWN']),
+        state: getXmlChildText(recipient, ['STATE_PROV', 'STATE', 'STATE_CD']),
         country: getXmlChildText(recipient, ['COUNTRY']),
-        postalCode: getXmlChildText(recipient, ['POSTAL_CODE', 'ZIP']),
+        postalCode: getXmlChildText(recipient, ['POSTAL_CODE', 'ZIP', 'ZIP_CODE', 'POSTCODE']),
         phone: getXmlChildText(recipient, ['PHONE']),
-        firmName: getXmlChildText(recipient, ['FIRM_NAME']).trim(),
+        firmName: getXmlChildText(recipient, ['FIRM_NAME', 'BUSINESS_NAME', 'COMPANY']).trim(),
       };
     };
 
@@ -1069,13 +1079,14 @@
       const parsed = {
         id: getLeafValue(fields, ['ID', 'RECIPIENT_ID', 'RECIPIENTID']),
         name: getLeafValue(fields, ['NAME']),
-        address: getLeafValue(fields, ['ADDRESS']),
-        city: getLeafValue(fields, ['CITY']),
-        state: getLeafValue(fields, ['STATE_PROV', 'STATE']),
+        address: getLeafValue(fields, ['ADDRESS', 'ADDRESS1', 'ADDR1', 'STREET', 'STREET1', 'STREET_ADDRESS', 'DELIV_ADDR', 'DELIVERY_ADDRESS']),
+        address2: getLeafValue(fields, ['ADDRESS2', 'ADDR2', 'STREET2']),
+        city: getLeafValue(fields, ['CITY', 'CITY_NAME', 'TOWN']),
+        state: getLeafValue(fields, ['STATE_PROV', 'STATE', 'STATE_CD']),
         country: getLeafValue(fields, ['COUNTRY']),
-        postalCode: getLeafValue(fields, ['POSTAL_CODE', 'ZIP']),
+        postalCode: getLeafValue(fields, ['POSTAL_CODE', 'ZIP', 'ZIP_CODE', 'POSTCODE']),
         phone: getLeafValue(fields, ['PHONE']),
-        firmName: getLeafValue(fields, ['FIRM_NAME']).trim(),
+        firmName: getLeafValue(fields, ['FIRM_NAME', 'BUSINESS_NAME', 'COMPANY']).trim(),
       };
       const hasRecipientSignal = !!(parsed.name || parsed.address || parsed.id);
       return hasRecipientSignal ? parsed : null;
@@ -1587,6 +1598,28 @@
     return country || defaultCountry;
   }
 
+  function normalizeUsZip5(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const explicit = text.match(/\b(\d{5})(?:-\d{4})?\b/);
+    if (explicit?.[1]) return explicit[1];
+    const digits = text.replace(/\D/g, '');
+    return digits.length >= 5 ? digits.slice(0, 5) : '';
+  }
+
+  function deriveRecipientZip(recipient = {}) {
+    const candidates = [
+      recipient?.postalCode,
+      recipient?.address,
+      `${recipient?.city || ''} ${recipient?.state || ''} ${recipient?.postalCode || ''}`,
+    ];
+    for (const candidate of candidates) {
+      const zip = normalizeUsZip5(candidate);
+      if (zip) return zip;
+    }
+    return '';
+  }
+
   function readElementValue(el) {
     if (!el) return '';
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
@@ -1762,10 +1795,10 @@
   }
 
   function stripUnitFromAddress(addressLine1, extractedUnit) {
-    let address = String(addressLine1 || '').trim();
+    let address = normalizeInlineWhitespace(addressLine1 || '');
     if (!address || !extractedUnit) return address;
     const escaped = extractedUnit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return address.replace(new RegExp(`\\s*,?\\s*${escaped}`, 'i'), '').replace(/\s{2,}/g, ' ').trim();
+    return normalizeInlineWhitespace(address.replace(new RegExp(`\\s*,?\\s*${escaped}`, 'i'), ''));
   }
 
   function inferLocationType(recipientName, firmName) {
@@ -1803,7 +1836,7 @@
       addressLine2: unit,
       city: recipient?.city || '',
       state: recipient?.state || '',
-      zip: recipient?.postalCode || '',
+      zip: deriveRecipientZip(recipient),
       country: mapCountry(recipient?.country || 'US'),
       locationType: inferLocationType(recipient?.name || '', businessName),
       locationName: businessName,
@@ -1824,17 +1857,23 @@
   }
 
   function fillField(name, value, reviewReason = '', options = {}) {
-    const { source = 'manual', maxLength = null } = options;
+    const {
+      source = 'manual',
+      maxLength = null,
+      dispatchInput = true,
+      dispatchChange = true,
+    } = options;
     const el = getInput(name);
     if (!el) { log('Missing field selector for', name); return null; }
-    const hasValue = value != null && String(value) !== '';
-    let finalValue = hasValue ? String(value) : '';
+    const rawValue = value == null ? '' : String(value);
+    const hasValue = rawValue.trim() !== '';
+    let finalValue = hasValue ? rawValue : '';
     let truncated = false;
     if (hasValue && maxLength && finalValue.length > maxLength) { finalValue = finalValue.slice(0, maxLength); truncated = true; }
 
     if (el.tagName === 'SELECT') {
       if (hasValue) {
-        const ok = setSelectByValueOrLabel(el, finalValue);
+        const ok = setSelectByValueOrLabel(el, finalValue, { dispatchInput, dispatchChange });
         if (ok) { if (source === 'service') markFilled(el, `Mapped from service${truncated ? ' (truncated/review suggested)' : ''}`); }
         else {
           const options = Array.from(el.options || []);
@@ -1854,7 +1893,7 @@
       }
     } else {
       if (hasValue) {
-        setNativeValue(el, finalValue);
+        setNativeValue(el, finalValue, { dispatchInput, dispatchChange });
         if (source === 'service') markFilled(el, `Mapped from service${truncated ? ' (truncated)' : ''}`);
       } else {
         setNativeValue(el, '');
@@ -1873,12 +1912,12 @@
     fillField('recipient_name', orderData.recipient_name, 'Mapped from recipient name split', { source: orderData.recipient_name ? 'service' : 'manual', maxLength: 100 });
     fillField('lastName', orderData.lastName, 'Mapped from recipient name split', { source: orderData.lastName ? 'service' : 'manual', maxLength: 100 });
     fillField('phone', orderData.phone, 'Mapped from recipient phone', { source: orderData.phone ? 'service' : 'manual', maxLength: 18 });
-    fillField('addressLine1', orderData.addressLine1, 'Mapped from recipient address', { source: orderData.addressLine1 ? 'service' : 'manual', maxLength: 120 });
-    fillField('addressLine2', orderData.addressLine2, 'Extracted from address or instructions; verify', { source: orderData.addressLine2 ? 'service' : 'manual', maxLength: 120 });
-    fillField('city', orderData.city, 'Mapped from recipient city', { source: orderData.city ? 'service' : 'manual', maxLength: 100 });
-    fillField('state', orderData.state, 'Mapped from recipient state', { source: orderData.state ? 'service' : 'manual' });
-    fillField('zip', orderData.zip, 'Mapped from recipient postal code', { source: orderData.zip ? 'service' : 'manual', maxLength: 5 });
-    fillField('country', orderData.country, 'Mapped from recipient country', { source: orderData.country ? 'service' : 'manual' });
+    fillField('addressLine1', orderData.addressLine1, 'Mapped from recipient address', { source: orderData.addressLine1 ? 'service' : 'manual', maxLength: 120, dispatchInput: true, dispatchChange: false });
+    fillField('addressLine2', orderData.addressLine2, 'Extracted from address or instructions; verify', { source: orderData.addressLine2 ? 'service' : 'manual', maxLength: 120, dispatchInput: true, dispatchChange: false });
+    fillField('city', orderData.city, 'Mapped from recipient city', { source: orderData.city ? 'service' : 'manual', maxLength: 100, dispatchInput: true, dispatchChange: false });
+    fillField('state', orderData.state, 'Mapped from recipient state', { source: orderData.state ? 'service' : 'manual', dispatchInput: true, dispatchChange: false });
+    fillField('zip', orderData.zip, 'Mapped from recipient postal code', { source: orderData.zip ? 'service' : 'manual', maxLength: 5, dispatchInput: true, dispatchChange: false });
+    fillField('country', orderData.country, 'Mapped from recipient country', { source: orderData.country ? 'service' : 'manual', dispatchInput: true, dispatchChange: false });
     enforceCountryDefault(orderData.country);
     setTimeout(() => enforceCountryDefault(orderData.country), 180);
     setTimeout(() => enforceCountryDefault(orderData.country), 650);
@@ -1903,6 +1942,7 @@
     } else {
       fillField('pickUpDateTime', orderData.pickUpDateTime, 'Future delivery: defaulted by configuration', { source: orderData.pickUpDateTime ? 'service' : 'manual', maxLength: 20 });
     }
+    scheduleAddressVerificationCommit(addressCommitToken);
   }
 
   const AUTO_FILLED_FIELD_KEYS = [
@@ -1925,6 +1965,59 @@
     'deliveryDate',
     'pickUpDateTime',
   ];
+
+  const ADDRESS_VERIFICATION_FIELD_KEYS = [
+    'addressLine1',
+    'addressLine2',
+    'city',
+    'state',
+    'zip',
+    'country',
+  ];
+
+  function dispatchInputAndChange(el) {
+    if (!el) return;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function dispatchChangeOnly(el) {
+    if (!el) return;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function commitAddressVerificationState(token) {
+    if (token !== state.addressVerificationCommitToken) return;
+    for (const key of ADDRESS_VERIFICATION_FIELD_KEYS) {
+      const el = getInput(key);
+      dispatchChangeOnly(el);
+    }
+  }
+
+  function removeBadgesForField(el) {
+    const labelNode = findFieldLabelNode(el);
+    if (!labelNode) return;
+    qsa('.mhq-field-badge', labelNode).forEach(node => node.remove());
+  }
+
+  function reconcileAddressLine1VisualState(token) {
+    if (token !== state.addressVerificationCommitToken) return;
+    const addressLine1 = getInput('addressLine1');
+    if (!addressLine1) return;
+    if (readElementValue(addressLine1)) return;
+    // Mercury may clear/replace address asynchronously after autofill.
+    // If value is now empty, clear stale visual "filled" state.
+    addressLine1.classList.remove('mhq-filled', 'mhq-review');
+    addressLine1.removeAttribute('title');
+    removeBadgesForField(addressLine1);
+  }
+
+  function scheduleAddressVerificationCommit(token) {
+    // Commit once after all address fields are filled, then once later to beat stale async responses.
+    setTimeout(() => commitAddressVerificationState(token), 90);
+    setTimeout(() => commitAddressVerificationState(token), 420);
+    setTimeout(() => reconcileAddressLine1VisualState(token), 950);
+  }
 
   function clearFieldValue(fieldKey) {
     const el = getInput(fieldKey);
@@ -1999,10 +2092,6 @@
     const pickerInput = qs('#mhq-delivery-template-input');
     if (pickerInput instanceof HTMLInputElement) pickerInput.value = '';
     clearHighlights();
-    state.lastTicketId = null;
-    state.lastLifecycle = null;
-    state.lastTicket = null;
-    state.lastRecipient = null;
     state.deliveryInstructionPreset = '';
   }
 
@@ -2584,6 +2673,7 @@
 
     function setInputStatus(kind, text = '', title = '') {
       if (!statusEl) return;
+      if (submitBusy && kind !== 'loading' && kind !== 'invalid') return;
       statusEl.classList.remove(...statusClasses);
       if (!kind) {
         statusEl.textContent = '';
@@ -2748,6 +2838,7 @@
     }
 
     function scheduleVerification() {
+      if (submitBusy) return;
       const normalized = normalizeSixDigit(input.value);
       if (!normalized) {
         clearVerificationState();
@@ -2901,6 +2992,7 @@
         // Bridge is optional. Keep modal usable with manual entry.
         log('OPOS bridge poll failed', error);
       } finally {
+        bridgeInputWrite = false;
         bridgeBusy = false;
       }
     }
