@@ -6,6 +6,11 @@
     <RootNamespace>FTD.OposBridge.Service</RootNamespace>
     <AssemblyName>FTD.OposBridge.Service</AssemblyName>
     <PlatformTarget>x86</PlatformTarget>
+    <IsPackable>true</IsPackable>
+    <PackageId>FTD.OposBridge.Service</PackageId>
+    <Authors>FTD</Authors>
+    <Description>OPOS scanner bridge service prototype for MercuryHQ barcode modal integration.</Description>
+    <PackageTags>opos;barcode;scanner;bridge;mercuryhq</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

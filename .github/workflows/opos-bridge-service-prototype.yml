@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   build-smoke-publish:
@@ -26,6 +27,7 @@ jobs:
     env:
       PROJECT: opos-browser-bridge/service-prototype/FTD.OposBridge.Service/FTD.OposBridge.Service.csproj
       PUBLISH_DIR: artifacts/prototype/win-x86-self-contained
+      NUGET_DIR: artifacts/prototype/nuget
       SMOKE_PORT: 17332
 
     steps:
@@ -119,3 +121,29 @@ jobs:
         with:
           name: ftd-opos-bridge-service-prototype-win-x86-self-contained
           path: ${{ env.PUBLISH_DIR }}
+
+      - name: Pack NuGet package
+        if: github.event_name != 'pull_request'
+        run: |
+          $version = "0.1.0-ci.${{ github.run_number }}.${{ github.run_attempt }}"
+          dotnet pack $env:PROJECT -c Release -o $env:NUGET_DIR --no-build /p:PackageVersion=$version
+          Get-ChildItem $env:NUGET_DIR -Filter *.nupkg | ForEach-Object { Write-Host "Packed package: $($_.FullName)" }
+
+      - name: Publish package to GitHub Packages (NuGet)
+        if: github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $sourceExists = dotnet nuget list source | Select-String -Pattern "github"
+          if ($sourceExists) {
+            dotnet nuget remove source github
+          }
+          dotnet nuget add source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" --name github --username "${{ github.actor }}" --password "$env:GITHUB_TOKEN" --store-password-in-clear-text
+          dotnet nuget push "$env:NUGET_DIR\*.nupkg" --source github --api-key "$env:GITHUB_TOKEN" --skip-duplicate
+
+      - name: Upload NuGet artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ftd-opos-bridge-service-prototype-nuget
+          path: ${{ env.NUGET_DIR }}

@@ -134,6 +134,8 @@ It runs on changes to `opos-browser-bridge/service-prototype/**` and does:
 2. publish `win-x86` self-contained artifact
 3. run mock API smoke test (`lease -> inject -> next -> clear -> release`)
 4. upload artifact `ftd-opos-bridge-service-prototype-win-x86-self-contained`
+5. pack NuGet package (`FTD.OposBridge.Service`) with CI version
+6. publish package to GitHub Packages NuGet feed (`https://nuget.pkg.github.com/<owner>/index.json`) on non-PR events
 
 ## Notes
 
