@@ -38,7 +38,7 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Restore
-        run: dotnet restore $env:PROJECT
+        run: dotnet restore $env:PROJECT -r win-x86
 
       - name: Build (Release)
         run: dotnet build $env:PROJECT -c Release --no-restore
