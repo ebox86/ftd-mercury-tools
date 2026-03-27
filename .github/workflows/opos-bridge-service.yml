@@ -122,12 +122,24 @@ jobs:
           name: ftd-opos-bridge-service-win-x86-self-contained
           path: ${{ env.PUBLISH_DIR }}
 
+      - name: Ensure NuGet artifact directory exists
+        if: github.event_name != 'pull_request'
+        run: |
+          if (-not (Test-Path $env:NUGET_DIR)) {
+            New-Item -ItemType Directory -Path $env:NUGET_DIR
+          }
+
       - name: Pack NuGet package
         if: github.event_name != 'pull_request'
         run: |
           $version = "0.1.0-ci.${{ github.run_number }}.${{ github.run_attempt }}"
           dotnet pack $env:PROJECT -c Release -o $env:NUGET_DIR --no-build /p:PackageVersion=$version
-          Get-ChildItem $env:NUGET_DIR -Filter *.nupkg | ForEach-Object { Write-Host "Packed package: $($_.FullName)" }
+          Write-Host "Checking contents of $env:NUGET_DIR"
+          Get-ChildItem $env:NUGET_DIR
+          if ((Get-ChildItem $env:NUGET_DIR -Filter '*.nupkg').Count -eq 0) {
+            Write-Host "Error: NuGet packages not found!"
+            exit 1
+          }
 
       - name: Publish package to GitHub Packages (NuGet)
         if: github.event_name != 'pull_request'
@@ -139,7 +151,9 @@ jobs:
             dotnet nuget remove source github
           }
           dotnet nuget add source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" --name github --username "${{ github.actor }}" --password "$env:GITHUB_TOKEN" --store-password-in-clear-text
-          dotnet nuget push "$env:NUGET_DIR\*.nupkg" --source github --api-key "$env:GITHUB_TOKEN" --skip-duplicate
+          Get-ChildItem "$env:NUGET_DIR" -Filter "*.nupkg" | ForEach-Object {
+            dotnet nuget push $_.FullName --source github --api-key "$env:GITHUB_TOKEN" --skip-duplicate
+          }
 
       - name: Upload NuGet artifact
         if: github.event_name != 'pull_request'
