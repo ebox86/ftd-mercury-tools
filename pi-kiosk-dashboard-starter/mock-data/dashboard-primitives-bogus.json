@@ -1,0 +1,11 @@
+﻿{
+  "GetDashboardEnabled": true,
+  "GetWeatherGadgetRefreshTime": 15,
+  "PublishDashboardEventType": "DashboardEnabled",
+  "MarkMessageRead": true,
+  "DeleteMarketingMessages": true,
+  "defaults": {
+    "maxMsgNumberClient": 0,
+    "msgTotalClient": 0
+  }
+}

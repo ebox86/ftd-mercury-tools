@@ -1,0 +1,22 @@
+﻿{
+  "DashboardEventType": [
+    { "id": 0, "name": "DashboardEnabled" },
+    { "id": 1, "name": "PollingInterval" },
+    { "id": 2, "name": "MercuryMessages" },
+    { "id": 3, "name": "DeclinedCreditCard" },
+    { "id": 4, "name": "UnauthorizedCreditCard" },
+    { "id": 5, "name": "CODOrders" },
+    { "id": 6, "name": "PickupOrders" },
+    { "id": 7, "name": "IncompleteOrPendingOrders" },
+    { "id": 8, "name": "FiledOrders" },
+    { "id": 9, "name": "UnableToAccessMercuryInternet" },
+    { "id": 10, "name": "ProtocolsUnavailable" },
+    { "id": 11, "name": "BackupStatus" },
+    { "id": 12, "name": "NotDeliveredOrders" },
+    { "id": 13, "name": "StoreMainCode" },
+    { "id": 14, "name": "LastOrderSequenceNumber" },
+    { "id": 15, "name": "MercuryMessageAlert" },
+    { "id": 16, "name": "InternetConnectionStatus" },
+    { "id": 17, "name": "MobileAppEnabled" }
+  ]
+}

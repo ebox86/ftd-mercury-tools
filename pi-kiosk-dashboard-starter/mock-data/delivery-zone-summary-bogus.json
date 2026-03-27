@@ -1,0 +1,42 @@
+﻿{
+  "dataset": "ZoneSummaryDataSet",
+  "table": "LoadZoneSummary",
+  "rows": [
+    {
+      "ZONE_ID": "1",
+      "ZONE_NAME": "NORTH SIDE",
+      "PRIORITY_ID": "1",
+      "PRIORITY_NAME": "DEL BY 10AM",
+      "NOT_DELIVERED": "2",
+      "NOT_DESIGNED": "1",
+      "DESIGNED": "1",
+      "SAVED": "0",
+      "ON_TRUCK": "0",
+      "DELIVERED": "0"
+    },
+    {
+      "ZONE_ID": "2",
+      "ZONE_NAME": "OAKLAND",
+      "PRIORITY_ID": "0",
+      "PRIORITY_NAME": "STANDARD",
+      "NOT_DELIVERED": "3",
+      "NOT_DESIGNED": "1",
+      "DESIGNED": "1",
+      "SAVED": "1",
+      "ON_TRUCK": "0",
+      "DELIVERED": "0"
+    },
+    {
+      "ZONE_ID": "3",
+      "ZONE_NAME": "WEXFORD",
+      "PRIORITY_ID": "2",
+      "PRIORITY_NAME": "DEL BY NOON",
+      "NOT_DELIVERED": "3",
+      "NOT_DESIGNED": "1",
+      "DESIGNED": "2",
+      "SAVED": "0",
+      "ON_TRUCK": "0",
+      "DELIVERED": "0"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+﻿{
+  "dataset": "DeliveryOrdersByZoneDataSet",
+  "table": "LoadOrderByZone",
+  "rows": [
+    {
+      "ID": "610002",
+      "SALE_ID": "470002",
+      "TICKET_POSITION": "1",
+      "RECIPIENT_NAME": "Ava Martinez",
+      "ZONE_ID": "1",
+      "ZONE_NAME": "NORTH SIDE",
+      "PRIORITY_ID": "1",
+      "PRIORITY_NAME": "DEL BY 10AM",
+      "ROUTE_NAME": "ROUTE-3",
+      "DELIVERY_DATE": "2026-03-27T15:30:00-04:00",
+      "DESIGNED_IND": "0",
+      "STATUS": "NOT_DESIGNED",
+      "LATITUDE": "40.4384",
+      "LONGITUDE": "-79.9162"
+    },
+    {
+      "ID": "610003",
+      "SALE_ID": "470003",
+      "TICKET_POSITION": "1",
+      "RECIPIENT_NAME": "Liam Peterson",
+      "ZONE_ID": "2",
+      "ZONE_NAME": "OAKLAND",
+      "PRIORITY_ID": "0",
+      "PRIORITY_NAME": "STANDARD",
+      "ROUTE_NAME": "",
+      "DELIVERY_DATE": "2026-03-27T14:10:00-04:00",
+      "DESIGNED_IND": "1",
+      "STATUS": "DESIGNED",
+      "LATITUDE": "40.4444",
+      "LONGITUDE": "-79.9531"
+    },
+    {
+      "ID": "610004",
+      "SALE_ID": "470004",
+      "TICKET_POSITION": "1",
+      "RECIPIENT_NAME": "Michael Duke",
+      "ZONE_ID": "3",
+      "ZONE_NAME": "WEXFORD",
+      "PRIORITY_ID": "2",
+      "PRIORITY_NAME": "DEL BY NOON",
+      "ROUTE_NAME": "ROUTE-1",
+      "DELIVERY_DATE": "2026-03-27T12:45:00-04:00",
+      "DESIGNED_IND": "1",
+      "STATUS": "ON_TRUCK",
+      "LATITUDE": "40.6203",
+      "LONGITUDE": "-80.0567"
+    }
+  ]
+}

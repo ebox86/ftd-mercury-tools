@@ -1,0 +1,51 @@
+﻿{
+  "dataset": "TicketStatusDataSet",
+  "table": "GetTicketStatus",
+  "byTicketId": {
+    "610002": {
+      "TicketUpdated": "2026-03-27T09:01:12-04:00",
+      "PrintedCopy": "1",
+      "PrintedPrinter": "ET0021B7ADF86D",
+      "PrintedTime": "2026-03-27T08:02:00-04:00",
+      "DesignerStatus": "Not Assigned",
+      "DesignerDesigner": "",
+      "DeliveryStatus": "0",
+      "DeliveryDate": "2026-03-27T15:30:00-04:00",
+      "DeliveryRoute": "",
+      "DeliveryDriver": "",
+      "DesignerDate": "",
+      "Sale_ID": "470002",
+      "Ticket_Position": "1"
+    },
+    "610003": {
+      "TicketUpdated": "2026-03-27T09:44:53-04:00",
+      "PrintedCopy": "1",
+      "PrintedPrinter": "ET0021B7ADF86D",
+      "PrintedTime": "2026-03-27T08:18:00-04:00",
+      "DesignerStatus": "Designed",
+      "DesignerDesigner": "ALEX M",
+      "DeliveryStatus": "2",
+      "DeliveryDate": "2026-03-27T14:10:00-04:00",
+      "DeliveryRoute": "ROUTE-3",
+      "DeliveryDriver": "SAM T",
+      "DesignerDate": "2026-03-27T09:40:00-04:00",
+      "Sale_ID": "470003",
+      "Ticket_Position": "1"
+    },
+    "610004": {
+      "TicketUpdated": "2026-03-27T10:21:10-04:00",
+      "PrintedCopy": "1",
+      "PrintedPrinter": "ET0021B7ADF86D",
+      "PrintedTime": "2026-03-27T08:25:00-04:00",
+      "DesignerStatus": "Designed",
+      "DesignerDesigner": "JORDAN R",
+      "DeliveryStatus": "4",
+      "DeliveryDate": "2026-03-27T12:45:00-04:00",
+      "DeliveryRoute": "ROUTE-1",
+      "DeliveryDriver": "CASEY N",
+      "DesignerDate": "2026-03-27T09:10:00-04:00",
+      "Sale_ID": "470004",
+      "Ticket_Position": "1"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+﻿{
+  "dataset": "MarketingMessageDataset",
+  "tables": {
+    "MARKETING_MESSAGE": [
+      {
+        "ID": "1",
+        "SENDER": "FTD Learning",
+        "SUBJECT": "Mock Spring Promo",
+        "MESSAGE": "Try a rotating hero card on the kiosk for spring campaigns.",
+        "READFLAG": "0",
+        "MESSAGEID": "MM-2026-001",
+        "MESSAGETYPE": "Info",
+        "URL": "https://example.local/mock/spring-promo",
+        "DEACTIVEDATE": "2026-05-31T23:59:59-04:00",
+        "ACTIVEDATE": "2026-03-01T00:00:00-05:00",
+        "RECEIVEDATE": "2026-03-27T08:20:00-04:00"
+      },
+      {
+        "ID": "2",
+        "SENDER": "FTD Ops",
+        "SUBJECT": "Mock Delivery Reminder",
+        "MESSAGE": "Route board latency alert threshold is set to 5 minutes.",
+        "READFLAG": "1",
+        "MESSAGEID": "MM-2026-002",
+        "MESSAGETYPE": "Alert",
+        "URL": "",
+        "DEACTIVEDATE": "2026-12-31T23:59:59-05:00",
+        "ACTIVEDATE": "2026-03-15T00:00:00-04:00",
+        "RECEIVEDATE": "2026-03-27T08:25:00-04:00"
+      }
+    ]
+  }
+}

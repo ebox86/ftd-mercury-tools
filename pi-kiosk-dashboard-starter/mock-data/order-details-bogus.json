@@ -1,0 +1,51 @@
+﻿{
+  "dataset": "OrderDetailsDataset",
+  "table": "DeliveryOrderDetailsLoad",
+  "rows": [
+    {
+      "ID": "610002",
+      "CUST_NAME": "Noah Bennett",
+      "CUST_PHONE_NBR": "(412)555-0166",
+      "ORDERED_BY": "Noah Bennett",
+      "ORDER_NOTES": "Front desk delivery after 3PM",
+      "SECOND_CHOICE_CODE": "",
+      "SECOND_CHOICE_DESC": "",
+      "SALE_ID": "470002",
+      "TICKET_POSITION": "1",
+      "SALE_DATE": "2026-03-27T08:00:00-04:00",
+      "COD_IND": "0",
+      "RECIPIENT_NAME": "Ava Martinez",
+      "EMP_NAME": "Dispatcher Mock"
+    },
+    {
+      "ID": "610003",
+      "CUST_NAME": "Liam Peterson",
+      "CUST_PHONE_NBR": "(412)555-0158",
+      "ORDERED_BY": "Liam Peterson",
+      "ORDER_NOTES": "Pickup at side door",
+      "SECOND_CHOICE_CODE": "",
+      "SECOND_CHOICE_DESC": "",
+      "SALE_ID": "470003",
+      "TICKET_POSITION": "1",
+      "SALE_DATE": "2026-03-27T08:18:00-04:00",
+      "COD_IND": "1",
+      "RECIPIENT_NAME": "Liam Peterson",
+      "EMP_NAME": "Designer Mock"
+    },
+    {
+      "ID": "610004",
+      "CUST_NAME": "Emma James",
+      "CUST_PHONE_NBR": "(412)555-0141",
+      "ORDERED_BY": "Emma James",
+      "ORDER_NOTES": "Leave with concierge if unavailable",
+      "SECOND_CHOICE_CODE": "",
+      "SECOND_CHOICE_DESC": "",
+      "SALE_ID": "470004",
+      "TICKET_POSITION": "1",
+      "SALE_DATE": "2026-03-27T08:25:00-04:00",
+      "COD_IND": "0",
+      "RECIPIENT_NAME": "Michael Duke",
+      "EMP_NAME": "Driver Mock"
+    }
+  ]
+}

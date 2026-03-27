@@ -1,0 +1,214 @@
+﻿{
+    "generated_at_utc":  "2026-03-27T06:12:18Z",
+    "service":  "DashboardService",
+    "endpoint":  "http://localhost/WsMercuryWebAPI/dashboard.asmx",
+    "target_namespace":  "http://localhost/webservices/",
+    "methods":  [
+                    {
+                        "name":  "DeleteMarketingMessages",
+                        "params":  [
+                                       "msgIds"
+                                   ],
+                        "result_kind":  "boolean",
+                        "http_post_path":  "/WsMercuryWebAPI/dashboard.asmx/DeleteMarketingMessages"
+                    },
+                    {
+                        "name":  "GetDashboardEnabled",
+                        "params":  [
+
+                                   ],
+                        "result_kind":  "boolean",
+                        "http_post_path":  "/WsMercuryWebAPI/dashboard.asmx/GetDashboardEnabled"
+                    },
+                    {
+                        "name":  "GetDashboardEvents",
+                        "params":  [
+
+                                   ],
+                        "result_kind":  "dataset:DashboardEventDataset",
+                        "http_post_path":  "/WsMercuryWebAPI/dashboard.asmx/GetDashboardEvents"
+                    },
+                    {
+                        "name":  "GetDashboardEventsNow",
+                        "params":  [
+
+                                   ],
+                        "result_kind":  "dataset:DashboardEventDataset",
+                        "http_post_path":  "/WsMercuryWebAPI/dashboard.asmx/GetDashboardEventsNow"
+                    },
+                    {
+                        "name":  "GetMarketingMessages",
+                        "params":  [
+                                       "maxMsgNumberClient",
+                                       "msgTotalClient"
+                                   ],
+                        "result_kind":  "dataset:MarketingMessageDataset",
+                        "http_post_path":  "/WsMercuryWebAPI/dashboard.asmx/GetMarketingMessages"
+                    },
+                    {
+                        "name":  "GetStates",
+                        "params":  [
+
+                                   ],
+                        "result_kind":  "dataset:StatesDataSet",
+                        "http_post_path":  "/WsMercuryWebAPI/dashboard.asmx/GetStates"
+                    },
+                    {
+                        "name":  "GetUndeliveredOrders",
+                        "params":  [
+
+                                   ],
+                        "result_kind":  "dataset:DashboardEventDataset",
+                        "http_post_path":  "/WsMercuryWebAPI/dashboard.asmx/GetUndeliveredOrders"
+                    },
+                    {
+                        "name":  "GetWeatherGadgetRefreshTime",
+                        "params":  [
+
+                                   ],
+                        "result_kind":  "int",
+                        "http_post_path":  "/WsMercuryWebAPI/dashboard.asmx/GetWeatherGadgetRefreshTime"
+                    },
+                    {
+                        "name":  "MarkMessageRead",
+                        "params":  [
+                                       "msgID"
+                                   ],
+                        "result_kind":  "boolean",
+                        "http_post_path":  "/WsMercuryWebAPI/dashboard.asmx/MarkMessageRead"
+                    },
+                    {
+                        "name":  "PublishDashboardEventType",
+                        "params":  [
+
+                                   ],
+                        "result_kind":  "enum-string",
+                        "http_post_path":  "/WsMercuryWebAPI/dashboard.asmx/PublishDashboardEventType"
+                    }
+                ],
+    "schemas":  {
+                    "DashboardEventDataset":  {
+                                                  "DashboardEventTable":  [
+                                                                              "EVENT_TYP_ID",
+                                                                              "COUNT",
+                                                                              "STATUS",
+                                                                              "DATA"
+                                                                          ],
+                                                  "MessageItems":  [
+                                                                       "CATEGORY",
+                                                                       "ID",
+                                                                       "WIRE_SERVICE",
+                                                                       "MSG_TYPE",
+                                                                       "SUMMARY_TEXT",
+                                                                       "MSG_DIRECTION",
+                                                                       "RECIPIENT_NAME",
+                                                                       "RECIPIENT_ADDRESS",
+                                                                       "RECIPIENT_CITY",
+                                                                       "RECIPIENT_STATE",
+                                                                       "RECIPIENT_STATE_ABBREV",
+                                                                       "RECIPIENT_ZIP",
+                                                                       "RECIPIENT_PHONE",
+                                                                       "FIRM_NAME",
+                                                                       "MSG_DATE",
+                                                                       "DELIVERY_DATE",
+                                                                       "SHOP_CODE",
+                                                                       "SHOP_NAME",
+                                                                       "SHOP_PHONE",
+                                                                       "MSG_NOTES"
+                                                                   ],
+                                                  "OrderItems":  [
+                                                                     "CATEGORY",
+                                                                     "ID",
+                                                                     "USER_REFERENCE",
+                                                                     "SUMMARY_TEXT",
+                                                                     "SALE_ID",
+                                                                     "TICKET_POSITION",
+                                                                     "ORDER_TYPE",
+                                                                     "RECIPIENT_NAME",
+                                                                     "RECIPIENT_ADDRESS",
+                                                                     "RECIPIENT_CITY",
+                                                                     "RECIPIENT_STATE",
+                                                                     "RECIPIENT_STATE_ABBREV",
+                                                                     "RECIPIENT_ZIP",
+                                                                     "RECIPIENT_PHONE",
+                                                                     "FIRM_NAME",
+                                                                     "LATITUDE",
+                                                                     "LONGITUDE",
+                                                                     "DELIVERY_DATE",
+                                                                     "CUSTOMER_NAME",
+                                                                     "CUSTOMER_PHONE",
+                                                                     "DELIVERY_INST",
+                                                                     "SPECIAL_INST",
+                                                                     "CARDHOLDER_NAME",
+                                                                     "CC_CARD_TYPE",
+                                                                     "CC_STATUS",
+                                                                     "CC_AUTH_DATE",
+                                                                     "CC_AMOUNT"
+                                                                 ],
+                                                  "BlabberItems":  [
+                                                                       "ID",
+                                                                       "MSG_DATE",
+                                                                       "SUMMARY_TEXT"
+                                                                   ],
+                                                  "DeliveryZones":  [
+                                                                        "NAME",
+                                                                        "PRIORITY",
+                                                                        "NOT_DELIVERED",
+                                                                        "NOT_DESIGNED",
+                                                                        "DESIGNED",
+                                                                        "SAVED",
+                                                                        "ON_TRUCK",
+                                                                        "DELIVERED"
+                                                                    ]
+                                              },
+                    "StatesDataSet":  {
+                                          "GetStates":  [
+                                                            "ABBREV",
+                                                            "NAME"
+                                                        ]
+                                      },
+                    "MarketingMessageDataset":  {
+                                                    "MARKETING_MESSAGE":  [
+                                                                              "ID",
+                                                                              "SENDER",
+                                                                              "SUBJECT",
+                                                                              "MESSAGE",
+                                                                              "READFLAG",
+                                                                              "MESSAGEID",
+                                                                              "MESSAGETYPE",
+                                                                              "URL",
+                                                                              "DEACTIVEDATE",
+                                                                              "ACTIVEDATE",
+                                                                              "RECEIVEDATE"
+                                                                          ]
+                                                }
+                },
+    "enum_dashboard_event_type":  [
+                                      "DashboardEnabled",
+                                      "PollingInterval",
+                                      "MercuryMessages",
+                                      "DeclinedCreditCard",
+                                      "UnauthorizedCreditCard",
+                                      "CODOrders",
+                                      "PickupOrders",
+                                      "IncompleteOrPendingOrders",
+                                      "FiledOrders",
+                                      "UnableToAccessMercuryInternet",
+                                      "ProtocolsUnavailable",
+                                      "BackupStatus",
+                                      "NotDeliveredOrders",
+                                      "StoreMainCode",
+                                      "LastOrderSequenceNumber",
+                                      "MercuryMessageAlert",
+                                      "InternetConnectionStatus",
+                                      "MobileAppEnabled"
+                                  ],
+    "config_group_14_dashboard_weather_settings":  {
+                                                       "DashboardCCDisplayLimit":  "30",
+                                                       "DashboardEnabled":  "1",
+                                                       "DashboardPollingInterval":  "5",
+                                                       "WeatherChannelLicenseKey":  "5338180762f6d414",
+                                                       "WeatherChannelPartnerID":  "1128230081",
+                                                       "WeatherGadgetRefreshTimer":  "15"
+                                                   }
+}
