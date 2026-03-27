@@ -1,2 +1,4 @@
 dist/
 artifacts/
+service/**/bin/
+service/**/obj/

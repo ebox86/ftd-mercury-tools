@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MercuryHQ - Single Request Barcode
 // @namespace    https://ebox86.com/
-// @version      0.4.06
+// @version      0.4.28
 // @description  Adds a barcode-assisted delivery request tab to MercuryHQ and prepopulates the Single Request form from Mercury services.
 // @author       Evan
 // @match        https://mercuryhq.com/create-delivery-service-request*
@@ -290,6 +290,15 @@
     .mhq-modal__input-status--loading { display: inline-block; width: 20px; min-width: 20px; height: 20px; border: 2px solid #c7d4df; border-top-color: #1f4f7a; background: transparent; color: transparent; font-size: 0; line-height: 0; animation: mhq-modal-spin .8s linear infinite; }
     .mhq-modal__input-status--valid { display: inline-block; color: #fff; background: #2e8b57; }
     .mhq-modal__input-status--invalid { display: inline-block; color: #fff; background: #c62828; }
+    .mhq-modal__scanner-state { margin-top: 10px; display: flex; align-items: center; gap: 8px; min-height: 18px; font-size: 12px; color: #4f5b66; }
+    .mhq-modal__scanner-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; background: #9aa5b1; box-shadow: 0 0 0 1px rgba(0,0,0,.08) inset; flex: 0 0 auto; }
+    .mhq-modal__scanner-spinner { width: 12px; height: 12px; border-radius: 999px; border: 2px solid #c7d4df; border-top-color: #1f4f7a; display: none; animation: mhq-modal-spin .8s linear infinite; flex: 0 0 auto; }
+    .mhq-modal__scanner-state--connecting .mhq-modal__scanner-dot { background: #d89b24; }
+    .mhq-modal__scanner-state--connecting .mhq-modal__scanner-spinner { display: inline-block; }
+    .mhq-modal__scanner-state--ready .mhq-modal__scanner-dot { background: #2e8b57; }
+    .mhq-modal__scanner-state--waiting .mhq-modal__scanner-dot { background: #d89b24; }
+    .mhq-modal__scanner-state--error .mhq-modal__scanner-dot { background: #c62828; }
+    .mhq-modal__scanner-state--paused .mhq-modal__scanner-dot { background: #7a8694; }
     .mhq-modal .mhq-btn[disabled] { opacity: .55; cursor: not-allowed; }
     @keyframes mhq-modal-spin { from { transform: translateY(-50%) rotate(0deg); } to { transform: translateY(-50%) rotate(360deg); } }
     .mhq-btn { appearance: none; border: 1px solid #c9d2d8; background: #fff; color: #1f2a33; border-radius: 6px; min-height: 34px; padding: 8px 12px; cursor: pointer; font-family: Arial; font-size: 12px; font-weight: 600; line-height: 1; }
@@ -894,15 +903,40 @@
 
     const normalizeTicketRef = value => String(value || '').trim().replace(/\s+/g, '').toUpperCase();
     const normalizeDigits = value => String(value || '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    const parseCompositeTicket = value => {
+      const match = String(value || '').trim().match(/^(\d+)\s*\/\s*(\d+)$/);
+      if (!match) return null;
+      return {
+        saleId: normalizeDigits(match[1]),
+        ticketNumber: normalizeDigits(match[2]),
+      };
+    };
+    const extractSaleId = value => {
+      const composite = parseCompositeTicket(value);
+      if (composite?.saleId) return composite.saleId;
+      return normalizeDigits(value);
+    };
+    const extractTicketNumber = (value, saleIdHint = '') => {
+      const composite = parseCompositeTicket(value);
+      if (composite?.ticketNumber && (!saleIdHint || composite.saleId === saleIdHint)) {
+        return composite.ticketNumber;
+      }
+      const digits = normalizeDigits(value);
+      if (!digits) return '';
+      if (saleIdHint && digits.length > saleIdHint.length && digits.startsWith(saleIdHint)) {
+        return digits.slice(saleIdHint.length).replace(/^0+(?=\d)/, '');
+      }
+      return digits;
+    };
     const parseRequiredToken = token => {
       const normalized = normalizeTicketRef(token);
       if (!normalized) return null;
-      const m = normalized.match(/^(\d+)\/(\d+)$/);
-      if (!m) return null;
+      const parsed = parseCompositeTicket(normalized);
+      if (!parsed) return null;
       return {
         normalized,
-        saleId: normalizeDigits(m[1]),
-        ticketNumber: normalizeDigits(m[2]),
+        saleId: parsed.saleId,
+        ticketNumber: parsed.ticketNumber,
       };
     };
     const required = parseRequiredToken(requiredTicketToken);
@@ -929,7 +963,10 @@
         const ns = String(node.namespaceURI || '').toLowerCase();
         if (ns.includes('www.w3.org/2001/xmlschema')) continue;
         const local = String(node.localName || node.nodeName || '').trim().toLowerCase();
-        if (!['ticket', 'table', 'row'].includes(local)) continue;
+        const looksLikeTicketRowName = ['ticket', 'table', 'row'].includes(local)
+          || /^table\d+$/.test(local)
+          || /^row\d+$/.test(local);
+        if (!looksLikeTicketRowName) continue;
         const parsed = parseTicketFromNode(node);
         if (!(parsed.saleId || parsed.recipientId || parsed.deliveryDate || parsed.amount || parsed.ticketId || parsed.id)) continue;
         rows.push(parsed);
@@ -946,8 +983,18 @@
       const byUserReference = rows.find(row => normalizeTicketRef(row.userReference) === required.normalized);
       if (byUserReference) return byUserReference;
 
-      const saleRows = rows.filter(row => normalizeDigits(row.saleId) === required.saleId);
+      const saleRows = rows.filter(row => extractSaleId(row.saleId) === required.saleId);
       if (saleRows.length) {
+        const byTicketIdNumber = saleRows.find(row =>
+          extractTicketNumber(row.ticketId, required.saleId) === required.ticketNumber,
+        );
+        if (byTicketIdNumber) return byTicketIdNumber;
+
+        const byUserReferenceNumber = saleRows.find(row =>
+          extractTicketNumber(row.userReference, required.saleId) === required.ticketNumber,
+        );
+        if (byUserReferenceNumber) return byUserReferenceNumber;
+
         const byPosition = saleRows.find(row => normalizeDigits(row.ticketPosition) === required.ticketNumber);
         if (byPosition) return byPosition;
 
@@ -957,9 +1004,13 @@
           if (idNorm === required.normalized) return true;
           const slashTicket = String(row.id || '').match(/\/\s*(\d+)\s*$/);
           if (slashTicket && normalizeDigits(slashTicket[1]) === required.ticketNumber) return true;
+          if (extractTicketNumber(row.id, required.saleId) === required.ticketNumber) return true;
           return normalizeDigits(row.id) === required.ticketNumber;
         });
         if (byId) return byId;
+
+        // If only one ticket row exists for this sale, use it.
+        if (saleRows.length === 1) return saleRows[0];
 
         const hasPerTicketIdentity = saleRows.some(row =>
           normalizeTicketRef(row.ticketId) ||
@@ -996,11 +1047,9 @@
         deliveryDate: getLeafValue(fields, ['DELIV_DATE', 'DELIVERY_DATE']),
         specialInstructions: getLeafValue(fields, ['SPECIAL_INSTR', 'SPECIAL_INSTRUCTIONS']),
         deliveryDateInstructions: getLeafValue(fields, ['DELIVERY_DATE_INSTR']),
-        ticketPosition: getLeafValue(fields, ['TICKET_POSITION', 'ticketPosition']),
-        userReference: getLeafValue(fields, ['USER_REFERENCE', 'userReference']),
       };
       const hasTicketSignal = !!(
-        parsed.saleId || parsed.recipientId || parsed.deliveryDate || parsed.amount || parsed.ticketId || parsed.userReference || parsed.ticketPosition
+        parsed.saleId || parsed.recipientId || parsed.deliveryDate || parsed.amount || parsed.ticketId || parsed.userReference || parsed.ticketPosition || parsed.id
       );
       return hasTicketSignal ? parsed : null;
     };
@@ -1031,11 +1080,6 @@
       const embeddedXml = parseEmbeddedResultXml(xml, ['GetTicketsResult', 'string']);
       if (embeddedXml) parsed = selectFromDoc(embeddedXml);
     }
-    if (!rows.length) {
-      const leafParsed = parseTicketFromLeafFields(xml);
-      if (leafParsed) rows = [leafParsed];
-    }
-    const parsed = selectTicketRow(rows);
 
     if (!parsed && requiredTicketToken) throw new Error(`Ticket ${requiredTicketToken} not found in GetTickets response`);
 
@@ -1202,6 +1246,25 @@
   function getBridgeBaseUrl() {
     const raw = String(CONFIG.oposBridge?.url || '').trim();
     return raw.replace(/\/+$/, '');
+  }
+
+  async function bridgeDetectService() {
+    const baseUrl = getBridgeBaseUrl();
+    if (!baseUrl) return false;
+    try {
+      const body = await bridgeRequest({ method: 'GET', url: `${baseUrl}/health` });
+      const text = String(body || '').trim();
+      if (!text) return true;
+      try {
+        const parsed = JSON.parse(text);
+        return parsed?.ok !== false;
+      } catch {
+        return true;
+      }
+    } catch (error) {
+      log('Bridge detection failed', error);
+      return false;
+    }
   }
 
   function queueBridgeLeaseOperation(operation, reason = '') {
@@ -1794,6 +1857,10 @@
     return { street: normalizedAddress, businessName: normalizedFirm };
   }
 
+  function normalizeInlineWhitespace(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+  }
+
   function stripUnitFromAddress(addressLine1, extractedUnit) {
     let address = normalizeInlineWhitespace(addressLine1 || '');
     if (!address || !extractedUnit) return address;
@@ -1906,6 +1973,7 @@
 
   function applyOrderData(orderData) {
     clearHighlights();
+    const addressCommitToken = ++state.addressVerificationCommitToken;
     fillField('referenceNumber', orderData.referenceNumber, 'Mapped from scanned order/ticket', { source: 'service', maxLength: 50 });
     fillField('totalItemValue', orderData.totalItemValue, 'Mapped from AMT on ticket', { source: orderData.totalItemValue ? 'service' : 'manual', maxLength: 20 });
     fillField('itemDescription', orderData.itemDescription, 'Fixed business rule', { source: 'service', maxLength: 500 });
@@ -2512,10 +2580,12 @@
   function showScanModal() {
     closeActiveScanModal();
     const modalNonce = ++state.scanModalNonce;
-    const backdrop = createElement(`<div class="mhq-modal-backdrop" role="dialog" aria-modal="true"><div class="mhq-modal"><div class="mhq-modal__header"><strong>${escapeHtml(CONFIG.labels.modalTitle)}</strong></div><div class="mhq-modal__body"><p style="margin-top:0">Enter the Order ID manually or scan the ticket into the input below.</p><div class="mhq-modal__input-wrap"><input class="mhq-modal__input" type="text" placeholder="${escapeHtml(CONFIG.labels.modalPlaceholder)}" autofocus /><span class="mhq-modal__input-status" aria-hidden="true"></span></div><div id="mhq-modal-error" style="display:none;color:#b00020;margin-top:10px"></div></div><div class="mhq-modal__footer"><button type="button" class="mhq-btn" data-action="cancel">Cancel</button><button type="button" class="mhq-btn mhq-btn--primary" data-action="lookup">Lookup</button></div></div></div>`);
+    const backdrop = createElement(`<div class="mhq-modal-backdrop" role="dialog" aria-modal="true"><div class="mhq-modal"><div class="mhq-modal__header"><strong>${escapeHtml(CONFIG.labels.modalTitle)}</strong></div><div class="mhq-modal__body"><p style="margin-top:0">Enter the Order ID manually or scan the ticket into the input below.</p><div class="mhq-modal__input-wrap"><input class="mhq-modal__input" type="text" placeholder="${escapeHtml(CONFIG.labels.modalPlaceholder)}" autofocus /><span class="mhq-modal__input-status" aria-hidden="true"></span></div><div class="mhq-modal__scanner-state mhq-modal__scanner-state--connecting" hidden><span class="mhq-modal__scanner-dot" aria-hidden="true"></span><span class="mhq-modal__scanner-text">Scanner bridge: connecting...</span><span class="mhq-modal__scanner-spinner" aria-hidden="true"></span></div><div id="mhq-modal-error" style="display:none;color:#b00020;margin-top:10px"></div></div><div class="mhq-modal__footer"><button type="button" class="mhq-btn" data-action="cancel">Cancel</button><button type="button" class="mhq-btn mhq-btn--primary" data-action="lookup">Lookup</button></div></div></div>`);
     document.body.appendChild(backdrop);
     const input = backdrop.querySelector('.mhq-modal__input');
     const statusEl = backdrop.querySelector('.mhq-modal__input-status');
+    const scannerStateEl = backdrop.querySelector('.mhq-modal__scanner-state');
+    const scannerStateTextEl = backdrop.querySelector('.mhq-modal__scanner-text');
     const errorEl = backdrop.querySelector('#mhq-modal-error');
     const lookupButton = backdrop.querySelector('[data-action="lookup"]');
     let bridgeTimer = null;
@@ -2536,7 +2606,9 @@
     let bridgeLeaseTimer = null;
     let bridgeLeaseHeld = false;
     let bridgeLeaseRenewing = false;
+    let bridgeBaselinePriming = false;
     let bridgeLeaseRetryAfterMs = 0;
+    let bridgeDetected = false;
     let handleModalVisibility = null;
     let handleWindowFocus = null;
     let handleWindowBlur = null;
@@ -2573,29 +2645,33 @@
     function suspendBridgeLease(reason = 'background') {
       stopBackgroundReleaseTimer();
       markScanAcceptanceBoundary();
-      if (!CONFIG.oposBridge?.enabled) return;
+      if (!CONFIG.oposBridge?.enabled || !bridgeDetected) return;
       if (!bridgeLeaseHeld && !bridgeLeaseRenewing) return;
       bridgeLeaseHeld = false;
       bridgeLeaseRetryAfterMs = Date.now() + 500;
+      setScannerBridgeState('paused', 'Scanner paused while window is in background.');
       void bridgeReleaseScanner(bridgeLeaseOwner).catch(error => {
         log(`Bridge release during ${reason} failed`, error);
       });
     }
 
-    function scheduleBackgroundRelease(reason = 'background') {
+    function scheduleBackgroundRelease(reason = 'background', delayMs = 500) {
       modalWasBackgrounded = true;
       stopBackgroundReleaseTimer();
       backgroundReleaseTimer = setTimeout(() => {
         if (closed || !backdrop.isConnected || state.scanModalClose !== close) return;
         if (isModalForegroundActive()) return;
         suspendBridgeLease(reason);
-      }, 500);
+      }, Math.max(250, Number(delayMs || 500)));
     }
 
     async function renewBridgeLease(reason = 'heartbeat') {
-      if (!CONFIG.oposBridge?.enabled) return false;
+      if (!CONFIG.oposBridge?.enabled || !bridgeDetected) return false;
       if (closed || !backdrop.isConnected) return false;
       if (bridgeLeaseRenewing) return bridgeLeaseHeld;
+      if (!bridgeLeaseHeld && reason !== 'heartbeat') {
+        setScannerBridgeState('connecting', 'Scanner bridge: acquiring scanner...');
+      }
       bridgeLeaseRenewing = true;
       const leaseMs = Math.max(1000, Number(CONFIG.oposBridge?.leaseMs || 3500));
       try {
@@ -2604,6 +2680,7 @@
         if (!bridgeLeaseHeld) {
           bridgeLeaseRetryAfterMs = Date.now() + 250;
           if (reason === 'open') log('Bridge lease not acquired on modal open', leaseResult);
+          setScannerBridgeState('waiting', 'Scanner is busy in Mercury. Waiting to retry...');
           if (reason !== 'heartbeat') {
             setError('Scanner is currently in use in Mercury. Close Mercury ticket entry, then scan again.');
           }
@@ -2615,12 +2692,37 @@
         } catch (error) {
           log('OPOS bridge rearm failed after lease', error);
         }
+        if (reason === 'heartbeat' && !bridgeBaselinePriming) {
+          setScannerBridgeState('ready', 'Scanner ready. Scan a ticket now.');
+        }
         if (/Scanner is currently in use in Mercury/i.test(String(errorEl.textContent || ''))) {
           setError('');
         }
         return true;
+      } catch (error) {
+        setScannerBridgeState('error', 'Scanner bridge request failed. Retrying...');
+        throw error;
       } finally {
         bridgeLeaseRenewing = false;
+      }
+    }
+
+    async function primeBridgeBaseline(reason = 'open') {
+      if (!CONFIG.oposBridge?.enabled || !bridgeDetected) return;
+      if (closed || !backdrop.isConnected) return;
+      if (!bridgeLeaseHeld) return;
+      bridgeBaselinePriming = true;
+      setScannerBridgeState('connecting', 'Scanner bridge: synchronizing scan state...');
+      try {
+        // Do not advance local sequence baseline here. A real scan can arrive
+        // right after lease acquisition; forcing bridgeLastSeq from /latest
+        // can drop that first valid scan on modal reopen.
+        setScannerBridgeState('ready', 'Scanner ready. Scan a ticket now.');
+      } catch (error) {
+        setScannerBridgeState('error', 'Scanner bridge reset failed. Retrying...');
+        log(`Bridge baseline prime failed (${reason})`, error);
+      } finally {
+        bridgeBaselinePriming = false;
       }
     }
 
@@ -2654,10 +2756,12 @@
       rapidInputStartedAtMs = 0;
       lastInputAtMs = 0;
       bridgeLeaseHeld = false;
-      if (flushBridge) {
-        void bridgeFlushScanner('modal-close').finally(() => bridgeReleaseScanner(bridgeLeaseOwner));
-      } else {
-        void bridgeReleaseScanner(bridgeLeaseOwner);
+      if (bridgeDetected) {
+        if (flushBridge) {
+          void bridgeFlushScanner('modal-close').finally(() => bridgeReleaseScanner(bridgeLeaseOwner));
+        } else {
+          void bridgeReleaseScanner(bridgeLeaseOwner);
+        }
       }
       if (state.scanModalClose === close || state.scanModalNonce === modalNonce) {
         state.scanModalClose = null;
@@ -2666,6 +2770,33 @@
     };
     state.scanModalClose = close;
     const setError = msg => { errorEl.textContent = msg; errorEl.style.display = msg ? 'block' : 'none'; };
+    const scannerStateClasses = [
+      'mhq-modal__scanner-state--connecting',
+      'mhq-modal__scanner-state--ready',
+      'mhq-modal__scanner-state--waiting',
+      'mhq-modal__scanner-state--error',
+      'mhq-modal__scanner-state--paused',
+    ];
+    function setScannerBridgeVisibility(visible) {
+      if (!(scannerStateEl instanceof HTMLElement)) return;
+      scannerStateEl.hidden = !visible;
+      scannerStateEl.style.display = visible ? 'flex' : 'none';
+    }
+    function setScannerBridgeState(kind = 'connecting', text = '') {
+      if (!(scannerStateEl instanceof HTMLElement)) return;
+      if (!bridgeDetected) {
+        setScannerBridgeVisibility(false);
+        return;
+      }
+      setScannerBridgeVisibility(true);
+      scannerStateEl.classList.remove(...scannerStateClasses);
+      const stateKind = scannerStateClasses.includes(`mhq-modal__scanner-state--${kind}`) ? kind : 'connecting';
+      scannerStateEl.classList.add(`mhq-modal__scanner-state--${stateKind}`);
+      if (scannerStateTextEl instanceof HTMLElement) {
+        scannerStateTextEl.textContent = text || 'Scanner bridge: connecting...';
+      }
+    }
+    setScannerBridgeVisibility(false);
     const statusClasses = ['mhq-modal__input-status--checking', 'mhq-modal__input-status--loading', 'mhq-modal__input-status--valid', 'mhq-modal__input-status--invalid'];
     let verifyTimer = null;
     let verifySeq = 0;
@@ -2673,7 +2804,7 @@
 
     function setInputStatus(kind, text = '', title = '') {
       if (!statusEl) return;
-      if (submitBusy && kind !== 'loading' && kind !== 'invalid') return;
+      if (isSubmitting && kind !== 'loading' && kind !== 'invalid') return;
       statusEl.classList.remove(...statusClasses);
       if (!kind) {
         statusEl.textContent = '';
@@ -2838,7 +2969,7 @@
     }
 
     function scheduleVerification() {
-      if (submitBusy) return;
+      if (isSubmitting) return;
       const normalized = normalizeSixDigit(input.value);
       if (!normalized) {
         clearVerificationState();
@@ -2960,11 +3091,16 @@
     }
 
     async function pollBridgeScan() {
-      if (!CONFIG.oposBridge?.enabled || bridgeBusy || isSubmitting) return;
+      if (!CONFIG.oposBridge?.enabled || !bridgeDetected || bridgeBusy || isSubmitting) return;
+      if (bridgeBaselinePriming) {
+        return;
+      }
       if (!isModalForegroundActive()) {
+        setScannerBridgeState('paused', 'Scanner paused while browser is not active.');
         return;
       }
       if (!bridgeLeaseHeld) {
+        setScannerBridgeState('connecting', 'Scanner bridge: waiting for scanner lease...');
         if (!bridgeLeaseRenewing && Date.now() >= bridgeLeaseRetryAfterMs) {
           bridgeLeaseRetryAfterMs = Date.now() + 250;
           void renewBridgeLease('poll');
@@ -2978,21 +3114,17 @@
         if (!latest || !Number.isFinite(latest.seq) || latest.seq <= bridgeLastSeq) return;
         bridgeLastSeq = latest.seq;
         if (!latest.value) return;
-        const scanAtMs = Date.parse(String(latest.at || ''));
-        // Ignore scans captured before this modal was active in the foreground.
-        if (!Number.isFinite(scanAtMs) || scanAtMs < scanAcceptAfterMs) {
-          return;
-        }
         const normalizedScanValue = normalizeTicketToken(latest.value);
         if (!normalizedScanValue) return;
+        setScannerBridgeState('ready', 'Scanner ready. Scan a ticket now.');
         pendingInputSource = 'scan';
         input.value = normalizedScanValue;
         input.dispatchEvent(new Event('input', { bubbles: true }));
       } catch (error) {
         // Bridge is optional. Keep modal usable with manual entry.
         log('OPOS bridge poll failed', error);
+        setScannerBridgeState('error', 'Scanner bridge polling failed. Retrying...');
       } finally {
-        bridgeInputWrite = false;
         bridgeBusy = false;
       }
     }
@@ -3040,7 +3172,7 @@
     handleModalVisibility = () => {
       if (closed || !backdrop.isConnected || state.scanModalClose !== close) return;
       if (document.visibilityState !== 'visible') {
-        scheduleBackgroundRelease('visibility-hidden');
+        scheduleBackgroundRelease('visibility-hidden', 300);
         return;
       }
       stopBackgroundReleaseTimer();
@@ -3064,7 +3196,9 @@
     handleWindowBlur = () => {
       if (closed || !backdrop.isConnected || state.scanModalClose !== close) return;
       modalWasBackgrounded = true;
-      scheduleBackgroundRelease('window-blur');
+      // Browser focus can flicker briefly during modal interactions. Delay
+      // release so transient blur does not drop scans between quick repeats.
+      scheduleBackgroundRelease('window-blur', 2500);
     };
     document.addEventListener('visibilitychange', handleModalVisibility);
     window.addEventListener('focus', handleWindowFocus);
@@ -3080,18 +3214,28 @@
       (async () => {
         let leaseAcquired = false;
         try {
+          bridgeDetected = await bridgeDetectService();
+          if (!bridgeDetected) {
+            setScannerBridgeVisibility(false);
+            log('OPOS bridge not detected on this machine; scanner status indicator hidden.');
+            return;
+          }
+          setScannerBridgeVisibility(true);
+          setScannerBridgeState('connecting', 'Scanner bridge: connecting...');
           if (isModalForegroundActive()) {
             leaseAcquired = await renewBridgeLease('open');
             if (bridgeLeaseHeld) {
-              await bridgeRearmScanner();
+              await primeBridgeBaseline('open');
             }
           }
         } catch (error) {
           log('OPOS bridge startup failed', error);
         } finally {
           if (closed || !backdrop.isConnected || state.scanModalClose !== close) return;
+          if (!bridgeDetected) return;
           if (isModalForegroundActive() && !leaseAcquired) {
             setError('Scanner bridge did not connect. If scans beep but do not populate, reload the userscript and retry.');
+            setScannerBridgeState('error', 'Scanner bridge did not connect.');
           }
           const keepAliveEvery = Math.max(500, Number(CONFIG.oposBridge?.leaseKeepAliveMs || 1200));
           bridgeLeaseTimer = setInterval(() => {
@@ -3103,12 +3247,17 @@
               if (acquired && /Scanner bridge did not connect/i.test(String(errorEl.textContent || ''))) {
                 setError('');
               }
+              if (acquired) {
+                setScannerBridgeState('ready', 'Scanner ready. Scan a ticket now.');
+              }
             });
           }, keepAliveEvery);
           bridgeTimer = setInterval(pollBridgeScan, Math.max(100, Number(CONFIG.oposBridge?.pollIntervalMs || 250)));
           pollBridgeScan();
         }
       })();
+    } else {
+      setScannerBridgeVisibility(false);
     }
 
   }

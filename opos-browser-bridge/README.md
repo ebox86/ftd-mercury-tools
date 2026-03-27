@@ -1,4 +1,13 @@
-# OPOS Browser Bridge (MercuryHQ Modal)
+<style>
+td, th {
+   border: none!important;
+}
+</style>
+
+| | |
+| --- | --- |
+| <img src="./about-scanner.png" alt="OPOS Browser Bridge icon" width="100" height="100" /> | <h2>OPOS Browser Bridge</h2><p>MercuryHQ Modal</p> |
+
 
 This folder adds **true OPOS scanner input** to the MercuryHQ Tampermonkey scan modal by running a local bridge on each workstation.
 
@@ -171,3 +180,22 @@ What it does:
 4. Creates/updates a GitHub release with installer and manifest zip
 
 No extra secrets or repo variables are required for this workflow.
+
+## Service Migration (Phase 1)
+
+A .NET service prototype now exists under:
+
+- `opos-browser-bridge\service\FTD.OposBridge.Service\`
+
+It includes:
+
+1. API-compatible endpoints used by the userscript
+2. Lease/owner scan-delivery logic matching current bridge semantics
+3. OPOS scanner spike mode (`--scanner-spike`) for open/claim/read validation
+4. Mock scanner mode (`--scanner-mode=mock`) for local contract testing
+
+See:
+
+- `opos-browser-bridge\service\README.md`
+- `opos-browser-bridge\service\install-opos-bridge-service.ps1`
+- `.github\workflows\opos-bridge-service.yml`
