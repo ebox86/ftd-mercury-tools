@@ -6,14 +6,22 @@
     <RootNamespace>FTD.OposBridge.Service</RootNamespace>
     <AssemblyName>FTD.OposBridge.Service</AssemblyName>
     <PlatformTarget>x86</PlatformTarget>
+    <UseWindowsForms>true</UseWindowsForms>
     <IsPackable>true</IsPackable>
     <PackageId>FTD.OposBridge.Service</PackageId>
     <Authors>FTD</Authors>
-    <Description>OPOS scanner bridge service prototype for MercuryHQ barcode modal integration.</Description>
+    <Description>OPOS scanner bridge service for MercuryHQ barcode modal integration.</Description>
     <PackageTags>opos;barcode;scanner;bridge;mercuryhq</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\about-scanner.png" Link="about-scanner.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 </Project>

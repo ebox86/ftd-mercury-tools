@@ -5,10 +5,10 @@ param(
   [string]$Action = 'install',
 
   [Parameter()]
-  [string]$ServiceName = 'FTD.OposBridge.Prototype',
+  [string]$ServiceName = 'FTD.OposBridge.Service',
 
   [Parameter()]
-  [string]$InstallRoot = 'C:\FTDTools\OposBridgePrototype',
+  [string]$InstallRoot = 'C:\FTDTools\OposBridgeService',
 
   [Parameter()]
   [string]$ProjectPath = '',
@@ -30,6 +30,10 @@ param(
   [Parameter()]
   [ValidateRange(100, 60000)]
   [int]$ClaimTimeoutMs = 3000,
+
+  [Parameter()]
+  [ValidateSet('trace', 'debug', 'information', 'warning', 'error', 'critical', 'none')]
+  [string]$LogLevel = 'information',
 
   [Parameter()]
   [ValidateSet('auto', 'demand', 'disabled')]
@@ -78,14 +82,19 @@ function Get-ServiceWmi([string]$name) {
   return Get-CimInstance Win32_Service -Filter ("Name='{0}'" -f $name) -ErrorAction SilentlyContinue
 }
 
-function Invoke-Sc([string[]]$args) {
-  $output = & sc.exe @args 2>&1
+function Invoke-Sc {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$ScArgs
+  )
+
+  $output = & sc.exe @ScArgs 2>&1
   if ($output) {
     $output | ForEach-Object { Write-Host $_ }
   }
 
   if ($LASTEXITCODE -ne 0) {
-    throw ("sc.exe failed (exit={0}) with args: {1}" -f $LASTEXITCODE, ($args -join ' '))
+    throw ("sc.exe failed (exit={0}) with args: {1}" -f $LASTEXITCODE, ($ScArgs -join ' '))
   }
 }
 
@@ -130,7 +139,7 @@ function Resolve-ExePath([string]$pathArg, [string]$root) {
 
 function Publish-ServiceBinary([string]$projectFile, [string]$outputDir) {
   if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
-    throw "dotnet CLI is required to publish the prototype service."
+    throw "dotnet CLI is required to publish the service."
   }
 
   New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
@@ -221,12 +230,12 @@ function Apply-ServiceIdentity([string]$name, [hashtable]$identity) {
 
 function Configure-ServiceRecovery([string]$name, [int]$restartDelayMs) {
   $delay = [Math]::Max(1000, [Math]::Min(600000, $restartDelayMs))
-  Invoke-Sc @('failure', $name, 'reset= 86400', "actions= restart/$delay/restart/$delay/restart/$delay")
-  Invoke-Sc @('failureflag', $name, '1')
+  Invoke-Sc -ScArgs @('failure', $name, 'reset=', '86400', 'actions=', "restart/$delay/restart/$delay/restart/$delay")
+  Invoke-Sc -ScArgs @('failureflag', $name, '1')
 }
 
 function Start-ServiceAndVerify([string]$name, [int]$port) {
-  Invoke-Sc @('start', $name)
+  Invoke-Sc -ScArgs @('start', $name)
   if (-not (Wait-ServiceState -name $name -desiredState 'Running' -timeoutSeconds 25)) {
     throw "Service '$name' did not enter Running state."
   }
@@ -255,8 +264,18 @@ function Start-ServiceAndVerify([string]$name, [int]$port) {
 
 function Install-OrUpdateService {
   Ensure-Admin
+  $service = Get-ServiceWmi -name $ServiceName
 
   if (-not $SkipPublish.IsPresent -and [string]::IsNullOrWhiteSpace($ExePath)) {
+    if ($null -ne $service -and $service.State -eq 'Running') {
+      Write-Host "Stopping service '$ServiceName' before publish to release file locks ..."
+      Invoke-Sc -ScArgs @('stop', $ServiceName)
+      if (-not (Wait-ServiceState -name $ServiceName -desiredState 'Stopped' -timeoutSeconds 30)) {
+        throw "Service '$ServiceName' failed to stop before publish."
+      }
+      $service = Get-ServiceWmi -name $ServiceName
+    }
+
     $projectFile = Resolve-ProjectPath -pathArg $ProjectPath
     Publish-ServiceBinary -projectFile $projectFile -outputDir $InstallRoot
   }
@@ -267,34 +286,40 @@ function Install-OrUpdateService {
   }
 
   $identity = Resolve-ServiceIdentity
-  $binPath = ('"{0}" --port={1} --logical-name={2} --scanner-mode={3} --claim-timeout-ms={4}' -f $resolvedExe, $Port, $LogicalName, $ScannerMode, $ClaimTimeoutMs)
+  $binPath = ('"{0}" --port={1} --logical-name={2} --scanner-mode={3} --claim-timeout-ms={4} --log-level={5}' -f $resolvedExe, $Port, $LogicalName, $ScannerMode, $ClaimTimeoutMs, $LogLevel)
   $service = Get-ServiceWmi -name $ServiceName
 
   if ($null -eq $service) {
     Write-Host "Creating service '$ServiceName' ..."
-    Invoke-Sc @(
+    Invoke-Sc -ScArgs @(
       'create',
       $ServiceName,
-      "binPath= $binPath",
-      "start= $StartMode",
-      "DisplayName= $ServiceName"
+      'binPath=',
+      $binPath,
+      'start=',
+      $StartMode,
+      'DisplayName=',
+      $ServiceName
     )
   }
   else {
     Write-Host "Updating existing service '$ServiceName' ..."
     if ($service.State -eq 'Running') {
-      Invoke-Sc @('stop', $ServiceName)
+      Invoke-Sc -ScArgs @('stop', $ServiceName)
       if (-not (Wait-ServiceState -name $ServiceName -desiredState 'Stopped' -timeoutSeconds 20)) {
         throw "Service '$ServiceName' failed to stop for update."
       }
     }
 
-    Invoke-Sc @(
+    Invoke-Sc -ScArgs @(
       'config',
       $ServiceName,
-      "binPath= $binPath",
-      "start= $StartMode",
-      "DisplayName= $ServiceName"
+      'binPath=',
+      $binPath,
+      'start=',
+      $StartMode,
+      'DisplayName=',
+      $ServiceName
     )
   }
 
@@ -311,13 +336,13 @@ function Uninstall-Service {
   }
   else {
     if ($service.State -eq 'Running') {
-      Invoke-Sc @('stop', $ServiceName)
+      Invoke-Sc -ScArgs @('stop', $ServiceName)
       if (-not (Wait-ServiceState -name $ServiceName -desiredState 'Stopped' -timeoutSeconds 20)) {
         throw "Service '$ServiceName' failed to stop before delete."
       }
     }
 
-    Invoke-Sc @('delete', $ServiceName)
+    Invoke-Sc -ScArgs @('delete', $ServiceName)
     Start-Sleep -Milliseconds 500
   }
 
@@ -357,17 +382,17 @@ switch ($Action) {
   }
   'start' {
     Ensure-Admin
-    Invoke-Sc @('start', $ServiceName)
+    Invoke-Sc -ScArgs @('start', $ServiceName)
   }
   'stop' {
     Ensure-Admin
-    Invoke-Sc @('stop', $ServiceName)
+    Invoke-Sc -ScArgs @('stop', $ServiceName)
   }
   'restart' {
     Ensure-Admin
-    Invoke-Sc @('stop', $ServiceName)
+    Invoke-Sc -ScArgs @('stop', $ServiceName)
     Wait-ServiceState -name $ServiceName -desiredState 'Stopped' -timeoutSeconds 20 | Out-Null
-    Invoke-Sc @('start', $ServiceName)
+    Invoke-Sc -ScArgs @('start', $ServiceName)
   }
   'status' {
     Show-Status
@@ -376,4 +401,3 @@ switch ($Action) {
     throw "Unsupported action: $Action"
   }
 }
-

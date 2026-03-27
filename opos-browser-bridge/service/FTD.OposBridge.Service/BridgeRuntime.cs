@@ -24,6 +24,7 @@ public sealed class BridgeRuntime : BackgroundService
   private bool? _scannerDeviceEnabled;
   private bool? _scannerAutoDisable;
   private string _scannerLeaseOwner = "";
+  private string _scannerLeaseToken = "";
   private DateTimeOffset _scannerLeaseUntil = DateTimeOffset.MinValue;
   private string _lastError = "";
   private string _lastDriverErrorSeen = "";
@@ -45,6 +46,18 @@ public sealed class BridgeRuntime : BackgroundService
   private string _lastEmittedValue = "";
   private int _lastEmittedDataCount = -1;
   private DateTimeOffset _lastEmittedAt = DateTimeOffset.MinValue;
+
+  private long _agentCommandId;
+  private bool _agentDesiredClaimed;
+  private string _agentDesiredOwner = "";
+  private string _agentDesiredLeaseToken = "";
+  private string _agentCommandReason = "startup";
+  private long _agentAckCommandId;
+  private bool _agentAckClaimed;
+  private string _agentAckAgentId = "";
+  private string _agentAckMessage = "";
+  private DateTimeOffset _agentAckAt = DateTimeOffset.MinValue;
+  private DateTimeOffset _agentLastSeenAt = DateTimeOffset.MinValue;
 
   public BridgeRuntime(
     BridgeOptions options,
@@ -79,6 +92,7 @@ public sealed class BridgeRuntime : BackgroundService
         scannerStatus = _scannerStatus,
         scannerClaimed = _scannerClaimed,
         scannerLeaseOwner = _scannerLeaseOwner,
+        scannerLeaseToken = _scannerLeaseToken,
         scannerLeaseRemainingMs = GetLeaseRemainingMsInternal(),
         port = _options.Port,
       };
@@ -111,6 +125,7 @@ public sealed class BridgeRuntime : BackgroundService
         scannerDeviceEnabled = _scannerDeviceEnabled,
         scannerAutoDisable = _scannerAutoDisable,
         scannerLeaseOwner = _scannerLeaseOwner,
+        scannerLeaseToken = _scannerLeaseToken,
         scannerLeaseRemainingMs = GetLeaseRemainingMsInternal(),
         scannerLeaseExpiresAt = GetLeaseRemainingMsInternal() > 0 ? _scannerLeaseUntil.ToString("o") : "",
         scannerLeaseDefaultMs = _options.DefaultLeaseMs,
@@ -125,6 +140,19 @@ public sealed class BridgeRuntime : BackgroundService
         replayGuardRemainingMs = guardRemaining,
         replayGuardWindowMs = _replayGuardWindowMs,
         duplicateEmitWindowMs = _duplicateEmitWindowMs,
+        agentControl = new
+        {
+          commandId = _agentCommandId,
+          desiredClaimed = _agentDesiredClaimed,
+          desiredOwner = _agentDesiredOwner,
+          ackCommandId = _agentAckCommandId,
+          ackClaimed = _agentAckClaimed,
+          ackAgentId = _agentAckAgentId,
+          ackMessage = _agentAckMessage,
+          ackAt = _agentAckAt == DateTimeOffset.MinValue ? "" : _agentAckAt.ToString("o"),
+          lastSeenAt = _agentLastSeenAt == DateTimeOffset.MinValue ? "" : _agentLastSeenAt.ToString("o"),
+          reason = _agentCommandReason,
+        },
         startedAt = _startedAt.ToString("o"),
         now = DateTimeOffset.Now.ToString("o"),
       };
@@ -161,6 +189,13 @@ public sealed class BridgeRuntime : BackgroundService
       {
         name = _instanceLock.Name,
       },
+      agentControl = new
+      {
+        commandId = _agentCommandId,
+        desiredClaimed = _agentDesiredClaimed,
+        desiredOwner = _agentDesiredOwner,
+        reason = _agentCommandReason,
+      },
     };
   }
 
@@ -176,6 +211,25 @@ public sealed class BridgeRuntime : BackgroundService
         scannerStatus = _scannerStatus,
         lastError = _lastError,
       };
+    }
+    finally
+    {
+      _gate.Release();
+    }
+  }
+
+  public async Task<BridgeStatusSnapshot> GetStatusSnapshotAsync(CancellationToken cancellationToken)
+  {
+    await _gate.WaitAsync(cancellationToken);
+    try
+    {
+      return new BridgeStatusSnapshot(
+        ScannerStatus: _scannerStatus,
+        ScannerClaimed: _scannerClaimed,
+        LeaseOwner: _scannerLeaseOwner,
+        LeaseRemainingMs: GetLeaseRemainingMsInternal(),
+        LastError: _lastError,
+        LastSeq: _lastSeq);
     }
     finally
     {
@@ -203,7 +257,8 @@ public sealed class BridgeRuntime : BackgroundService
 
       if (!_lastDeliveredSeqByOwner.TryGetValue(owner, out var ownerDeliveredSeq))
       {
-        ownerDeliveredSeq = _lastDeliveredSeq;
+        // New owner sessions should never replay previously captured scans.
+        ownerDeliveredSeq = _lastSeq;
         _lastDeliveredSeqByOwner[owner] = ownerDeliveredSeq;
       }
 
@@ -303,7 +358,14 @@ public sealed class BridgeRuntime : BackgroundService
       }
 
       _lastDeliveredSeq = _lastSeq;
-      _lastDeliveredSeqByOwner.Clear();
+      if (!string.IsNullOrWhiteSpace(_scannerLeaseOwner))
+      {
+        _lastDeliveredSeqByOwner[_scannerLeaseOwner] = _lastSeq;
+      }
+      else
+      {
+        _lastDeliveredSeqByOwner.Clear();
+      }
       ClearLastScanPayloadInternal();
 
       return new
@@ -327,18 +389,58 @@ public sealed class BridgeRuntime : BackgroundService
       var owner = NormalizeLeaseOwner(ownerRaw);
       var request = requestedMs > 0 ? requestedMs : _options.DefaultLeaseMs;
       var leaseMs = Math.Clamp(request, 500, _options.MaxLeaseMs);
+      var now = DateTimeOffset.UtcNow;
+      var hadActiveLease = GetLeaseRemainingMsInternal() > 0;
+      var ownerChanged = !string.Equals(owner, _scannerLeaseOwner, StringComparison.OrdinalIgnoreCase);
+      var previousLeaseToken = _scannerLeaseToken;
 
       var claimed = await EnsureClaimInternalAsync($"lease:{owner}", cancellationToken);
       if (claimed)
       {
+        var previousOwner = _scannerLeaseOwner;
+        if (!hadActiveLease || ownerChanged || string.IsNullOrWhiteSpace(_scannerLeaseToken))
+        {
+          _scannerLeaseToken = Guid.NewGuid().ToString("N");
+        }
+        var leaseTokenChanged = !string.Equals(_scannerLeaseToken, previousLeaseToken, StringComparison.Ordinal);
+
         _scannerLeaseOwner = owner;
-        _scannerLeaseUntil = DateTimeOffset.UtcNow.AddMilliseconds(leaseMs);
+        _scannerLeaseUntil = now.AddMilliseconds(leaseMs);
+        if (ownerChanged)
+        {
+          if (!string.IsNullOrWhiteSpace(previousOwner))
+          {
+            _lastDeliveredSeqByOwner.Remove(previousOwner);
+          }
+
+          _lastDeliveredSeqByOwner[owner] = _lastSeq;
+          _lastDeliveredSeq = _lastSeq;
+        }
+
+        // Keep heartbeats cheap: do not churn command ids on same-owner renewals.
+        // Relay command updates are only needed when ownership/claim state changes.
+        var shouldUpdateAgentCommand = !hadActiveLease
+          || ownerChanged
+          || leaseTokenChanged
+          || !_agentDesiredClaimed;
+        if (shouldUpdateAgentCommand)
+        {
+          UpdateAgentCommandInternal(true, $"lease:{owner}");
+        }
+
         _observability.StructuredInfo("lease_acquired", new Dictionary<string, object?>
         {
           ["owner"] = owner,
           ["leaseMs"] = leaseMs,
+          ["leaseToken"] = AbbreviateToken(_scannerLeaseToken),
+          ["commandId"] = _agentCommandId,
           ["scannerStatus"] = _scannerStatus,
         }, 2200);
+      }
+      else
+      {
+        ClearLeaseTrackingInternal();
+        UpdateAgentCommandInternal(false, $"lease-claim-failed:{owner}");
       }
 
       return new
@@ -348,8 +450,10 @@ public sealed class BridgeRuntime : BackgroundService
         scannerClaimed = _scannerClaimed,
         scannerStatus = _scannerStatus,
         scannerLeaseOwner = _scannerLeaseOwner,
+        scannerLeaseToken = _scannerLeaseToken,
         scannerLeaseRemainingMs = GetLeaseRemainingMsInternal(),
         scannerLeaseExpiresAt = GetLeaseRemainingMsInternal() > 0 ? _scannerLeaseUntil.ToString("o") : "",
+        agentCommandId = _agentCommandId,
         lastError = _lastError,
         lastSeq = _lastSeq,
       };
@@ -378,12 +482,20 @@ public sealed class BridgeRuntime : BackgroundService
         _lastDeliveredSeqByOwner.Remove(owner);
       }
 
+      // Prevent stale scan replay on next modal open after explicit release.
+      if (released || force || ownerMatches)
+      {
+        _lastDeliveredSeq = _lastSeq;
+        ClearLastScanPayloadInternal();
+      }
+
       _observability.StructuredInfo("lease_released", new Dictionary<string, object?>
       {
         ["owner"] = owner,
         ["force"] = force,
         ["released"] = released,
         ["ownerAccepted"] = force || ownerMatches,
+        ["commandId"] = _agentCommandId,
       }, 2201);
 
       return new
@@ -394,7 +506,9 @@ public sealed class BridgeRuntime : BackgroundService
         scannerClaimed = _scannerClaimed,
         scannerStatus = _scannerStatus,
         scannerLeaseOwner = _scannerLeaseOwner,
+        scannerLeaseToken = _scannerLeaseToken,
         scannerLeaseRemainingMs = GetLeaseRemainingMsInternal(),
+        agentCommandId = _agentCommandId,
         lastError = _lastError,
         lastSeq = _lastSeq,
       };
@@ -437,11 +551,90 @@ public sealed class BridgeRuntime : BackgroundService
     }
   }
 
-  public async Task<object> InjectDebugScanAsync(string value, CancellationToken cancellationToken)
+  public async Task<object> InjectDebugScanAsync(
+    string value,
+    string sourceRaw,
+    string ownerRaw,
+    string leaseTokenRaw,
+    long commandId,
+    string correlationIdRaw,
+    CancellationToken cancellationToken)
   {
     await _gate.WaitAsync(cancellationToken);
     try
     {
+      var source = string.IsNullOrWhiteSpace(sourceRaw) ? "debug" : sourceRaw.Trim().ToLowerInvariant();
+      var owner = NormalizeLeaseOwner(ownerRaw);
+      var leaseToken = (leaseTokenRaw ?? "").Trim();
+      var correlationId = NormalizeCorrelationId(correlationIdRaw);
+      var leaseRemaining = GetLeaseRemainingMsInternal();
+      var hasActiveLease = leaseRemaining > 0 && !string.IsNullOrWhiteSpace(_scannerLeaseOwner) && _scannerClaimed;
+      if (!hasActiveLease)
+      {
+        return new
+        {
+          ok = false,
+          injected = false,
+          error = "No active scanner lease; injection ignored.",
+          scannerLeaseOwner = _scannerLeaseOwner,
+          scannerLeaseRemainingMs = leaseRemaining,
+          scannerClaimed = _scannerClaimed,
+        };
+      }
+
+      if (string.Equals(source, "agent-relay", StringComparison.OrdinalIgnoreCase))
+      {
+        if (_agentCommandId <= 0 || commandId != _agentCommandId)
+        {
+          return new
+          {
+            ok = false,
+            injected = false,
+            error = "Stale or missing command id.",
+            commandId,
+            expectedCommandId = _agentCommandId,
+          };
+        }
+
+        var ackSynchronized = _agentAckCommandId == _agentCommandId && _agentAckClaimed;
+        if (!ackSynchronized)
+        {
+          // Do not reject valid posts during the brief claim->ack propagation
+          // window. Owner/token + command checks below still gate correctness.
+          _observability.StructuredWarn("agent_scan_inject_ack_out_of_sync", new Dictionary<string, object?>
+          {
+            ["commandId"] = commandId,
+            ["expectedCommandId"] = _agentCommandId,
+            ["ackCommandId"] = _agentAckCommandId,
+            ["ackClaimed"] = _agentAckClaimed,
+            ["owner"] = owner,
+            ["activeOwner"] = _scannerLeaseOwner,
+          }, 2410);
+        }
+
+        if (!string.Equals(owner, _scannerLeaseOwner, StringComparison.OrdinalIgnoreCase))
+        {
+          return new
+          {
+            ok = false,
+            injected = false,
+            error = "Owner mismatch for active lease.",
+            owner,
+            activeOwner = _scannerLeaseOwner,
+          };
+        }
+
+        if (string.IsNullOrWhiteSpace(leaseToken) || !string.Equals(leaseToken, _scannerLeaseToken, StringComparison.Ordinal))
+        {
+          return new
+          {
+            ok = false,
+            injected = false,
+            error = "Lease token mismatch.",
+          };
+        }
+      }
+
       var normalized = NormalizeScanValue(value);
       if (string.IsNullOrWhiteSpace(normalized))
       {
@@ -454,7 +647,131 @@ public sealed class BridgeRuntime : BackgroundService
       }
 
       var injected = injector.Inject(normalized);
-      return new { ok = true, injected, value = normalized };
+      _observability.StructuredInfo("scan_injected", new Dictionary<string, object?>
+      {
+        ["source"] = source,
+        ["owner"] = _scannerLeaseOwner,
+        ["commandId"] = commandId,
+        ["correlationId"] = correlationId,
+        ["valueLength"] = normalized.Length,
+        ["injected"] = injected,
+      }, 2302);
+
+      return new
+      {
+        ok = true,
+        injected,
+        value = normalized,
+        correlationId,
+      };
+    }
+    finally
+    {
+      _gate.Release();
+    }
+  }
+
+  public async Task<object> GetAgentControlAsync(string agentIdRaw, long knownCommandId, bool claimedReported, CancellationToken cancellationToken)
+  {
+    await _gate.WaitAsync(cancellationToken);
+    try
+    {
+      var agentId = NormalizeAgentId(agentIdRaw);
+      _agentLastSeenAt = DateTimeOffset.UtcNow;
+
+      var changed = knownCommandId != _agentCommandId;
+      if (changed || claimedReported != _agentDesiredClaimed)
+      {
+        _observability.StructuredInfo("agent_control_polled", new Dictionary<string, object?>
+        {
+          ["agentId"] = agentId,
+          ["knownCommandId"] = knownCommandId,
+          ["commandId"] = _agentCommandId,
+          ["desiredClaimed"] = _agentDesiredClaimed,
+          ["claimedReported"] = claimedReported,
+          ["leaseOwner"] = _agentDesiredOwner,
+          ["leaseToken"] = AbbreviateToken(_agentDesiredLeaseToken),
+        }, 2400);
+      }
+
+      return new
+      {
+        ok = true,
+        agentId,
+        commandId = _agentCommandId,
+        changed,
+        desiredClaimed = _agentDesiredClaimed,
+        owner = _agentDesiredOwner,
+        leaseToken = _agentDesiredLeaseToken,
+        leaseRemainingMs = GetLeaseRemainingMsInternal(),
+        leaseExpiresAt = GetLeaseRemainingMsInternal() > 0 ? _scannerLeaseUntil.ToString("o") : "",
+        reason = _agentCommandReason,
+        ack = new
+        {
+          commandId = _agentAckCommandId,
+          claimed = _agentAckClaimed,
+          agentId = _agentAckAgentId,
+          at = _agentAckAt == DateTimeOffset.MinValue ? "" : _agentAckAt.ToString("o"),
+          message = _agentAckMessage,
+        },
+      };
+    }
+    finally
+    {
+      _gate.Release();
+    }
+  }
+
+  public async Task<object> AckAgentControlAsync(
+    string agentIdRaw,
+    long commandId,
+    bool claimed,
+    string messageRaw,
+    string correlationIdRaw,
+    CancellationToken cancellationToken)
+  {
+    await _gate.WaitAsync(cancellationToken);
+    try
+    {
+      var agentId = NormalizeAgentId(agentIdRaw);
+      var message = (messageRaw ?? "").Trim();
+      if (message.Length > 160)
+      {
+        message = message[..160];
+      }
+
+      var correlationId = NormalizeCorrelationId(correlationIdRaw);
+      var accepted = commandId == _agentCommandId;
+      if (accepted)
+      {
+        _agentAckCommandId = commandId;
+        _agentAckClaimed = claimed;
+        _agentAckAgentId = agentId;
+        _agentAckAt = DateTimeOffset.UtcNow;
+        _agentAckMessage = message;
+      }
+
+      _observability.StructuredInfo("agent_control_acked", new Dictionary<string, object?>
+      {
+        ["agentId"] = agentId,
+        ["commandId"] = commandId,
+        ["expectedCommandId"] = _agentCommandId,
+        ["accepted"] = accepted,
+        ["claimed"] = claimed,
+        ["correlationId"] = correlationId,
+        ["message"] = message,
+      }, accepted ? 2401 : 2402);
+
+      return new
+      {
+        ok = true,
+        accepted,
+        commandId = _agentCommandId,
+        desiredClaimed = _agentDesiredClaimed,
+        owner = _agentDesiredOwner,
+        leaseToken = _agentDesiredLeaseToken,
+        correlationId,
+      };
     }
     finally
     {
@@ -475,14 +792,14 @@ public sealed class BridgeRuntime : BackgroundService
       _lastError = "";
       _lastDriverErrorSeen = "";
       _logger.LogInformation(
-        "Prototype bridge started (version={Version}, mode={Mode}, logicalName={LogicalName}, port={Port}, pid={Pid}).",
+        "Bridge started (version={Version}, mode={Mode}, logicalName={LogicalName}, port={Port}, pid={Pid}).",
         _options.Version,
         _driver.Mode,
         _options.LogicalName,
         _options.Port,
         _processId);
       _observability.Info(
-        $"Prototype bridge started (version={_options.Version}, mode={_driver.Mode}, logicalName={_options.LogicalName}, port={_options.Port}, pid={_processId}).",
+        $"Bridge started (version={_options.Version}, mode={_driver.Mode}, logicalName={_options.LogicalName}, port={_options.Port}, pid={_processId}).",
         1100);
     }
     catch (Exception ex)
@@ -542,8 +859,8 @@ public sealed class BridgeRuntime : BackgroundService
       _ = await ReleaseClaimInternalAsync("shutdown", cancellationToken);
       await _driver.ShutdownAsync(cancellationToken);
       _scannerStatus = "stopped";
-      _logger.LogInformation("Prototype bridge stopped.");
-      _observability.Info("Prototype bridge stopped.", 1101);
+      _logger.LogInformation("Bridge stopped.");
+      _observability.Info("Bridge stopped.", 1101);
     }
     catch (Exception ex)
     {
@@ -903,6 +1220,7 @@ public sealed class BridgeRuntime : BackgroundService
       _scannerClaimed = false;
       _scannerStatus = "open";
       ClearLeaseTrackingInternal();
+      UpdateAgentCommandInternal(false, $"release-no-claim:{reason}");
       return false;
     }
 
@@ -925,6 +1243,7 @@ public sealed class BridgeRuntime : BackgroundService
     _replayGuardUntil = DateTimeOffset.MinValue;
     _lastDeliveredSeqByOwner.Clear();
     ClearLeaseTrackingInternal();
+    UpdateAgentCommandInternal(false, $"release:{reason}");
     ClearLastScanPayloadInternal();
 
     _logger.LogInformation("Scanner claim released (reason={Reason}, released={Released}).", reason, released);
@@ -945,7 +1264,41 @@ public sealed class BridgeRuntime : BackgroundService
   private void ClearLeaseTrackingInternal()
   {
     _scannerLeaseOwner = "";
+    _scannerLeaseToken = "";
     _scannerLeaseUntil = DateTimeOffset.MinValue;
+  }
+
+  private void UpdateAgentCommandInternal(bool desiredClaimed, string reason)
+  {
+    var desiredOwner = desiredClaimed ? _scannerLeaseOwner : "";
+    var desiredToken = desiredClaimed ? _scannerLeaseToken : "";
+    var changed = desiredClaimed != _agentDesiredClaimed
+      || !string.Equals(desiredOwner, _agentDesiredOwner, StringComparison.OrdinalIgnoreCase)
+      || !string.Equals(desiredToken, _agentDesiredLeaseToken, StringComparison.Ordinal);
+
+    _agentCommandReason = string.IsNullOrWhiteSpace(reason) ? "unspecified" : reason.Trim();
+    if (!changed)
+    {
+      return;
+    }
+
+    _agentCommandId++;
+    _agentDesiredClaimed = desiredClaimed;
+    _agentDesiredOwner = desiredOwner;
+    _agentDesiredLeaseToken = desiredToken;
+    if (!desiredClaimed)
+    {
+      _agentAckClaimed = false;
+    }
+
+    _observability.StructuredInfo("agent_command_updated", new Dictionary<string, object?>
+    {
+      ["commandId"] = _agentCommandId,
+      ["desiredClaimed"] = _agentDesiredClaimed,
+      ["owner"] = _agentDesiredOwner,
+      ["leaseToken"] = AbbreviateToken(_agentDesiredLeaseToken),
+      ["reason"] = _agentCommandReason,
+    }, 2403);
   }
 
   private void ClearLastScanPayloadInternal()
@@ -1003,6 +1356,69 @@ public sealed class BridgeRuntime : BackgroundService
     return sb.ToString().Trim();
   }
 
+  private static string NormalizeAgentId(string? input)
+  {
+    var raw = (input ?? "").Trim();
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+      return "agent";
+    }
+
+    var sb = new StringBuilder(raw.Length);
+    foreach (var ch in raw)
+    {
+      if (char.IsLetterOrDigit(ch) || ch is '_' or '-' or '.' or ':' or '@')
+      {
+        sb.Append(ch);
+      }
+    }
+
+    var cleaned = sb.ToString().Trim();
+    if (string.IsNullOrWhiteSpace(cleaned))
+    {
+      return "agent";
+    }
+
+    return cleaned.Length > 80 ? cleaned[..80] : cleaned;
+  }
+
+  private static string NormalizeCorrelationId(string? input)
+  {
+    var raw = (input ?? "").Trim();
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+      return Guid.NewGuid().ToString("N")[..12];
+    }
+
+    var sb = new StringBuilder(raw.Length);
+    foreach (var ch in raw)
+    {
+      if (char.IsLetterOrDigit(ch) || ch is '-' or '_')
+      {
+        sb.Append(ch);
+      }
+    }
+
+    var cleaned = sb.ToString().Trim();
+    if (string.IsNullOrWhiteSpace(cleaned))
+    {
+      return Guid.NewGuid().ToString("N")[..12];
+    }
+
+    return cleaned.Length > 40 ? cleaned[..40] : cleaned;
+  }
+
+  private static string AbbreviateToken(string? token)
+  {
+    if (string.IsNullOrWhiteSpace(token))
+    {
+      return "";
+    }
+
+    var trimmed = token.Trim();
+    return trimmed.Length <= 8 ? trimmed : trimmed[..8];
+  }
+
   private static string ResolveServiceAccount()
   {
     if (!OperatingSystem.IsWindows())
@@ -1025,6 +1441,14 @@ public sealed class BridgeRuntime : BackgroundService
 
     return Environment.UserName;
   }
+
+  public sealed record BridgeStatusSnapshot(
+    string ScannerStatus,
+    bool ScannerClaimed,
+    string LeaseOwner,
+    int LeaseRemainingMs,
+    string LastError,
+    long LastSeq);
 
   public sealed record ScanPayload(
     long Seq,

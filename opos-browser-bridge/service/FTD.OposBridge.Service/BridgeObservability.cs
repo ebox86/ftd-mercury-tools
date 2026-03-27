@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Principal;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace FTD.OposBridge.Service;
 
@@ -132,6 +133,11 @@ public sealed class BridgeObservability
       return;
     }
 
+    if (!ShouldWrite(level))
+    {
+      return;
+    }
+
     var stamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
     var line = $"[{stamp}] [{level}] {message}";
 
@@ -193,6 +199,52 @@ public sealed class BridgeObservability
 
     var json = JsonSerializer.Serialize(payload);
     Write(level, json, eventId);
+  }
+
+  private bool ShouldWrite(string level)
+  {
+    var normalized = (level ?? "").Trim();
+    if (string.IsNullOrWhiteSpace(normalized))
+    {
+      return true;
+    }
+
+    var mapped = ParseLogLevel(normalized);
+    if (!mapped.HasValue)
+    {
+      return true;
+    }
+
+    return mapped.Value >= _options.MinimumLogLevel;
+  }
+
+  private static LogLevel? ParseLogLevel(string level)
+  {
+    switch (level.ToUpperInvariant())
+    {
+      case "TRACE":
+        return LogLevel.Trace;
+      case "DEBUG":
+        return LogLevel.Debug;
+      case "INFO":
+      case "INFORMATION":
+        return LogLevel.Information;
+      case "WARN":
+      case "WARNING":
+        return LogLevel.Warning;
+      case "ERROR":
+        return LogLevel.Error;
+      case "CRITICAL":
+      case "FATAL":
+        return LogLevel.Critical;
+      default:
+        if (Enum.TryParse<LogLevel>(level, true, out var parsed))
+        {
+          return parsed;
+        }
+
+        return null;
+    }
   }
 
   private void RotateLogIfNeededUnsafe()

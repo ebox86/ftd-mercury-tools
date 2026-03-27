@@ -1,4 +1,4 @@
-# OPOS Bridge Service Prototype (Phase 1)
+# OPOS Bridge Service (Phase 1)
 
 This folder contains **Phase 1** of the migration from PowerShell bridge scripts to a traditional `.exe` implementation.
 
@@ -26,17 +26,21 @@ Scope in this prototype:
 - `GET /scanner/lease?owner=...&ms=...`
 - `GET /scanner/release?owner=...&force=1`
 - `GET /scanner/rearm`
+- `GET /agent/control?agentId=...&knownCommandId=...&claimed=...`
+- `GET /agent/ack?agentId=...&commandId=...&claimed=...`
 
 Prototype-only helper:
 
 - `GET /debug/inject?value=OR369999/1` (only meaningful in `mock` mode)
+
+In split-host mode, agent relay uses strict lease-bound injection (owner + lease token + command id) so stale/off-context scans are rejected.
 
 ## Run (development)
 
 Recommended (no machine runtime dependency):
 
 ```powershell
-cd .\opos-browser-bridge\service-prototype\FTD.OposBridge.Service
+cd .\opos-browser-bridge\service\FTD.OposBridge.Service
 dotnet publish -c Release -r win-x86 --self-contained true -o ..\artifacts\win-x86-self-contained
 ..\artifacts\win-x86-self-contained\FTD.OposBridge.Service.exe --scanner-mode=mock --port=17331
 ```
@@ -44,7 +48,7 @@ dotnet publish -c Release -r win-x86 --self-contained true -o ..\artifacts\win-x
 `dotnet run` is also supported, but requires x86 .NET runtime installed on the workstation:
 
 ```powershell
-cd .\opos-browser-bridge\service-prototype\FTD.OposBridge.Service
+cd .\opos-browser-bridge\service\FTD.OposBridge.Service
 dotnet run -- --scanner-mode=mock --port=17331
 ```
 
@@ -61,7 +65,7 @@ Invoke-RestMethod "http://127.0.0.1:17331/scan/next?owner=dev-modal"
 Use this mode to validate claim/read behavior without running full HTTP host loop:
 
 ```powershell
-cd .\opos-browser-bridge\service-prototype\FTD.OposBridge.Service
+cd .\opos-browser-bridge\service\FTD.OposBridge.Service
 dotnet run -- --scanner-spike --scanner-mode=opos --logical-name=ZEBRA_SCANNER
 ```
 
@@ -69,6 +73,7 @@ Optional args:
 
 - `--interop-dll-path=C:\Wings\Interop.OposScanner_1_9_Lib.dll`
 - `--claim-timeout-ms=3000`
+- `--log-level=information` (`trace|debug|information|warning|error|critical|none`)
 - `--spike-timeout-seconds=20`
 - `--log-directory=C:\ProgramData\FTD\OposBridge\Logs`
 - `--disable-event-log`
@@ -80,9 +85,9 @@ Windows Service hosting is enabled in this prototype (`UseWindowsService`); the 
 Direct `.exe` service registration (Admin PowerShell):
 
 ```powershell
-cd .\opos-browser-bridge\service-prototype\FTD.OposBridge.Service
+cd .\opos-browser-bridge\service\FTD.OposBridge.Service
 dotnet publish -c Release -r win-x86 --self-contained true -o ..\artifacts\win-x86-self-contained
-..\artifacts\win-x86-self-contained\FTD.OposBridge.Service.exe --service-install --service-name=FTD.OposBridge.Prototype --port=17331 --logical-name=ZEBRA_SCANNER --scanner-mode=opos
+..\artifacts\win-x86-self-contained\FTD.OposBridge.Service.exe --service-install --service-name=FTD.OposBridge.Service --port=17331 --logical-name=ZEBRA_SCANNER --scanner-mode=opos
 ```
 
 Optional service install args:
@@ -94,30 +99,73 @@ Optional service install args:
 Direct service control:
 
 ```powershell
-..\artifacts\win-x86-self-contained\FTD.OposBridge.Service.exe --service-status --service-name=FTD.OposBridge.Prototype --port=17331
-..\artifacts\win-x86-self-contained\FTD.OposBridge.Service.exe --service-restart --service-name=FTD.OposBridge.Prototype
-..\artifacts\win-x86-self-contained\FTD.OposBridge.Service.exe --service-uninstall --service-name=FTD.OposBridge.Prototype
+..\artifacts\win-x86-self-contained\FTD.OposBridge.Service.exe --service-status --service-name=FTD.OposBridge.Service --port=17331
+..\artifacts\win-x86-self-contained\FTD.OposBridge.Service.exe --service-restart --service-name=FTD.OposBridge.Service
+..\artifacts\win-x86-self-contained\FTD.OposBridge.Service.exe --service-uninstall --service-name=FTD.OposBridge.Service
 ```
 
 Optional convenience wrapper script:
 
 ```powershell
-cd .\opos-browser-bridge\service-prototype
-.\install-opos-bridge-prototype-service.ps1 -Action install -LogicalName ZEBRA_SCANNER -Port 17331
+cd .\opos-browser-bridge\service
+.\install-opos-bridge-service.ps1 -Action install -LogicalName ZEBRA_SCANNER -Port 17331 -LogLevel warning
+```
+
+One-shot migration from script bridge to EXE service:
+
+```powershell
+cd .\opos-browser-bridge\service
+.\migrate-script-bridge-to-service.ps1 -LogicalName ZEBRA_SCANNER -Port 17331 -LogLevel warning
+```
+
+If OPOS vendor COM is unstable in Windows Service/session-0 context on a workstation, enable automatic fallback to an EXE interactive scheduled task host:
+
+```powershell
+cd .\opos-browser-bridge\service
+.\migrate-script-bridge-to-service.ps1 -LogicalName ZEBRA_SCANNER -Port 17331 -EnableTaskFallback -LogLevel warning
+```
+
+Recommended split-host architecture (future-product path):
+
+1. Windows Service runs API coordinator in `mock` mode (stable in session-0).
+2. User-session EXE runs OPOS `--agent-relay` mode and relays scans into the API.
+
+One-shot migration for split-host:
+
+```powershell
+cd .\opos-browser-bridge\service
+.\migrate-script-bridge-to-service.ps1 -LogicalName ZEBRA_SCANNER -Port 17331 -UseAgentRelayHost -LogLevel warning
+```
+
+What migration does:
+
+1. stops legacy scheduled task (`FTD OPOS Scanner Bridge`)
+2. removes legacy scheduled task (unless `-KeepLegacyTask`)
+3. stops any running `opos-scanner-bridge.ps1` process
+4. installs/starts EXE service via `install-opos-bridge-service.ps1`
+5. optional: if service mode fails and `-EnableTaskFallback` is set, installs/starts EXE scheduled task host via `install-opos-bridge-task.ps1`
+6. optional: if `-UseAgentRelayHost` is set, service installs in `mock` mode and an EXE user-session `agent-relay` task is installed for OPOS ownership
+
+## Agent Relay Mode
+
+Run manually for validation:
+
+```powershell
+C:\FTDTools\OposBridgeService\FTD.OposBridge.Service.exe --agent-relay --logical-name=ZEBRA_SCANNER --bridge-base-url=http://127.0.0.1:17331 --scanner-mode=opos
 ```
 
 The wrapper script will:
 
-1. publish win-x86 self-contained binaries to `C:\FTDTools\OposBridgePrototype` (unless `-SkipPublish`)
-2. create or update service `FTD.OposBridge.Prototype` (equivalent to `--service-install`)
+1. publish win-x86 self-contained binaries to `C:\FTDTools\OposBridgeService` (unless `-SkipPublish`)
+2. create or update service `FTD.OposBridge.Service` (equivalent to `--service-install`)
 3. set service identity and recovery policy
 4. start service and verify `http://127.0.0.1:<port>/health`
 
 Secure account selection in wrapper script:
 
 ```powershell
-cd .\opos-browser-bridge\service-prototype
-.\install-opos-bridge-prototype-service.ps1 `
+cd .\opos-browser-bridge\service
+.\install-opos-bridge-service.ps1 `
   -Action install `
   -ServiceAccount current-user `
   -PromptForCredential `
@@ -128,8 +176,8 @@ cd .\opos-browser-bridge\service-prototype
 Manual `sc.exe` example (if needed):
 
 ```powershell
-$svcName = "FTD.OposBridge.Prototype"
-$exe = "C:\FTDTools\OposBridgePrototype\FTD.OposBridge.Service.exe"
+$svcName = "FTD.OposBridge.Service"
+$exe = "C:\FTDTools\OposBridgeService\FTD.OposBridge.Service.exe"
 sc.exe create $svcName binPath= "\"$exe\" --port=17331 --logical-name=ZEBRA_SCANNER" start= auto
 sc.exe start $svcName
 ```
@@ -137,23 +185,23 @@ sc.exe start $svcName
 Update/cleanup:
 
 ```powershell
-cd .\opos-browser-bridge\service-prototype
-.\install-opos-bridge-prototype-service.ps1 -Action status -Port 17331
-.\install-opos-bridge-prototype-service.ps1 -Action uninstall -RemoveInstallRoot
+cd .\opos-browser-bridge\service
+.\install-opos-bridge-service.ps1 -Action status -Port 17331
+.\install-opos-bridge-service.ps1 -Action uninstall -RemoveInstallRoot
 ```
 
-## GitHub Actions (prototype CI)
+## GitHub Actions (service CI)
 
 Workflow:
 
-- `.github/workflows/opos-bridge-service-prototype.yml`
+- `.github/workflows/opos-bridge-service.yml`
 
-It runs on changes to `opos-browser-bridge/service-prototype/**` and does:
+It runs on changes to `opos-browser-bridge/service/**` and does:
 
 1. restore + build (`Release`)
 2. publish `win-x86` self-contained artifact
 3. run mock API smoke test (`lease -> inject -> next -> clear -> release`)
-4. upload artifact `ftd-opos-bridge-service-prototype-win-x86-self-contained`
+4. upload artifact `ftd-opos-bridge-service-win-x86-self-contained`
 5. pack NuGet package (`FTD.OposBridge.Service`) with CI version
 6. publish package to GitHub Packages NuGet feed (`https://nuget.pkg.github.com/<owner>/index.json`) on non-PR events
 
@@ -162,7 +210,7 @@ It runs on changes to `opos-browser-bridge/service-prototype/**` and does:
 Manual hardware acceptance runner:
 
 ```powershell
-cd .\opos-browser-bridge\service-prototype
+cd .\opos-browser-bridge\service
 .\run-live-hardware-regression.ps1 -BaseUrl "http://127.0.0.1:17331" -Owner "regression-modal" -ScanCount 10
 ```
 

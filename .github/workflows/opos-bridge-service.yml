@@ -1,4 +1,4 @@
-name: OPOS Bridge Service Prototype CI
+name: OPOS Bridge Service CI
 
 on:
   workflow_dispatch:
@@ -6,12 +6,12 @@ on:
     branches:
       - main
     paths:
-      - "opos-browser-bridge/service-prototype/**"
-      - ".github/workflows/opos-bridge-service-prototype.yml"
+      - "opos-browser-bridge/service/**"
+      - ".github/workflows/opos-bridge-service.yml"
   pull_request:
     paths:
-      - "opos-browser-bridge/service-prototype/**"
-      - ".github/workflows/opos-bridge-service-prototype.yml"
+      - "opos-browser-bridge/service/**"
+      - ".github/workflows/opos-bridge-service.yml"
 
 permissions:
   contents: read
@@ -25,9 +25,9 @@ jobs:
         shell: pwsh
 
     env:
-      PROJECT: opos-browser-bridge/service-prototype/FTD.OposBridge.Service/FTD.OposBridge.Service.csproj
-      PUBLISH_DIR: artifacts/prototype/win-x86-self-contained
-      NUGET_DIR: artifacts/prototype/nuget
+      PROJECT: opos-browser-bridge/service/FTD.OposBridge.Service/FTD.OposBridge.Service.csproj
+      PUBLISH_DIR: artifacts/service/win-x86-self-contained
+      NUGET_DIR: artifacts/service/nuget
       SMOKE_PORT: 17332
 
     steps:
@@ -53,8 +53,8 @@ jobs:
           $ErrorActionPreference = "Stop"
           $base = "http://127.0.0.1:$env:SMOKE_PORT"
           $exe = Join-Path $PWD "$env:PUBLISH_DIR\FTD.OposBridge.Service.exe"
-          $outLog = Join-Path $env:RUNNER_TEMP "opos-service-proto-smoke-stdout.log"
-          $errLog = Join-Path $env:RUNNER_TEMP "opos-service-proto-smoke-stderr.log"
+          $outLog = Join-Path $env:RUNNER_TEMP "opos-service-smoke-stdout.log"
+          $errLog = Join-Path $env:RUNNER_TEMP "opos-service-smoke-stderr.log"
           Remove-Item $outLog,$errLog -ErrorAction SilentlyContinue
 
           if (-not (Test-Path $exe)) {
@@ -116,10 +116,10 @@ jobs:
             }
           }
 
-      - name: Upload prototype artifact
+      - name: Upload service artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ftd-opos-bridge-service-prototype-win-x86-self-contained
+          name: ftd-opos-bridge-service-win-x86-self-contained
           path: ${{ env.PUBLISH_DIR }}
 
       - name: Pack NuGet package
@@ -145,5 +145,5 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: ftd-opos-bridge-service-prototype-nuget
+          name: ftd-opos-bridge-service-nuget
           path: ${{ env.NUGET_DIR }}
