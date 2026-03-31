@@ -1,114 +1,50 @@
-﻿# Pi Kiosk Dashboard Starter (Workflow API Focus)
+# Pi Kiosk Dashboard Starter (Live Mercury)
 
-This folder is a workflow-focused starter pack for building a Raspberry Pi kiosk dashboard that tracks Mercury jobs from incoming to delivered/exception.
+This folder contains a live Mercury dashboard setup for kiosk operations (design + delivery tracking).
 
-## Workflow API Scope (MVP)
+![Mercury Kiosk Dashboard Screenshot](../public/dashboard.png)
 
-1. `Dashboard.GetDashboardEventsNow`
-2. `Dashboard.GetUndeliveredOrders`
-3. `OrderEntry.GetTicketStatus(ticketID)`
-4. `Delivery.LoadOrderDetails(ticketID)`
-5. `OrderLifeCycle.OLCGetByTicket(TicketID)`
+## Key Components
 
-## Nice-To-Have APIs (Scaffolded)
+- `kiosk-app/` React dashboard UI
+- `workflow-bridge/server.mjs` live SOAP-to-JSON bridge
+- `reference/` Mercury API maps and schema notes
+- `start-live-mvp.*` launchers for direct API mode or SOAP bridge mode
+- `start-mvp.*` launchers for local SOAP bridge + kiosk app
 
-1. `Dashboard.GetDashboardEnabled`
-2. `Framework.GetServerTime`
-3. `Delivery.LoadZoneSummary(date, thrudate, priorityIDList, designedOnly)`
-4. `Delivery.LoadInProgressRouteSummary(date, thrudate)`
-5. `Delivery.LoadFailedDelivery()`
-6. `Delivery.LoadOrderByZone(deliveryDate, deliveryThruDate, designedOrders, priorityIDList)`
-7. `Delivery.LoadOrderByRoutes(deliveryDate, deliveryThruDate)`
-8. `Message.GetMessageList(...)`
-9. `OrderLifeCycle.OLCGetBySERVICE_MSG_NUM(SERVICE_MSG_NUM)`
+## Start (Preferred)
 
-## Key Files
+Use one of these inputs:
 
-- `reference/job-workflow-api-focus.json`
-- `reference/job-workflow-api-cheatsheet.md`
-- `reference/frontend-types.ts`
-- `mock-data/dashboard-events-bogus.json`
-- `mock-data/ticket-status-bogus.json`
-- `mock-data/order-details-bogus.json`
-- `mock-data/order-lifecycle-bogus.json`
-- `mock-data/delivery-zone-summary-bogus.json`
-- `mock-data/delivery-in-progress-route-summary-bogus.json`
-- `mock-data/delivery-failed-delivery-bogus.json`
-- `mock-data/delivery-orders-by-zone-bogus.json`
-- `mock-data/delivery-orders-by-routes-bogus.json`
-- `mock-data/message-list-bogus.json`
-- `mock-server/server.mjs`
+1. `WORKFLOW_API_BASE_URL` if you already have a JSON `/api/workflow/*` host
+2. `MERCURY_BASE_URL` if you want the local bridge to call Mercury SOAP directly
 
-## Run The Local Mock Server
-
-```bash
-cd pi-kiosk-dashboard-starter/mock-server
-npm start
+```powershell
+$env:MERCURY_BASE_URL='http://localhost/WsMercuryWebAPI'
+.\start-live-mvp.ps1
 ```
-
-Default port: `17344`
 
 ## Workflow JSON Endpoints
 
-1. `GET /api/workflow/focus`
-2. `GET /api/workflow/dashboard/enabled`
-3. `GET /api/workflow/framework/server-time`
-4. `GET /api/workflow/events-now`
-5. `GET /api/workflow/undelivered-orders`
-6. `GET /api/workflow/ticket-status/:ticketId`
-7. `GET /api/workflow/order-details/:ticketId`
-8. `GET /api/workflow/order-lifecycle/:ticketId`
-9. `GET /api/workflow/order-lifecycle/by-service-msg/:serviceMsgNum`
-10. `GET /api/workflow/delivery/zone-summary`
-11. `GET /api/workflow/delivery/in-progress-route-summary`
-12. `GET /api/workflow/delivery/failed-delivery`
-13. `GET /api/workflow/delivery/orders-by-zone`
-14. `GET /api/workflow/delivery/orders-by-routes`
-15. `GET /api/workflow/messages/list`
-
-## Mercury-like XML Endpoints
-
-1. `POST /WsMercuryWebAPI/dashboard.asmx/GetDashboardEventsNow`
-2. `POST /WsMercuryWebAPI/dashboard.asmx/GetUndeliveredOrders`
-3. `POST /WsMercuryWebAPI/dashboard.asmx/GetDashboardEnabled`
-4. `POST /WsMercuryWebAPI/framework.asmx/GetServerTime`
-5. `POST /WsMercuryWebAPI/orderentry.asmx/GetTicketStatus`
-6. `POST /WsMercuryWebAPI/delivery.asmx/LoadOrderDetails`
-7. `POST /WsMercuryWebAPI/delivery.asmx/LoadZoneSummary`
-8. `POST /WsMercuryWebAPI/delivery.asmx/LoadInProgressRouteSummary`
-9. `POST /WsMercuryWebAPI/delivery.asmx/LoadFailedDelivery`
-10. `POST /WsMercuryWebAPI/delivery.asmx/LoadOrderByZone`
-11. `POST /WsMercuryWebAPI/delivery.asmx/LoadOrderByRoutes`
-12. `POST /WsMercuryWebAPI/message.asmx/GetMessageList`
-13. `POST /WsMercuryWebAPI/orderlifecycle.asmx/OLCGetByTicket`
-14. `POST /WsMercuryWebAPI/orderlifecycle.asmx/OLCGetBySERVICE_MSG_NUM`
-
-## Suggested Frontend Scaffold (Home)
-
-```bash
-npm create vite@latest mercury-kiosk -- --template react-ts
-cd mercury-kiosk
-npm install
-npm run dev -- --host
-```
-
-Use the mock files above to seed frontend state, cards, route boards, and timeline views.
-
-## Optional Contract Refresh
-
-If you want to re-snapshot local Mercury service metadata later:
-
-```powershell
-cd .\pi-kiosk-dashboard-starter\tools
-.\export-wsmercury-dashboard-reference.ps1
-```
-
-This regenerates:
-
-- `reference/wsmercury-service-operations.json`
-- `reference/dashboard-service-contract.json`
+- `GET /health`
+- `GET /api/workflow/focus`
+- `GET /api/workflow/dashboard/enabled`
+- `GET /api/workflow/framework/server-time`
+- `GET /api/workflow/events-now`
+- `GET /api/workflow/undelivered-orders`
+- `GET /api/workflow/tickets/search`
+- `GET /api/workflow/ticket-status/:ticketId`
+- `GET /api/workflow/order-details/:ticketId`
+- `GET /api/workflow/order-lifecycle/:ticketId`
+- `GET /api/workflow/order-lifecycle/by-service-msg/:serviceMsgNum`
+- `GET /api/workflow/delivery/zone-summary`
+- `GET /api/workflow/delivery/in-progress-route-summary`
+- `GET /api/workflow/delivery/failed-delivery`
+- `GET /api/workflow/delivery/orders-by-zone`
+- `GET /api/workflow/delivery/orders-by-routes`
+- `GET /api/workflow/messages/list`
 
 ## Notes
 
-- Mock payloads are intentionally bogus/synthetic for safe UI prototyping.
-- Live Mercury responses can include sensitive fields; avoid committing raw payload exports.
+- The bridge is live-only and intended for real Mercury data.
+- Avoid committing raw payloads that contain sensitive customer information.

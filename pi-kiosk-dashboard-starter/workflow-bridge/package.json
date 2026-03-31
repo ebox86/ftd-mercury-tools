@@ -1,0 +1,10 @@
+﻿{
+  "name": "pi-kiosk-mercury-workflow-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Live Mercury workflow bridge for kiosk dashboard endpoints.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}

@@ -1,0 +1,299 @@
+import type {
+  DashboardEventsDataset,
+  DeliveryOrdersByRoutesDataset,
+  DeliveryOrdersByZoneDataset,
+  LifecycleDataset,
+  MercuryMessageDetailDataset,
+  MercuryMessageDetailRow,
+  OrderDetailsDataset,
+  OrderDetailsRow,
+  MercuryMessageListDataset,
+  TicketStatusDataset,
+  TicketStatusRow,
+  LifecycleRow,
+  TicketSearchDataset,
+} from './types';
+
+const RAW_BASE_URL = String((import.meta.env.VITE_WORKFLOW_BASE_URL as string | undefined) || '').trim();
+const BASE_URL = RAW_BASE_URL.replace(/\/+$/, '');
+export const WORKFLOW_BASE_URL = BASE_URL || 'same-origin (/api)';
+
+function buildRequestUrl(path: string): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  if (!BASE_URL) return normalizedPath;
+
+  if (BASE_URL.endsWith('/api/workflow') && normalizedPath.startsWith('/api/workflow/')) {
+    return `${BASE_URL}${normalizedPath.slice('/api/workflow'.length)}`;
+  }
+  if (BASE_URL.endsWith('/api') && normalizedPath.startsWith('/api/')) {
+    return `${BASE_URL}${normalizedPath.slice('/api'.length)}`;
+  }
+
+  return `${BASE_URL}${normalizedPath}`;
+}
+
+function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue;
+    query.set(key, String(value));
+  }
+  const serialized = query.toString();
+  return serialized ? `?${serialized}` : '';
+}
+
+async function getJson<T>(path: string): Promise<T> {
+  const requestUrl = buildRequestUrl(path);
+  try {
+    const response = await fetch(requestUrl, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed: ${requestUrl} (${response.status})`);
+    }
+    return response.json() as Promise<T>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Cannot reach workflow API at ${requestUrl}. ${reason}`);
+  }
+}
+
+async function getJsonOrNull<T>(path: string): Promise<T | null> {
+  try {
+    return await getJson<T>(path);
+  } catch {
+    return null;
+  }
+}
+
+function firstDatasetRows(result: unknown, tableKey: string): Array<Record<string, unknown>> {
+  const rowsFromTables = (result as { tables?: Record<string, Array<Record<string, unknown>>> })?.tables?.[tableKey] || [];
+  const rowsFromFlat = (result as { rows?: Array<Record<string, unknown>> })?.rows || [];
+  return rowsFromTables.length ? rowsFromTables : rowsFromFlat;
+}
+
+function lifecycleText(row: LifecycleRow): string {
+  return `${String(row.STATUS_CD || '')} ${String(row.STATUS_CD_DESC || '')} ${String(row.STATUS_TEXT || '')}`.toUpperCase();
+}
+
+function isTerminalLifecycleRow(row: LifecycleRow): boolean {
+  const text = lifecycleText(row);
+  return text.includes('DELIVER')
+    || text.includes('EXCEPT')
+    || text.includes('FAIL')
+    || text.includes('UNDELIVER')
+    || text.includes('RETURN');
+}
+
+function pickLifecycleSignal(rows: LifecycleRow[]): LifecycleRow | null {
+  if (!rows.length) return null;
+  const sorted = [...rows].sort((a, b) => {
+    const at = Date.parse(String(a.MSG_DATETIME || ''));
+    const bt = Date.parse(String(b.MSG_DATETIME || ''));
+    return bt - at;
+  });
+  const latestTerminal = sorted.find(row => isTerminalLifecycleRow(row));
+  return latestTerminal || sorted[0];
+}
+
+export async function fetchEventsNow(): Promise<DashboardEventsDataset> {
+  return getJson<DashboardEventsDataset>('/api/workflow/events-now');
+}
+
+export async function fetchUndeliveredOrders(): Promise<DashboardEventsDataset> {
+  return getJson<DashboardEventsDataset>('/api/workflow/undelivered-orders');
+}
+
+export async function fetchOrdersByZone(params: {
+  deliveryDate: string;
+  deliveryThruDate: string;
+  designedOrders?: boolean;
+  priorityIDList?: string;
+}): Promise<DeliveryOrdersByZoneDataset> {
+  const query = buildQuery({
+    deliveryDate: params.deliveryDate,
+    deliveryThruDate: params.deliveryThruDate,
+    designedOrders: params.designedOrders ?? false,
+    priorityIDList: params.priorityIDList ?? '',
+  });
+  return getJson<DeliveryOrdersByZoneDataset>(`/api/workflow/delivery/orders-by-zone${query}`);
+}
+
+export async function fetchOrdersByRoutes(params: {
+  deliveryDate: string;
+  deliveryThruDate: string;
+}): Promise<DeliveryOrdersByRoutesDataset> {
+  const query = buildQuery({
+    deliveryDate: params.deliveryDate,
+    deliveryThruDate: params.deliveryThruDate,
+  });
+  return getJson<DeliveryOrdersByRoutesDataset>(`/api/workflow/delivery/orders-by-routes${query}`);
+}
+
+export async function fetchTicketSearch(params: {
+  fromDate?: string;
+  toDate?: string;
+  notDelivered?: boolean;
+  includeDelivered?: boolean;
+  recipientName?: string;
+  customerName?: string;
+  city?: string;
+  zone?: string;
+  orderNumber?: string;
+}): Promise<TicketSearchDataset> {
+  const query = buildQuery({
+    fromDate: params.fromDate ?? '',
+    toDate: params.toDate ?? '',
+    notDelivered: params.notDelivered ?? true,
+    includeDelivered: params.includeDelivered ?? false,
+    recipientName: params.recipientName ?? '',
+    customerName: params.customerName ?? '',
+    city: params.city ?? '',
+    zone: params.zone ?? '',
+    orderNumber: params.orderNumber ?? '',
+  });
+  return getJson<TicketSearchDataset>(`/api/workflow/tickets/search${query}`);
+}
+
+export async function fetchMessageList(params?: {
+  maxRows?: number;
+  msgDirection?: number;
+  wireService?: string | number;
+  storeID?: string | number;
+  msgType?: string | number;
+  delivDate?: string;
+  msgDate?: string;
+  memberCode?: string;
+  ticketNum?: string;
+  recipientName?: string;
+  mercuryNum?: string;
+  msgID?: string | number;
+}): Promise<MercuryMessageListDataset> {
+  const query = buildQuery({
+    wireService: params?.wireService ?? '',
+    storeID: params?.storeID ?? '',
+    msgType: params?.msgType ?? '',
+    maxRows: params?.maxRows ?? 200,
+    msgDirection: params?.msgDirection ?? 1,
+    delivDate: params?.delivDate ?? '',
+    msgDate: params?.msgDate ?? '',
+    memberCode: params?.memberCode ?? '',
+    ticketNum: params?.ticketNum ?? '',
+    recipientName: params?.recipientName ?? '',
+    mercuryNum: params?.mercuryNum ?? '',
+    msgID: params?.msgID ?? '',
+  });
+  return getJson<MercuryMessageListDataset>(`/api/workflow/messages/list${query}`);
+}
+
+export async function fetchMessageDetail(msgID: string, params?: {
+  mercID?: string;
+  isCanadian?: boolean;
+}): Promise<MercuryMessageDetailRow | null> {
+  const id = String(msgID || '').trim();
+  if (!id) return null;
+  const query = buildQuery({
+    msgID: id,
+    mercID: params?.mercID ?? '',
+    isCanadian: params?.isCanadian ?? false,
+  });
+  const paths = [
+    `/api/workflow/messages/detail/${encodeURIComponent(id)}`,
+    `/api/workflow/messages/detail${query}`,
+  ];
+
+  for (const path of paths) {
+    const result = await getJsonOrNull<MercuryMessageDetailDataset>(path);
+    if (!result) continue;
+    const rowFromFlat = (result as unknown as { rows?: MercuryMessageDetailRow[] })?.rows?.[0];
+    if (rowFromFlat) return rowFromFlat;
+    const rowFromTables = firstDatasetRows(result as unknown, 'MessageDetailResp')?.[0] as MercuryMessageDetailRow | undefined;
+    if (rowFromTables) return rowFromTables;
+  }
+  return null;
+}
+
+export async function fetchTicketStatus(ticketId: string): Promise<TicketStatusRow | null> {
+  const id = String(ticketId || '').trim();
+  if (!id) return null;
+
+  const query = buildQuery({ ticketId: id, ticketID: id, TicketID: id });
+  const paths = [
+    `/api/workflow/ticket-status/${encodeURIComponent(id)}`,
+    `/api/workflow/ticket-status${query}`,
+  ];
+
+  for (const path of paths) {
+    const result = await getJsonOrNull<TicketStatusDataset>(path);
+    if (!result) continue;
+    const rowFromTables = (result as unknown as { tables?: { GetTicketStatus?: TicketStatusRow[] } })?.tables?.GetTicketStatus?.[0];
+    if (rowFromTables) return rowFromTables;
+
+    const byTicketId = (result as unknown as { byTicketId?: Record<string, TicketStatusRow> })?.byTicketId || {};
+    const rowFromByTicket = byTicketId[id] || byTicketId[String(id).toUpperCase()] || byTicketId[String(id).toLowerCase()];
+    if (rowFromByTicket) return rowFromByTicket;
+
+    const firstByTicket = Object.values(byTicketId)[0] || null;
+    if (firstByTicket) return firstByTicket;
+  }
+  return null;
+}
+
+export async function fetchOrderDetails(ticketId: string): Promise<OrderDetailsRow | null> {
+  const id = String(ticketId || '').trim();
+  if (!id) return null;
+  const query = buildQuery({ ticketId: id, ticketID: id, TicketID: id });
+  const paths = [
+    `/api/workflow/order-details/${encodeURIComponent(id)}`,
+    `/api/workflow/order-details${query}`,
+  ];
+
+  for (const path of paths) {
+    const result = await getJsonOrNull<OrderDetailsDataset>(path);
+    if (!result) continue;
+    const rowFromTables = (result as unknown as { tables?: { LoadOrderDetails?: OrderDetailsRow[] } })?.tables?.LoadOrderDetails?.[0];
+    if (rowFromTables) return rowFromTables;
+    const rowFromFlat = (result as unknown as { rows?: OrderDetailsRow[] })?.rows?.[0];
+    if (rowFromFlat) return rowFromFlat;
+  }
+  return null;
+}
+
+export async function fetchLifecycleLatest(ticketId: string): Promise<LifecycleRow | null> {
+  const id = String(ticketId || '').trim();
+  if (!id) return null;
+  const query = buildQuery({ ticketId: id, ticketID: id, TicketID: id });
+  const paths = [
+    `/api/workflow/order-lifecycle/${encodeURIComponent(id)}`,
+    `/api/workflow/order-lifecycle${query}`,
+  ];
+
+  for (const path of paths) {
+    const result = await getJsonOrNull<LifecycleDataset>(path);
+    if (!result) continue;
+    const rows = firstDatasetRows(result as unknown, 'OLCStatusMsg') as LifecycleRow[];
+    if (!rows.length) continue;
+    return pickLifecycleSignal(rows);
+  }
+  return null;
+}
+
+export async function fetchLifecycleByServiceMsg(serviceMsgNum: string): Promise<LifecycleRow | null> {
+  const serviceMsg = String(serviceMsgNum || '').trim();
+  if (!serviceMsg) return null;
+  const query = buildQuery({ serviceMsgNum: serviceMsg, SERVICE_MSG_NUM: serviceMsg });
+  const paths = [
+    `/api/workflow/order-lifecycle/by-service-msg/${encodeURIComponent(serviceMsg)}`,
+    `/api/workflow/order-lifecycle/by-service-msg${query}`,
+  ];
+
+  for (const path of paths) {
+    const result = await getJsonOrNull<LifecycleDataset>(path);
+    if (!result) continue;
+    const rows = firstDatasetRows(result as unknown, 'OLCStatusMsg') as LifecycleRow[];
+    if (!rows.length) continue;
+    return pickLifecycleSignal(rows);
+  }
+  return null;
+}

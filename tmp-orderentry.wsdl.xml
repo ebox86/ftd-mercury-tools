@@ -1,0 +1,3739 @@
+<?xml version="1.0" encoding="utf-8"?>
+<wsdl:definitions xmlns:tm="http://microsoft.com/wsdl/mime/textMatching/" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:mime="http://schemas.xmlsoap.org/wsdl/mime/" xmlns:tns="http://localhost/webservices/" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:s1="http://microsoft.com/wsdl/types/" xmlns:s="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/" xmlns:http="http://schemas.xmlsoap.org/wsdl/http/" targetNamespace="http://localhost/webservices/" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">
+  <wsdl:documentation xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">FTD Mercury Order entry Web Service</wsdl:documentation>
+  <wsdl:types>
+    <s:schema elementFormDefault="qualified" targetNamespace="http://localhost/webservices/">
+      <s:import namespace="http://tempuri.org/SaleDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/TicketDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/ItemDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/PaymentDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/RecipientDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/WireTicketDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/AnswerDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/CardRecipientsDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/PhonedInOrderDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/GiftCardResponseDataset.xsd" />
+      <s:import namespace="http://tempuri.org/CreditCardPaymentDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/POSTerminalDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/POSManualEntryDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/POSSessionHistoryDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/POSSessionDetailDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/POSReceiptDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/TicketStatusDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/GetAttachedWireInInfoDataSet.xsd" />
+      <s:import namespace="http://microsoft.com/wsdl/types/" />
+      <s:import namespace="http://tempuri.org/CommentsDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/AddressDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/PhoneDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/GetOEPhonedOrderInfoDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/DeliveryDriverDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/POSTransactionDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/StandingOrderDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/OutOfCountryAndStateProvDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/ProdCodeByIDAndWireTypeDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/EndOfDayCountInfoDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/EndOfDayEmployeeInfoDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/EndOfDayHourlyInfoDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/OpenDrawerDataDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/GiftCardsDataset.xsd" />
+      <s:import namespace="http://tempuri.org/TicketSearchDataset.xsd" />
+      <s:import namespace="http://tempuri.org/TicketSearchByDesignerDataset.xsd" />
+      <s:import namespace="http://tempuri.org/StandingOrderScheduleDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/AbbreviationDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/DesignerAnalysisDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/UnpaidTicketsDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=StandingOrderScheduleDataSet" namespace="http://tempuri.org/StandingOrderScheduleDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=PaymentDataSet" namespace="http://tempuri.org/PaymentDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=GiftCardsDataset" namespace="http://tempuri.org/GiftCardsDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=POSTransactionDataSet" namespace="http://tempuri.org/POSTransactionDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=CreditCardPaymentDataSet" namespace="http://tempuri.org/CreditCardPaymentDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=OpenDrawerDataDataSet" namespace="http://tempuri.org/OpenDrawerDataDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=GetAttachedWireInInfoDataSet" namespace="http://tempuri.org/GetAttachedWireInInfoDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=SaleDataSet" namespace="http://tempuri.org/SaleDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=AbbreviationDataSet" namespace="http://tempuri.org/AbbreviationDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=POSSessionDetailDataSet" namespace="http://tempuri.org/POSSessionDetailDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=CommentsDataSet" namespace="http://tempuri.org/CommentsDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=WireTicketDataSet" namespace="http://tempuri.org/WireTicketDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=StandingOrderDataSet" namespace="http://tempuri.org/StandingOrderDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=TicketSearchDataset" namespace="http://tempuri.org/TicketSearchDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=EndOfDayCountInfoDataSet" namespace="http://tempuri.org/EndOfDayCountInfoDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=ProdCodeByIDAndWireTypeDataSet" namespace="http://tempuri.org/ProdCodeByIDAndWireTypeDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=EndOfDayEmployeeInfoDataSet" namespace="http://tempuri.org/EndOfDayEmployeeInfoDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=RecipientDataSet" namespace="http://tempuri.org/RecipientDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=GiftCardResponseDataset" namespace="http://tempuri.org/GiftCardResponseDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=POSReceiptDataSet" namespace="http://tempuri.org/POSReceiptDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=GetOEPhonedOrderInfoDataSet" namespace="http://tempuri.org/GetOEPhonedOrderInfoDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=EndOfDayHourlyInfoDataSet" namespace="http://tempuri.org/EndOfDayHourlyInfoDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=ItemDataSet" namespace="http://tempuri.org/ItemDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=PhonedInOrderDataSet" namespace="http://tempuri.org/PhonedInOrderDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=TicketStatusDataSet" namespace="http://tempuri.org/TicketStatusDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=POSSessionHistoryDataSet" namespace="http://tempuri.org/POSSessionHistoryDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=OutOfCountryAndStateProvDataSet" namespace="http://tempuri.org/OutOfCountryAndStateProvDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=UnpaidTicketsDataSet" namespace="http://tempuri.org/UnpaidTicketsDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=DesignerAnalysisDataSet" namespace="http://tempuri.org/DesignerAnalysisDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=TicketDataSet" namespace="http://tempuri.org/TicketDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=POSManualEntryDataSet" namespace="http://tempuri.org/POSManualEntryDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=CardRecipientsDataSet" namespace="http://tempuri.org/CardRecipientsDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=PhoneDataSet" namespace="http://tempuri.org/PhoneDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=TicketSearchByDesignerDataset" namespace="http://tempuri.org/TicketSearchByDesignerDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=AddressDataSet" namespace="http://tempuri.org/AddressDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=AnswerDataSet" namespace="http://tempuri.org/AnswerDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=POSTerminalDataSet" namespace="http://tempuri.org/POSTerminalDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=DeliveryDriverDataSet" namespace="http://tempuri.org/DeliveryDriverDataSet.xsd" />
+      <s:element name="SaveSale">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="sale">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/SaleDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="0" maxOccurs="1" name="tickets">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/TicketDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="0" maxOccurs="1" name="items">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ItemDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="0" maxOccurs="1" name="payments">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/PaymentDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="0" maxOccurs="1" name="recipient">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/RecipientDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="0" maxOccurs="1" name="wireOutInfo">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/WireTicketDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="0" maxOccurs="1" name="marketingAnswers">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/AnswerDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="0" maxOccurs="1" name="cardRecipients">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/CardRecipientsDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="0" maxOccurs="1" name="phonedInOrder">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/PhonedInOrderDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveSaleResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="SaveSaleResult" type="tns:SaveSaleResp" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="SaveSaleResp">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="ID" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="POSTransactionID" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="StoreID" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="Response" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="ticketIDsForPrintingXML" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="isCreditCardProcessingRequired" type="s:boolean" />
+          <s:element minOccurs="1" maxOccurs="1" name="isDebitCardProcessingRequired" type="s:boolean" />
+          <s:element minOccurs="1" maxOccurs="1" name="isGiftCardProcessingRequired" type="s:boolean" />
+          <s:element minOccurs="0" maxOccurs="1" name="creditCardResponsesXML" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="errorXML" type="s:string" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="CompleteSale">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CompleteSaleResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="CompleteSaleResult" type="tns:SaveSaleResp" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveGiftCardResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="gcResponses">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/GiftCardResponseDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveGiftCardResponseResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="SaveGiftCardResponseResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="RemoveGiftCardDesignerIDs">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="RemoveGiftCardDesignerIDsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="RemoveGiftCardDesignerIDsResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveDebitCard">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="approvalCode" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveDebitCardResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="SaveDebitCardResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SavePinPadCard">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="ppData">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/CreditCardPaymentDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SavePinPadCardResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="SavePinPadCardResult" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveCreditCard">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="ccData">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/CreditCardPaymentDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveCreditCardResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="SaveCreditCardResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetNewID">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="tableName" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetNewIDResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="GetNewIDResult" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="Save_Item_Status_Change">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="lstChanges" type="tns:ArrayOfSave_ItemParameter" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ArrayOfSave_ItemParameter">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="Save_ItemParameter" nillable="true" type="tns:Save_ItemParameter" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="Save_ItemParameter">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="itemID" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="property" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="Save_Item_Status_ChangeResponse">
+        <s:complexType />
+      </s:element>
+      <s:element name="Save_Item_Designer_Change">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="lstDesigners" type="tns:ArrayOfSave_ItemParameter" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="Save_Item_Designer_ChangeResponse">
+        <s:complexType />
+      </s:element>
+      <s:element name="SaveNote">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="indvOrgID" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="indvOrgTypCD" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="noteText" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveNoteResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="SaveNoteResult" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SetInvoiceEmailSent">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ticketID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SetInvoiceEmailSentResponse">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetPOSTerminal">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="hostName" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="nicAddress" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSTerminalResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPOSTerminalResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/POSTerminalDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSTerminalList">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetPOSTerminalListResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPOSTerminalListResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/POSTerminalDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSManualEntry">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleDate" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="storeID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSManualEntryResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPOSManualEntryResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/POSManualEntryDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSSessionHistory">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="sessionID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="dateFrom" nillable="true" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="dateTo" nillable="true" type="s:dateTime" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSSessionHistoryResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPOSSessionHistoryResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/POSSessionHistoryDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSSessionDetail">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="sessionID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSSessionDetailResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPOSSessionDetailResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/POSSessionDetailDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSPriorOpeningBalanceAmt">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="posTerminalID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSPriorOpeningBalanceAmtResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="GetPOSPriorOpeningBalanceAmtResult" type="s:decimal" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAuthorization">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="EmpID" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="EmpLoginName" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="EmpLoginPassword" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="POSTransTypeID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAuthorizationResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="GetAuthorizationResult" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSReceipt">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="transactionID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="sessionID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSReceiptResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPOSReceiptResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/POSReceiptDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetRecipient">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="recipientID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetRecipientResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetRecipientResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/RecipientDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetTickets">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetTicketsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetTicketsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/TicketDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetTicketIDs">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetTicketIDsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetTicketIDsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:element ref="s:schema" />
+                  <s:any />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetTicketStatus">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ticketID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetTicketStatusResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetTicketStatusResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/TicketStatusDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveTicketStatus">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ticketID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryStatus" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryDate" type="s:dateTime" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveTicketStatusResponse">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetCreditCardPayments">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetCreditCardPaymentsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetCreditCardPaymentsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/CreditCardPaymentDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetCreditCardInfoForPayments">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetCreditCardInfoForPaymentsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetCreditCardInfoForPaymentsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/CreditCardPaymentDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetCreditCardPaymentFromID">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ccID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetCreditCardPaymentFromIDResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetCreditCardPaymentFromIDResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/CreditCardPaymentDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAnswers">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="indvOrgID" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="indvOrgTypCD" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAnswersResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetAnswersResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/AnswerDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetItems">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ticketID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetItemsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetItemsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ItemDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetItemsPerSale">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetItemsPerSaleResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetItemsPerSaleResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ItemDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPayments">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPaymentsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPaymentsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/PaymentDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetWireOutInfo">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ticketID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetWireOutInfoResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetWireOutInfoResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/WireTicketDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAttachedWireInfo">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="msgID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAttachedWireInfoResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetAttachedWireInfoResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/GetAttachedWireInInfoDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetSale">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetSaleResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetSaleResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/SaleDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetComments">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="indvOrgID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="indvOrgTypCD" type="s1:char" />
+            <s:element minOccurs="0" maxOccurs="1" name="CommentTypCD" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetCommentsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetCommentsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/CommentsDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetCardRecipients">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ticketID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetCardRecipientsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetCardRecipientsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/CardRecipientsDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetWireOutOrderInfo">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ticketID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetWireOutOrderInfoResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetWireOutOrderInfoResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/WireTicketDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAddress">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="recipientID" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="orgType" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAddressResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetAddressResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/AddressDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPhone">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="recipientID" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="orgType" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPhoneResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPhoneResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/PhoneDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPhonedOrderInfo">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ticketID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPhonedOrderInfoResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPhonedOrderInfoResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/GetOEPhonedOrderInfoDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetSaleChangeStatus">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="posIND" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="posTerminal_ID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="posSession_ID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetSaleChangeStatusResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="GetSaleChangeStatusResult" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetDeliveryDriver">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ticketID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetDeliveryDriverResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetDeliveryDriverResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/DeliveryDriverDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSTransactionForSale">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPOSTransactionForSaleResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPOSTransactionForSaleResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/POSTransactionDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetStandingOrderTemplate">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="standingOrderID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetStandingOrderTemplateResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetStandingOrderTemplateResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/StandingOrderDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOutOfCountryAndStateProv">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="memberCode" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="wireServiceID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOutOfCountryAndStateProvResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetOutOfCountryAndStateProvResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/OutOfCountryAndStateProvDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetProdCodeByIDAndWireType">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="prodID" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="wireAbbr" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetProdCodeByIDAndWireTypeResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetProdCodeByIDAndWireTypeResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ProdCodeByIDAndWireTypeDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetEndOfDayCountInfoData">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="transactionID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="sessionID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetEndOfDayCountInfoDataResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetEndOfDayCountInfoDataResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/EndOfDayCountInfoDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetEndOfDayEmployeeInfo">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="transactionID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="sessionID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetEndOfDayEmployeeInfoResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetEndOfDayEmployeeInfoResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/EndOfDayEmployeeInfoDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetEndOfDayHourlyInfo">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="transactionID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="sessionID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetEndOfDayHourlyInfoResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetEndOfDayHourlyInfoResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/EndOfDayHourlyInfoDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOpenDrawerData">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="sessionID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOpenDrawerDataResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetOpenDrawerDataResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/OpenDrawerDataDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="HasDeclinedCreditCards">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="HasDeclinedCreditCardsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="HasDeclinedCreditCardsResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="ChangeSaleStatus">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="saleStatus" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="ChangeSaleStatusResponse">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetGiftCardInfo">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetGiftCardInfoResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetGiftCardInfoResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/GiftCardsDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CancelSale">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="posInd" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="sessionID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="terminalID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="deleteRecMsg" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CancelSaleResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="CancelSaleResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="ReverseCreditCardsForSale">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="ReverseCreditCardsForSaleResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ReverseCreditCardsForSaleResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="TicketSearch">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="StoreID" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="FromDate" nillable="true" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="ToDate" nillable="true" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="SaleDateInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="DelivDateInd" nillable="true" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="CustName" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="RecipientName" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="RecipientAddr" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="RecipientCity" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="ProductCode" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="DelivZone" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="SaleID" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="OrderType" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="OrderStatus" nillable="true" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="EmpName" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="JobType" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="AssignInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="DesignInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="DelivInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="NotAssignInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="NotDesignInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="NotDeliverInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="PictureSentInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="OEInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="OrderHistoryInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="MaxResultsInd" nillable="true" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="TicketSearchResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="TicketSearchResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/TicketSearchDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="TicketSearchByDesigner">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryDate" nillable="true" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="designerID" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="storeID" nillable="true" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="ticketID" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="assignedInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="unassignedInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="designedInd" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="notdesignedInd" nillable="true" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="TicketSearchByDesignerResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="TicketSearchByDesignerResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/TicketSearchByDesignerDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="Initialize">
+        <s:complexType />
+      </s:element>
+      <s:element name="InitializeResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="InitializeResult" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeleteTickets">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="ticketIDs" type="tns:ArrayOfInt" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ArrayOfInt">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="int" type="s:int" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="DeleteTicketsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="DeleteTicketsResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="RefundSale">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="originalSaleID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="refundSaleID" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="ticketIDs" type="tns:ArrayOfInt" />
+            <s:element minOccurs="0" maxOccurs="1" name="ticketPositions" type="tns:ArrayOfInt" />
+            <s:element minOccurs="0" maxOccurs="1" name="ticketRefundIndicators" type="tns:ArrayOfInt" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="RefundSaleResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="RefundSaleResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="UpdateMsgTableTicketID">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ticketID" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="fillingFlorist" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="UpdateMsgTableTicketIDResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UpdateMsgTableTicketIDResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SavePOSTerminal">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="posTerminalID" nillable="true" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="hostName" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="nicAddress" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SavePOSTerminalResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="SavePOSTerminalResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/POSTerminalDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SavePOSTransaction">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="terminalID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="posSessionID" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="cashAmt" type="s:decimal" />
+            <s:element minOccurs="1" maxOccurs="1" name="checkAmt" type="s:decimal" />
+            <s:element minOccurs="1" maxOccurs="1" name="creditPendingAmt" type="s:decimal" />
+            <s:element minOccurs="1" maxOccurs="1" name="creditUnapprovedAmt" type="s:decimal" />
+            <s:element minOccurs="1" maxOccurs="1" name="creditApprovedAmt" type="s:decimal" />
+            <s:element minOccurs="1" maxOccurs="1" name="debitAmt" type="s:decimal" />
+            <s:element minOccurs="1" maxOccurs="1" name="houseAmt" type="s:decimal" />
+            <s:element minOccurs="1" maxOccurs="1" name="giftCertificateAmt" type="s:decimal" />
+            <s:element minOccurs="1" maxOccurs="1" name="giftCardAmt" type="s:decimal" />
+            <s:element minOccurs="1" maxOccurs="1" name="posTransactionTypID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="posPaidOutTypID" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="empID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" nillable="true" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="storeID" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="empLogName" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="empPassword" type="s:base64Binary" />
+            <s:element minOccurs="1" maxOccurs="1" name="tax_1_amt" nillable="true" type="s:decimal" />
+            <s:element minOccurs="1" maxOccurs="1" name="tax_2_amt" nillable="true" type="s:decimal" />
+            <s:element minOccurs="1" maxOccurs="1" name="zOutDate" nillable="true" type="s:dateTime" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SavePOSTransactionResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="SavePOSTransactionResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/POSTransactionDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SavePOSSessionDrawer">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="posSessionID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="drawerCashAmt" type="s:decimal" />
+            <s:element minOccurs="1" maxOccurs="1" name="drawerCheckAmt" type="s:decimal" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SavePOSSessionDrawerResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="SavePOSSessionDrawerResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveStandingOrderTemplate">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="standingOrder">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/StandingOrderDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveStandingOrderTemplateResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="SaveStandingOrderTemplateResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveStandingOrderSchedule">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="standingOrderSchedule">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/StandingOrderScheduleDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveStandingOrderScheduleResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="SaveStandingOrderScheduleResult" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="AllocatePayment">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="payments" type="tns:ArrayOfAllocatedPayments" />
+            <s:element minOccurs="1" maxOccurs="1" name="custID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="storeID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="saleID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="amount" type="s:decimal" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ArrayOfAllocatedPayments">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="AllocatedPayments" type="tns:AllocatedPayments" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="AllocatedPayments">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="TicketID" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="Amt" type="s:decimal" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="AllocatePaymentResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="AllocatePaymentResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAbbrevDetail">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="input" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAbbrevDetailResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetAbbrevDetailResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/AbbreviationDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetDesignAnalysis">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryDate" nillable="true" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="storeID" nillable="true" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetDesignAnalysisResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetDesignAnalysisResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/DesignerAnalysisDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetUnpaidTickets">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="customerId" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="storeId" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetUnpaidTicketsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetUnpaidTicketsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/UnpaidTicketsDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DoAgingTicketSearch">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="customerId" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="storeId" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="startDate" nillable="true" type="s:dateTime" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="AgingTicketEntity">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="SaleID" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="TicketID" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="StoreId" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="SellingStoreName" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="SaleDate" nillable="true" type="s:dateTime" />
+          <s:element minOccurs="1" maxOccurs="1" name="DeliveryDate" nillable="true" type="s:dateTime" />
+          <s:element minOccurs="0" maxOccurs="1" name="RecipientName" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="SaleType" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="SaleTypeId" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="IsPaidInFull" type="s:boolean" />
+          <s:element minOccurs="1" maxOccurs="1" name="AmtCharged" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="RemainingBalance" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="FormattedSaleID" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="RunningTotalBalance" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="SaleStatus" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="RefundInd" type="s:int" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfAgingTicketEntity">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="AgingTicketEntity" nillable="true" type="tns:AgingTicketEntity" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="DoAgingTicketSearchResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="DoAgingTicketSearchResult" type="tns:ArrayOfAgingTicketEntity" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DoSalePaymentAppliedList">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="salePaymentId" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="salePaymentFlag" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="SalePaymentAppliedEntity">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="TransactionID" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="FormattedSaleID" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="SellingStoreName" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="SaleDate" nillable="true" type="s:dateTime" />
+          <s:element minOccurs="1" maxOccurs="1" name="DeliveryDate" nillable="true" type="s:dateTime" />
+          <s:element minOccurs="0" maxOccurs="1" name="RecipientName" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="SaleType" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="SaleTypeId" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="TotalAmount" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="Unallocated" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="AmountAllocated" type="s:decimal" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfSalePaymentAppliedEntity">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="SalePaymentAppliedEntity" nillable="true" type="tns:SalePaymentAppliedEntity" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="DoSalePaymentAppliedListResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="DoSalePaymentAppliedListResult" type="tns:ArrayOfSalePaymentAppliedEntity" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetBarCodeTasks">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="barCodeType" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="BarCodeTaskEntity">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="BarCodeType" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="TypeDescription" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="TaskDescription" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="TaskId" type="s:int" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfBarCodeTaskEntity">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="BarCodeTaskEntity" nillable="true" type="tns:BarCodeTaskEntity" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetBarCodeTasksResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetBarCodeTasksResult" type="tns:ArrayOfBarCodeTaskEntity" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+    </s:schema>
+    <s:schema elementFormDefault="qualified" targetNamespace="http://microsoft.com/wsdl/types/">
+      <s:simpleType name="char">
+        <s:restriction base="s:unsignedShort" />
+      </s:simpleType>
+    </s:schema>
+  </wsdl:types>
+  <wsdl:message name="SaveSaleSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveSale" />
+  </wsdl:message>
+  <wsdl:message name="SaveSaleSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveSaleResponse" />
+  </wsdl:message>
+  <wsdl:message name="CompleteSaleSoapIn">
+    <wsdl:part name="parameters" element="tns:CompleteSale" />
+  </wsdl:message>
+  <wsdl:message name="CompleteSaleSoapOut">
+    <wsdl:part name="parameters" element="tns:CompleteSaleResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveGiftCardResponseSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveGiftCardResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveGiftCardResponseSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveGiftCardResponseResponse" />
+  </wsdl:message>
+  <wsdl:message name="RemoveGiftCardDesignerIDsSoapIn">
+    <wsdl:part name="parameters" element="tns:RemoveGiftCardDesignerIDs" />
+  </wsdl:message>
+  <wsdl:message name="RemoveGiftCardDesignerIDsSoapOut">
+    <wsdl:part name="parameters" element="tns:RemoveGiftCardDesignerIDsResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveDebitCardSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveDebitCard" />
+  </wsdl:message>
+  <wsdl:message name="SaveDebitCardSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveDebitCardResponse" />
+  </wsdl:message>
+  <wsdl:message name="SavePinPadCardSoapIn">
+    <wsdl:part name="parameters" element="tns:SavePinPadCard" />
+  </wsdl:message>
+  <wsdl:message name="SavePinPadCardSoapOut">
+    <wsdl:part name="parameters" element="tns:SavePinPadCardResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveCreditCardSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveCreditCard" />
+  </wsdl:message>
+  <wsdl:message name="SaveCreditCardSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveCreditCardResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetNewIDSoapIn">
+    <wsdl:part name="parameters" element="tns:GetNewID" />
+  </wsdl:message>
+  <wsdl:message name="GetNewIDSoapOut">
+    <wsdl:part name="parameters" element="tns:GetNewIDResponse" />
+  </wsdl:message>
+  <wsdl:message name="Save_Item_Status_ChangeSoapIn">
+    <wsdl:part name="parameters" element="tns:Save_Item_Status_Change" />
+  </wsdl:message>
+  <wsdl:message name="Save_Item_Status_ChangeSoapOut">
+    <wsdl:part name="parameters" element="tns:Save_Item_Status_ChangeResponse" />
+  </wsdl:message>
+  <wsdl:message name="Save_Item_Designer_ChangeSoapIn">
+    <wsdl:part name="parameters" element="tns:Save_Item_Designer_Change" />
+  </wsdl:message>
+  <wsdl:message name="Save_Item_Designer_ChangeSoapOut">
+    <wsdl:part name="parameters" element="tns:Save_Item_Designer_ChangeResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveNoteSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveNote" />
+  </wsdl:message>
+  <wsdl:message name="SaveNoteSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveNoteResponse" />
+  </wsdl:message>
+  <wsdl:message name="SetInvoiceEmailSentSoapIn">
+    <wsdl:part name="parameters" element="tns:SetInvoiceEmailSent" />
+  </wsdl:message>
+  <wsdl:message name="SetInvoiceEmailSentSoapOut">
+    <wsdl:part name="parameters" element="tns:SetInvoiceEmailSentResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSTerminalSoapIn">
+    <wsdl:part name="parameters" element="tns:GetPOSTerminal" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSTerminalSoapOut">
+    <wsdl:part name="parameters" element="tns:GetPOSTerminalResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSTerminalListSoapIn">
+    <wsdl:part name="parameters" element="tns:GetPOSTerminalList" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSTerminalListSoapOut">
+    <wsdl:part name="parameters" element="tns:GetPOSTerminalListResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSManualEntrySoapIn">
+    <wsdl:part name="parameters" element="tns:GetPOSManualEntry" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSManualEntrySoapOut">
+    <wsdl:part name="parameters" element="tns:GetPOSManualEntryResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSSessionHistorySoapIn">
+    <wsdl:part name="parameters" element="tns:GetPOSSessionHistory" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSSessionHistorySoapOut">
+    <wsdl:part name="parameters" element="tns:GetPOSSessionHistoryResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSSessionDetailSoapIn">
+    <wsdl:part name="parameters" element="tns:GetPOSSessionDetail" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSSessionDetailSoapOut">
+    <wsdl:part name="parameters" element="tns:GetPOSSessionDetailResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSPriorOpeningBalanceAmtSoapIn">
+    <wsdl:part name="parameters" element="tns:GetPOSPriorOpeningBalanceAmt" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSPriorOpeningBalanceAmtSoapOut">
+    <wsdl:part name="parameters" element="tns:GetPOSPriorOpeningBalanceAmtResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetAuthorizationSoapIn">
+    <wsdl:part name="parameters" element="tns:GetAuthorization" />
+  </wsdl:message>
+  <wsdl:message name="GetAuthorizationSoapOut">
+    <wsdl:part name="parameters" element="tns:GetAuthorizationResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSReceiptSoapIn">
+    <wsdl:part name="parameters" element="tns:GetPOSReceipt" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSReceiptSoapOut">
+    <wsdl:part name="parameters" element="tns:GetPOSReceiptResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetRecipientSoapIn">
+    <wsdl:part name="parameters" element="tns:GetRecipient" />
+  </wsdl:message>
+  <wsdl:message name="GetRecipientSoapOut">
+    <wsdl:part name="parameters" element="tns:GetRecipientResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetTicketsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetTickets" />
+  </wsdl:message>
+  <wsdl:message name="GetTicketsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetTicketsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetTicketIDsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetTicketIDs" />
+  </wsdl:message>
+  <wsdl:message name="GetTicketIDsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetTicketIDsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetTicketStatusSoapIn">
+    <wsdl:part name="parameters" element="tns:GetTicketStatus" />
+  </wsdl:message>
+  <wsdl:message name="GetTicketStatusSoapOut">
+    <wsdl:part name="parameters" element="tns:GetTicketStatusResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveTicketStatusSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveTicketStatus" />
+  </wsdl:message>
+  <wsdl:message name="SaveTicketStatusSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveTicketStatusResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetCreditCardPaymentsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetCreditCardPayments" />
+  </wsdl:message>
+  <wsdl:message name="GetCreditCardPaymentsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetCreditCardPaymentsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetCreditCardInfoForPaymentsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetCreditCardInfoForPayments" />
+  </wsdl:message>
+  <wsdl:message name="GetCreditCardInfoForPaymentsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetCreditCardInfoForPaymentsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetCreditCardPaymentFromIDSoapIn">
+    <wsdl:part name="parameters" element="tns:GetCreditCardPaymentFromID" />
+  </wsdl:message>
+  <wsdl:message name="GetCreditCardPaymentFromIDSoapOut">
+    <wsdl:part name="parameters" element="tns:GetCreditCardPaymentFromIDResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetAnswersSoapIn">
+    <wsdl:part name="parameters" element="tns:GetAnswers" />
+  </wsdl:message>
+  <wsdl:message name="GetAnswersSoapOut">
+    <wsdl:part name="parameters" element="tns:GetAnswersResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetItemsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetItems" />
+  </wsdl:message>
+  <wsdl:message name="GetItemsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetItemsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetItemsPerSaleSoapIn">
+    <wsdl:part name="parameters" element="tns:GetItemsPerSale" />
+  </wsdl:message>
+  <wsdl:message name="GetItemsPerSaleSoapOut">
+    <wsdl:part name="parameters" element="tns:GetItemsPerSaleResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPaymentsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetPayments" />
+  </wsdl:message>
+  <wsdl:message name="GetPaymentsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetPaymentsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetWireOutInfoSoapIn">
+    <wsdl:part name="parameters" element="tns:GetWireOutInfo" />
+  </wsdl:message>
+  <wsdl:message name="GetWireOutInfoSoapOut">
+    <wsdl:part name="parameters" element="tns:GetWireOutInfoResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetAttachedWireInfoSoapIn">
+    <wsdl:part name="parameters" element="tns:GetAttachedWireInfo" />
+  </wsdl:message>
+  <wsdl:message name="GetAttachedWireInfoSoapOut">
+    <wsdl:part name="parameters" element="tns:GetAttachedWireInfoResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetSaleSoapIn">
+    <wsdl:part name="parameters" element="tns:GetSale" />
+  </wsdl:message>
+  <wsdl:message name="GetSaleSoapOut">
+    <wsdl:part name="parameters" element="tns:GetSaleResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetCommentsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetComments" />
+  </wsdl:message>
+  <wsdl:message name="GetCommentsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetCommentsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetCardRecipientsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetCardRecipients" />
+  </wsdl:message>
+  <wsdl:message name="GetCardRecipientsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetCardRecipientsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetWireOutOrderInfoSoapIn">
+    <wsdl:part name="parameters" element="tns:GetWireOutOrderInfo" />
+  </wsdl:message>
+  <wsdl:message name="GetWireOutOrderInfoSoapOut">
+    <wsdl:part name="parameters" element="tns:GetWireOutOrderInfoResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetAddressSoapIn">
+    <wsdl:part name="parameters" element="tns:GetAddress" />
+  </wsdl:message>
+  <wsdl:message name="GetAddressSoapOut">
+    <wsdl:part name="parameters" element="tns:GetAddressResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPhoneSoapIn">
+    <wsdl:part name="parameters" element="tns:GetPhone" />
+  </wsdl:message>
+  <wsdl:message name="GetPhoneSoapOut">
+    <wsdl:part name="parameters" element="tns:GetPhoneResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPhonedOrderInfoSoapIn">
+    <wsdl:part name="parameters" element="tns:GetPhonedOrderInfo" />
+  </wsdl:message>
+  <wsdl:message name="GetPhonedOrderInfoSoapOut">
+    <wsdl:part name="parameters" element="tns:GetPhonedOrderInfoResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetSaleChangeStatusSoapIn">
+    <wsdl:part name="parameters" element="tns:GetSaleChangeStatus" />
+  </wsdl:message>
+  <wsdl:message name="GetSaleChangeStatusSoapOut">
+    <wsdl:part name="parameters" element="tns:GetSaleChangeStatusResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetDeliveryDriverSoapIn">
+    <wsdl:part name="parameters" element="tns:GetDeliveryDriver" />
+  </wsdl:message>
+  <wsdl:message name="GetDeliveryDriverSoapOut">
+    <wsdl:part name="parameters" element="tns:GetDeliveryDriverResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSTransactionForSaleSoapIn">
+    <wsdl:part name="parameters" element="tns:GetPOSTransactionForSale" />
+  </wsdl:message>
+  <wsdl:message name="GetPOSTransactionForSaleSoapOut">
+    <wsdl:part name="parameters" element="tns:GetPOSTransactionForSaleResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetStandingOrderTemplateSoapIn">
+    <wsdl:part name="parameters" element="tns:GetStandingOrderTemplate" />
+  </wsdl:message>
+  <wsdl:message name="GetStandingOrderTemplateSoapOut">
+    <wsdl:part name="parameters" element="tns:GetStandingOrderTemplateResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetOutOfCountryAndStateProvSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOutOfCountryAndStateProv" />
+  </wsdl:message>
+  <wsdl:message name="GetOutOfCountryAndStateProvSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOutOfCountryAndStateProvResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetProdCodeByIDAndWireTypeSoapIn">
+    <wsdl:part name="parameters" element="tns:GetProdCodeByIDAndWireType" />
+  </wsdl:message>
+  <wsdl:message name="GetProdCodeByIDAndWireTypeSoapOut">
+    <wsdl:part name="parameters" element="tns:GetProdCodeByIDAndWireTypeResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetEndOfDayCountInfoDataSoapIn">
+    <wsdl:part name="parameters" element="tns:GetEndOfDayCountInfoData" />
+  </wsdl:message>
+  <wsdl:message name="GetEndOfDayCountInfoDataSoapOut">
+    <wsdl:part name="parameters" element="tns:GetEndOfDayCountInfoDataResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetEndOfDayEmployeeInfoSoapIn">
+    <wsdl:part name="parameters" element="tns:GetEndOfDayEmployeeInfo" />
+  </wsdl:message>
+  <wsdl:message name="GetEndOfDayEmployeeInfoSoapOut">
+    <wsdl:part name="parameters" element="tns:GetEndOfDayEmployeeInfoResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetEndOfDayHourlyInfoSoapIn">
+    <wsdl:part name="parameters" element="tns:GetEndOfDayHourlyInfo" />
+  </wsdl:message>
+  <wsdl:message name="GetEndOfDayHourlyInfoSoapOut">
+    <wsdl:part name="parameters" element="tns:GetEndOfDayHourlyInfoResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetOpenDrawerDataSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOpenDrawerData" />
+  </wsdl:message>
+  <wsdl:message name="GetOpenDrawerDataSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOpenDrawerDataResponse" />
+  </wsdl:message>
+  <wsdl:message name="HasDeclinedCreditCardsSoapIn">
+    <wsdl:part name="parameters" element="tns:HasDeclinedCreditCards" />
+  </wsdl:message>
+  <wsdl:message name="HasDeclinedCreditCardsSoapOut">
+    <wsdl:part name="parameters" element="tns:HasDeclinedCreditCardsResponse" />
+  </wsdl:message>
+  <wsdl:message name="ChangeSaleStatusSoapIn">
+    <wsdl:part name="parameters" element="tns:ChangeSaleStatus" />
+  </wsdl:message>
+  <wsdl:message name="ChangeSaleStatusSoapOut">
+    <wsdl:part name="parameters" element="tns:ChangeSaleStatusResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetGiftCardInfoSoapIn">
+    <wsdl:part name="parameters" element="tns:GetGiftCardInfo" />
+  </wsdl:message>
+  <wsdl:message name="GetGiftCardInfoSoapOut">
+    <wsdl:part name="parameters" element="tns:GetGiftCardInfoResponse" />
+  </wsdl:message>
+  <wsdl:message name="CancelSaleSoapIn">
+    <wsdl:part name="parameters" element="tns:CancelSale" />
+  </wsdl:message>
+  <wsdl:message name="CancelSaleSoapOut">
+    <wsdl:part name="parameters" element="tns:CancelSaleResponse" />
+  </wsdl:message>
+  <wsdl:message name="ReverseCreditCardsForSaleSoapIn">
+    <wsdl:part name="parameters" element="tns:ReverseCreditCardsForSale" />
+  </wsdl:message>
+  <wsdl:message name="ReverseCreditCardsForSaleSoapOut">
+    <wsdl:part name="parameters" element="tns:ReverseCreditCardsForSaleResponse" />
+  </wsdl:message>
+  <wsdl:message name="TicketSearchSoapIn">
+    <wsdl:part name="parameters" element="tns:TicketSearch" />
+  </wsdl:message>
+  <wsdl:message name="TicketSearchSoapOut">
+    <wsdl:part name="parameters" element="tns:TicketSearchResponse" />
+  </wsdl:message>
+  <wsdl:message name="TicketSearchByDesignerSoapIn">
+    <wsdl:part name="parameters" element="tns:TicketSearchByDesigner" />
+  </wsdl:message>
+  <wsdl:message name="TicketSearchByDesignerSoapOut">
+    <wsdl:part name="parameters" element="tns:TicketSearchByDesignerResponse" />
+  </wsdl:message>
+  <wsdl:message name="InitializeSoapIn">
+    <wsdl:part name="parameters" element="tns:Initialize" />
+  </wsdl:message>
+  <wsdl:message name="InitializeSoapOut">
+    <wsdl:part name="parameters" element="tns:InitializeResponse" />
+  </wsdl:message>
+  <wsdl:message name="DeleteTicketsSoapIn">
+    <wsdl:part name="parameters" element="tns:DeleteTickets" />
+  </wsdl:message>
+  <wsdl:message name="DeleteTicketsSoapOut">
+    <wsdl:part name="parameters" element="tns:DeleteTicketsResponse" />
+  </wsdl:message>
+  <wsdl:message name="RefundSaleSoapIn">
+    <wsdl:part name="parameters" element="tns:RefundSale" />
+  </wsdl:message>
+  <wsdl:message name="RefundSaleSoapOut">
+    <wsdl:part name="parameters" element="tns:RefundSaleResponse" />
+  </wsdl:message>
+  <wsdl:message name="UpdateMsgTableTicketIDSoapIn">
+    <wsdl:part name="parameters" element="tns:UpdateMsgTableTicketID" />
+  </wsdl:message>
+  <wsdl:message name="UpdateMsgTableTicketIDSoapOut">
+    <wsdl:part name="parameters" element="tns:UpdateMsgTableTicketIDResponse" />
+  </wsdl:message>
+  <wsdl:message name="SavePOSTerminalSoapIn">
+    <wsdl:part name="parameters" element="tns:SavePOSTerminal" />
+  </wsdl:message>
+  <wsdl:message name="SavePOSTerminalSoapOut">
+    <wsdl:part name="parameters" element="tns:SavePOSTerminalResponse" />
+  </wsdl:message>
+  <wsdl:message name="SavePOSTransactionSoapIn">
+    <wsdl:part name="parameters" element="tns:SavePOSTransaction" />
+  </wsdl:message>
+  <wsdl:message name="SavePOSTransactionSoapOut">
+    <wsdl:part name="parameters" element="tns:SavePOSTransactionResponse" />
+  </wsdl:message>
+  <wsdl:message name="SavePOSSessionDrawerSoapIn">
+    <wsdl:part name="parameters" element="tns:SavePOSSessionDrawer" />
+  </wsdl:message>
+  <wsdl:message name="SavePOSSessionDrawerSoapOut">
+    <wsdl:part name="parameters" element="tns:SavePOSSessionDrawerResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveStandingOrderTemplateSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveStandingOrderTemplate" />
+  </wsdl:message>
+  <wsdl:message name="SaveStandingOrderTemplateSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveStandingOrderTemplateResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveStandingOrderScheduleSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveStandingOrderSchedule" />
+  </wsdl:message>
+  <wsdl:message name="SaveStandingOrderScheduleSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveStandingOrderScheduleResponse" />
+  </wsdl:message>
+  <wsdl:message name="AllocatePaymentSoapIn">
+    <wsdl:part name="parameters" element="tns:AllocatePayment" />
+  </wsdl:message>
+  <wsdl:message name="AllocatePaymentSoapOut">
+    <wsdl:part name="parameters" element="tns:AllocatePaymentResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetAbbrevDetailSoapIn">
+    <wsdl:part name="parameters" element="tns:GetAbbrevDetail" />
+  </wsdl:message>
+  <wsdl:message name="GetAbbrevDetailSoapOut">
+    <wsdl:part name="parameters" element="tns:GetAbbrevDetailResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetDesignAnalysisSoapIn">
+    <wsdl:part name="parameters" element="tns:GetDesignAnalysis" />
+  </wsdl:message>
+  <wsdl:message name="GetDesignAnalysisSoapOut">
+    <wsdl:part name="parameters" element="tns:GetDesignAnalysisResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetUnpaidTicketsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetUnpaidTickets" />
+  </wsdl:message>
+  <wsdl:message name="GetUnpaidTicketsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetUnpaidTicketsResponse" />
+  </wsdl:message>
+  <wsdl:message name="DoAgingTicketSearchSoapIn">
+    <wsdl:part name="parameters" element="tns:DoAgingTicketSearch" />
+  </wsdl:message>
+  <wsdl:message name="DoAgingTicketSearchSoapOut">
+    <wsdl:part name="parameters" element="tns:DoAgingTicketSearchResponse" />
+  </wsdl:message>
+  <wsdl:message name="DoSalePaymentAppliedListSoapIn">
+    <wsdl:part name="parameters" element="tns:DoSalePaymentAppliedList" />
+  </wsdl:message>
+  <wsdl:message name="DoSalePaymentAppliedListSoapOut">
+    <wsdl:part name="parameters" element="tns:DoSalePaymentAppliedListResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetBarCodeTasksSoapIn">
+    <wsdl:part name="parameters" element="tns:GetBarCodeTasks" />
+  </wsdl:message>
+  <wsdl:message name="GetBarCodeTasksSoapOut">
+    <wsdl:part name="parameters" element="tns:GetBarCodeTasksResponse" />
+  </wsdl:message>
+  <wsdl:portType name="OrderEntryServiceSoap">
+    <wsdl:operation name="SaveSale">
+      <wsdl:input message="tns:SaveSaleSoapIn" />
+      <wsdl:output message="tns:SaveSaleSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="CompleteSale">
+      <wsdl:input message="tns:CompleteSaleSoapIn" />
+      <wsdl:output message="tns:CompleteSaleSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SaveGiftCardResponse">
+      <wsdl:input message="tns:SaveGiftCardResponseSoapIn" />
+      <wsdl:output message="tns:SaveGiftCardResponseSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="RemoveGiftCardDesignerIDs">
+      <wsdl:input message="tns:RemoveGiftCardDesignerIDsSoapIn" />
+      <wsdl:output message="tns:RemoveGiftCardDesignerIDsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SaveDebitCard">
+      <wsdl:input message="tns:SaveDebitCardSoapIn" />
+      <wsdl:output message="tns:SaveDebitCardSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SavePinPadCard">
+      <wsdl:input message="tns:SavePinPadCardSoapIn" />
+      <wsdl:output message="tns:SavePinPadCardSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SaveCreditCard">
+      <wsdl:input message="tns:SaveCreditCardSoapIn" />
+      <wsdl:output message="tns:SaveCreditCardSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetNewID">
+      <wsdl:input message="tns:GetNewIDSoapIn" />
+      <wsdl:output message="tns:GetNewIDSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="Save_Item_Status_Change">
+      <wsdl:input message="tns:Save_Item_Status_ChangeSoapIn" />
+      <wsdl:output message="tns:Save_Item_Status_ChangeSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="Save_Item_Designer_Change">
+      <wsdl:input message="tns:Save_Item_Designer_ChangeSoapIn" />
+      <wsdl:output message="tns:Save_Item_Designer_ChangeSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SaveNote">
+      <wsdl:input message="tns:SaveNoteSoapIn" />
+      <wsdl:output message="tns:SaveNoteSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SetInvoiceEmailSent">
+      <wsdl:input message="tns:SetInvoiceEmailSentSoapIn" />
+      <wsdl:output message="tns:SetInvoiceEmailSentSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSTerminal">
+      <wsdl:input message="tns:GetPOSTerminalSoapIn" />
+      <wsdl:output message="tns:GetPOSTerminalSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSTerminalList">
+      <wsdl:input message="tns:GetPOSTerminalListSoapIn" />
+      <wsdl:output message="tns:GetPOSTerminalListSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSManualEntry">
+      <wsdl:input message="tns:GetPOSManualEntrySoapIn" />
+      <wsdl:output message="tns:GetPOSManualEntrySoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSSessionHistory">
+      <wsdl:input message="tns:GetPOSSessionHistorySoapIn" />
+      <wsdl:output message="tns:GetPOSSessionHistorySoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSSessionDetail">
+      <wsdl:input message="tns:GetPOSSessionDetailSoapIn" />
+      <wsdl:output message="tns:GetPOSSessionDetailSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSPriorOpeningBalanceAmt">
+      <wsdl:input message="tns:GetPOSPriorOpeningBalanceAmtSoapIn" />
+      <wsdl:output message="tns:GetPOSPriorOpeningBalanceAmtSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetAuthorization">
+      <wsdl:input message="tns:GetAuthorizationSoapIn" />
+      <wsdl:output message="tns:GetAuthorizationSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSReceipt">
+      <wsdl:input message="tns:GetPOSReceiptSoapIn" />
+      <wsdl:output message="tns:GetPOSReceiptSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetRecipient">
+      <wsdl:input message="tns:GetRecipientSoapIn" />
+      <wsdl:output message="tns:GetRecipientSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetTickets">
+      <wsdl:input message="tns:GetTicketsSoapIn" />
+      <wsdl:output message="tns:GetTicketsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetTicketIDs">
+      <wsdl:input message="tns:GetTicketIDsSoapIn" />
+      <wsdl:output message="tns:GetTicketIDsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetTicketStatus">
+      <wsdl:input message="tns:GetTicketStatusSoapIn" />
+      <wsdl:output message="tns:GetTicketStatusSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SaveTicketStatus">
+      <wsdl:input message="tns:SaveTicketStatusSoapIn" />
+      <wsdl:output message="tns:SaveTicketStatusSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetCreditCardPayments">
+      <wsdl:input message="tns:GetCreditCardPaymentsSoapIn" />
+      <wsdl:output message="tns:GetCreditCardPaymentsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetCreditCardInfoForPayments">
+      <wsdl:input message="tns:GetCreditCardInfoForPaymentsSoapIn" />
+      <wsdl:output message="tns:GetCreditCardInfoForPaymentsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetCreditCardPaymentFromID">
+      <wsdl:input message="tns:GetCreditCardPaymentFromIDSoapIn" />
+      <wsdl:output message="tns:GetCreditCardPaymentFromIDSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetAnswers">
+      <wsdl:input message="tns:GetAnswersSoapIn" />
+      <wsdl:output message="tns:GetAnswersSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetItems">
+      <wsdl:input message="tns:GetItemsSoapIn" />
+      <wsdl:output message="tns:GetItemsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetItemsPerSale">
+      <wsdl:input message="tns:GetItemsPerSaleSoapIn" />
+      <wsdl:output message="tns:GetItemsPerSaleSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPayments">
+      <wsdl:input message="tns:GetPaymentsSoapIn" />
+      <wsdl:output message="tns:GetPaymentsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetWireOutInfo">
+      <wsdl:input message="tns:GetWireOutInfoSoapIn" />
+      <wsdl:output message="tns:GetWireOutInfoSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetAttachedWireInfo">
+      <wsdl:input message="tns:GetAttachedWireInfoSoapIn" />
+      <wsdl:output message="tns:GetAttachedWireInfoSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetSale">
+      <wsdl:input message="tns:GetSaleSoapIn" />
+      <wsdl:output message="tns:GetSaleSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetComments">
+      <wsdl:input message="tns:GetCommentsSoapIn" />
+      <wsdl:output message="tns:GetCommentsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetCardRecipients">
+      <wsdl:input message="tns:GetCardRecipientsSoapIn" />
+      <wsdl:output message="tns:GetCardRecipientsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetWireOutOrderInfo">
+      <wsdl:input message="tns:GetWireOutOrderInfoSoapIn" />
+      <wsdl:output message="tns:GetWireOutOrderInfoSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetAddress">
+      <wsdl:input message="tns:GetAddressSoapIn" />
+      <wsdl:output message="tns:GetAddressSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPhone">
+      <wsdl:input message="tns:GetPhoneSoapIn" />
+      <wsdl:output message="tns:GetPhoneSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPhonedOrderInfo">
+      <wsdl:input message="tns:GetPhonedOrderInfoSoapIn" />
+      <wsdl:output message="tns:GetPhonedOrderInfoSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetSaleChangeStatus">
+      <wsdl:input message="tns:GetSaleChangeStatusSoapIn" />
+      <wsdl:output message="tns:GetSaleChangeStatusSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetDeliveryDriver">
+      <wsdl:input message="tns:GetDeliveryDriverSoapIn" />
+      <wsdl:output message="tns:GetDeliveryDriverSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSTransactionForSale">
+      <wsdl:input message="tns:GetPOSTransactionForSaleSoapIn" />
+      <wsdl:output message="tns:GetPOSTransactionForSaleSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetStandingOrderTemplate">
+      <wsdl:input message="tns:GetStandingOrderTemplateSoapIn" />
+      <wsdl:output message="tns:GetStandingOrderTemplateSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetOutOfCountryAndStateProv">
+      <wsdl:input message="tns:GetOutOfCountryAndStateProvSoapIn" />
+      <wsdl:output message="tns:GetOutOfCountryAndStateProvSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetProdCodeByIDAndWireType">
+      <wsdl:input message="tns:GetProdCodeByIDAndWireTypeSoapIn" />
+      <wsdl:output message="tns:GetProdCodeByIDAndWireTypeSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetEndOfDayCountInfoData">
+      <wsdl:input message="tns:GetEndOfDayCountInfoDataSoapIn" />
+      <wsdl:output message="tns:GetEndOfDayCountInfoDataSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetEndOfDayEmployeeInfo">
+      <wsdl:input message="tns:GetEndOfDayEmployeeInfoSoapIn" />
+      <wsdl:output message="tns:GetEndOfDayEmployeeInfoSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetEndOfDayHourlyInfo">
+      <wsdl:input message="tns:GetEndOfDayHourlyInfoSoapIn" />
+      <wsdl:output message="tns:GetEndOfDayHourlyInfoSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetOpenDrawerData">
+      <wsdl:input message="tns:GetOpenDrawerDataSoapIn" />
+      <wsdl:output message="tns:GetOpenDrawerDataSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="HasDeclinedCreditCards">
+      <wsdl:input message="tns:HasDeclinedCreditCardsSoapIn" />
+      <wsdl:output message="tns:HasDeclinedCreditCardsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="ChangeSaleStatus">
+      <wsdl:input message="tns:ChangeSaleStatusSoapIn" />
+      <wsdl:output message="tns:ChangeSaleStatusSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetGiftCardInfo">
+      <wsdl:input message="tns:GetGiftCardInfoSoapIn" />
+      <wsdl:output message="tns:GetGiftCardInfoSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="CancelSale">
+      <wsdl:input message="tns:CancelSaleSoapIn" />
+      <wsdl:output message="tns:CancelSaleSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="ReverseCreditCardsForSale">
+      <wsdl:input message="tns:ReverseCreditCardsForSaleSoapIn" />
+      <wsdl:output message="tns:ReverseCreditCardsForSaleSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="TicketSearch">
+      <wsdl:input message="tns:TicketSearchSoapIn" />
+      <wsdl:output message="tns:TicketSearchSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="TicketSearchByDesigner">
+      <wsdl:input message="tns:TicketSearchByDesignerSoapIn" />
+      <wsdl:output message="tns:TicketSearchByDesignerSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="Initialize">
+      <wsdl:input message="tns:InitializeSoapIn" />
+      <wsdl:output message="tns:InitializeSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="DeleteTickets">
+      <wsdl:input message="tns:DeleteTicketsSoapIn" />
+      <wsdl:output message="tns:DeleteTicketsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="RefundSale">
+      <wsdl:input message="tns:RefundSaleSoapIn" />
+      <wsdl:output message="tns:RefundSaleSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="UpdateMsgTableTicketID">
+      <wsdl:input message="tns:UpdateMsgTableTicketIDSoapIn" />
+      <wsdl:output message="tns:UpdateMsgTableTicketIDSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SavePOSTerminal">
+      <wsdl:input message="tns:SavePOSTerminalSoapIn" />
+      <wsdl:output message="tns:SavePOSTerminalSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SavePOSTransaction">
+      <wsdl:input message="tns:SavePOSTransactionSoapIn" />
+      <wsdl:output message="tns:SavePOSTransactionSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SavePOSSessionDrawer">
+      <wsdl:input message="tns:SavePOSSessionDrawerSoapIn" />
+      <wsdl:output message="tns:SavePOSSessionDrawerSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SaveStandingOrderTemplate">
+      <wsdl:input message="tns:SaveStandingOrderTemplateSoapIn" />
+      <wsdl:output message="tns:SaveStandingOrderTemplateSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SaveStandingOrderSchedule">
+      <wsdl:input message="tns:SaveStandingOrderScheduleSoapIn" />
+      <wsdl:output message="tns:SaveStandingOrderScheduleSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="AllocatePayment">
+      <wsdl:input message="tns:AllocatePaymentSoapIn" />
+      <wsdl:output message="tns:AllocatePaymentSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetAbbrevDetail">
+      <wsdl:input message="tns:GetAbbrevDetailSoapIn" />
+      <wsdl:output message="tns:GetAbbrevDetailSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetDesignAnalysis">
+      <wsdl:input message="tns:GetDesignAnalysisSoapIn" />
+      <wsdl:output message="tns:GetDesignAnalysisSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetUnpaidTickets">
+      <wsdl:input message="tns:GetUnpaidTicketsSoapIn" />
+      <wsdl:output message="tns:GetUnpaidTicketsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="DoAgingTicketSearch">
+      <wsdl:input message="tns:DoAgingTicketSearchSoapIn" />
+      <wsdl:output message="tns:DoAgingTicketSearchSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="DoSalePaymentAppliedList">
+      <wsdl:input message="tns:DoSalePaymentAppliedListSoapIn" />
+      <wsdl:output message="tns:DoSalePaymentAppliedListSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetBarCodeTasks">
+      <wsdl:input message="tns:GetBarCodeTasksSoapIn" />
+      <wsdl:output message="tns:GetBarCodeTasksSoapOut" />
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="OrderEntryServiceSoap" type="tns:OrderEntryServiceSoap">
+    <soap:binding transport="http://schemas.xmlsoap.org/soap/http" />
+    <wsdl:operation name="SaveSale">
+      <soap:operation soapAction="http://localhost/webservices/SaveSale" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CompleteSale">
+      <soap:operation soapAction="http://localhost/webservices/CompleteSale" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveGiftCardResponse">
+      <soap:operation soapAction="http://localhost/webservices/SaveGiftCardResponse" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="RemoveGiftCardDesignerIDs">
+      <soap:operation soapAction="http://localhost/webservices/RemoveGiftCardDesignerIDs" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveDebitCard">
+      <soap:operation soapAction="http://localhost/webservices/SaveDebitCard" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SavePinPadCard">
+      <soap:operation soapAction="http://localhost/webservices/SavePinPadCard" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveCreditCard">
+      <soap:operation soapAction="http://localhost/webservices/SaveCreditCard" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetNewID">
+      <soap:operation soapAction="http://localhost/webservices/GetNewID" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Save_Item_Status_Change">
+      <soap:operation soapAction="http://localhost/webservices/Save_Item_Status_Change" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Save_Item_Designer_Change">
+      <soap:operation soapAction="http://localhost/webservices/Save_Item_Designer_Change" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveNote">
+      <soap:operation soapAction="http://localhost/webservices/SaveNote" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SetInvoiceEmailSent">
+      <soap:operation soapAction="http://localhost/webservices/SetInvoiceEmailSent" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSTerminal">
+      <soap:operation soapAction="http://localhost/webservices/GetPOSTerminal" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSTerminalList">
+      <soap:operation soapAction="http://localhost/webservices/GetPOSTerminalList" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSManualEntry">
+      <soap:operation soapAction="http://localhost/webservices/GetPOSManualEntry" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSSessionHistory">
+      <soap:operation soapAction="http://localhost/webservices/GetPOSSessionHistory" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSSessionDetail">
+      <soap:operation soapAction="http://localhost/webservices/GetPOSSessionDetail" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSPriorOpeningBalanceAmt">
+      <soap:operation soapAction="http://localhost/webservices/GetPOSPriorOpeningBalanceAmt" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAuthorization">
+      <soap:operation soapAction="http://localhost/webservices/GetAuthorization" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSReceipt">
+      <soap:operation soapAction="http://localhost/webservices/GetPOSReceipt" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetRecipient">
+      <soap:operation soapAction="http://localhost/webservices/GetRecipient" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetTickets">
+      <soap:operation soapAction="http://localhost/webservices/GetTickets" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetTicketIDs">
+      <soap:operation soapAction="http://localhost/webservices/GetTicketIDs" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetTicketStatus">
+      <soap:operation soapAction="http://localhost/webservices/GetTicketStatus" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveTicketStatus">
+      <soap:operation soapAction="http://localhost/webservices/SaveTicketStatus" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetCreditCardPayments">
+      <soap:operation soapAction="http://localhost/webservices/GetCreditCardPayments" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetCreditCardInfoForPayments">
+      <soap:operation soapAction="http://localhost/webservices/GetCreditCardInfoForPayments" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetCreditCardPaymentFromID">
+      <soap:operation soapAction="http://localhost/webservices/GetCreditCardPaymentFromID" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAnswers">
+      <soap:operation soapAction="http://localhost/webservices/GetAnswers" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItems">
+      <soap:operation soapAction="http://localhost/webservices/GetItems" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItemsPerSale">
+      <soap:operation soapAction="http://localhost/webservices/GetItemsPerSale" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPayments">
+      <soap:operation soapAction="http://localhost/webservices/GetPayments" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetWireOutInfo">
+      <soap:operation soapAction="http://localhost/webservices/GetWireOutInfo" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAttachedWireInfo">
+      <soap:operation soapAction="http://localhost/webservices/GetAttachedWireInfo" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetSale">
+      <soap:operation soapAction="http://localhost/webservices/GetSale" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetComments">
+      <soap:operation soapAction="http://localhost/webservices/GetComments" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetCardRecipients">
+      <soap:operation soapAction="http://localhost/webservices/GetCardRecipients" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetWireOutOrderInfo">
+      <soap:operation soapAction="http://localhost/webservices/GetWireOutOrderInfo" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAddress">
+      <soap:operation soapAction="http://localhost/webservices/GetAddress" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPhone">
+      <soap:operation soapAction="http://localhost/webservices/GetPhone" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPhonedOrderInfo">
+      <soap:operation soapAction="http://localhost/webservices/GetPhonedOrderInfo" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetSaleChangeStatus">
+      <soap:operation soapAction="http://localhost/webservices/GetSaleChangeStatus" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetDeliveryDriver">
+      <soap:operation soapAction="http://localhost/webservices/GetDeliveryDriver" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSTransactionForSale">
+      <soap:operation soapAction="http://localhost/webservices/GetPOSTransactionForSale" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetStandingOrderTemplate">
+      <soap:operation soapAction="http://localhost/webservices/GetStandingOrderTemplate" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOutOfCountryAndStateProv">
+      <soap:operation soapAction="http://localhost/webservices/GetOutOfCountryAndStateProv" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetProdCodeByIDAndWireType">
+      <soap:operation soapAction="http://localhost/webservices/GetProdCodeByIDAndWireType" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetEndOfDayCountInfoData">
+      <soap:operation soapAction="http://localhost/webservices/GetEndOfDayCountInfoData" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetEndOfDayEmployeeInfo">
+      <soap:operation soapAction="http://localhost/webservices/GetEndOfDayEmployeeInfo" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetEndOfDayHourlyInfo">
+      <soap:operation soapAction="http://localhost/webservices/GetEndOfDayHourlyInfo" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOpenDrawerData">
+      <soap:operation soapAction="http://localhost/webservices/GetOpenDrawerData" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="HasDeclinedCreditCards">
+      <soap:operation soapAction="http://localhost/webservices/HasDeclinedCreditCards" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="ChangeSaleStatus">
+      <soap:operation soapAction="http://localhost/webservices/ChangeSaleStatus" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetGiftCardInfo">
+      <soap:operation soapAction="http://localhost/webservices/GetGiftCardInfo" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CancelSale">
+      <soap:operation soapAction="http://localhost/webservices/CancelSale" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="ReverseCreditCardsForSale">
+      <soap:operation soapAction="http://localhost/webservices/ReverseCreditCardsForSale" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="TicketSearch">
+      <soap:operation soapAction="http://localhost/webservices/TicketSearch" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="TicketSearchByDesigner">
+      <soap:operation soapAction="http://localhost/webservices/TicketSearchByDesigner" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Initialize">
+      <soap:operation soapAction="http://localhost/webservices/Initialize" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteTickets">
+      <soap:operation soapAction="http://localhost/webservices/DeleteTickets" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="RefundSale">
+      <soap:operation soapAction="http://localhost/webservices/RefundSale" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="UpdateMsgTableTicketID">
+      <soap:operation soapAction="http://localhost/webservices/UpdateMsgTableTicketID" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SavePOSTerminal">
+      <soap:operation soapAction="http://localhost/webservices/SavePOSTerminal" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SavePOSTransaction">
+      <soap:operation soapAction="http://localhost/webservices/SavePOSTransaction" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SavePOSSessionDrawer">
+      <soap:operation soapAction="http://localhost/webservices/SavePOSSessionDrawer" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveStandingOrderTemplate">
+      <soap:operation soapAction="http://localhost/webservices/SaveStandingOrderTemplate" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveStandingOrderSchedule">
+      <soap:operation soapAction="http://localhost/webservices/SaveStandingOrderSchedule" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="AllocatePayment">
+      <soap:operation soapAction="http://localhost/webservices/AllocatePayment" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAbbrevDetail">
+      <soap:operation soapAction="http://localhost/webservices/GetAbbrevDetail" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetDesignAnalysis">
+      <soap:operation soapAction="http://localhost/webservices/GetDesignAnalysis" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetUnpaidTickets">
+      <soap:operation soapAction="http://localhost/webservices/GetUnpaidTickets" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DoAgingTicketSearch">
+      <soap:operation soapAction="http://localhost/webservices/DoAgingTicketSearch" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DoSalePaymentAppliedList">
+      <soap:operation soapAction="http://localhost/webservices/DoSalePaymentAppliedList" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetBarCodeTasks">
+      <soap:operation soapAction="http://localhost/webservices/GetBarCodeTasks" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:binding name="OrderEntryServiceSoap12" type="tns:OrderEntryServiceSoap">
+    <soap12:binding transport="http://schemas.xmlsoap.org/soap/http" />
+    <wsdl:operation name="SaveSale">
+      <soap12:operation soapAction="http://localhost/webservices/SaveSale" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CompleteSale">
+      <soap12:operation soapAction="http://localhost/webservices/CompleteSale" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveGiftCardResponse">
+      <soap12:operation soapAction="http://localhost/webservices/SaveGiftCardResponse" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="RemoveGiftCardDesignerIDs">
+      <soap12:operation soapAction="http://localhost/webservices/RemoveGiftCardDesignerIDs" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveDebitCard">
+      <soap12:operation soapAction="http://localhost/webservices/SaveDebitCard" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SavePinPadCard">
+      <soap12:operation soapAction="http://localhost/webservices/SavePinPadCard" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveCreditCard">
+      <soap12:operation soapAction="http://localhost/webservices/SaveCreditCard" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetNewID">
+      <soap12:operation soapAction="http://localhost/webservices/GetNewID" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Save_Item_Status_Change">
+      <soap12:operation soapAction="http://localhost/webservices/Save_Item_Status_Change" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Save_Item_Designer_Change">
+      <soap12:operation soapAction="http://localhost/webservices/Save_Item_Designer_Change" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveNote">
+      <soap12:operation soapAction="http://localhost/webservices/SaveNote" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SetInvoiceEmailSent">
+      <soap12:operation soapAction="http://localhost/webservices/SetInvoiceEmailSent" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSTerminal">
+      <soap12:operation soapAction="http://localhost/webservices/GetPOSTerminal" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSTerminalList">
+      <soap12:operation soapAction="http://localhost/webservices/GetPOSTerminalList" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSManualEntry">
+      <soap12:operation soapAction="http://localhost/webservices/GetPOSManualEntry" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSSessionHistory">
+      <soap12:operation soapAction="http://localhost/webservices/GetPOSSessionHistory" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSSessionDetail">
+      <soap12:operation soapAction="http://localhost/webservices/GetPOSSessionDetail" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSPriorOpeningBalanceAmt">
+      <soap12:operation soapAction="http://localhost/webservices/GetPOSPriorOpeningBalanceAmt" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAuthorization">
+      <soap12:operation soapAction="http://localhost/webservices/GetAuthorization" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSReceipt">
+      <soap12:operation soapAction="http://localhost/webservices/GetPOSReceipt" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetRecipient">
+      <soap12:operation soapAction="http://localhost/webservices/GetRecipient" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetTickets">
+      <soap12:operation soapAction="http://localhost/webservices/GetTickets" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetTicketIDs">
+      <soap12:operation soapAction="http://localhost/webservices/GetTicketIDs" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetTicketStatus">
+      <soap12:operation soapAction="http://localhost/webservices/GetTicketStatus" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveTicketStatus">
+      <soap12:operation soapAction="http://localhost/webservices/SaveTicketStatus" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetCreditCardPayments">
+      <soap12:operation soapAction="http://localhost/webservices/GetCreditCardPayments" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetCreditCardInfoForPayments">
+      <soap12:operation soapAction="http://localhost/webservices/GetCreditCardInfoForPayments" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetCreditCardPaymentFromID">
+      <soap12:operation soapAction="http://localhost/webservices/GetCreditCardPaymentFromID" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAnswers">
+      <soap12:operation soapAction="http://localhost/webservices/GetAnswers" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItems">
+      <soap12:operation soapAction="http://localhost/webservices/GetItems" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItemsPerSale">
+      <soap12:operation soapAction="http://localhost/webservices/GetItemsPerSale" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPayments">
+      <soap12:operation soapAction="http://localhost/webservices/GetPayments" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetWireOutInfo">
+      <soap12:operation soapAction="http://localhost/webservices/GetWireOutInfo" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAttachedWireInfo">
+      <soap12:operation soapAction="http://localhost/webservices/GetAttachedWireInfo" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetSale">
+      <soap12:operation soapAction="http://localhost/webservices/GetSale" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetComments">
+      <soap12:operation soapAction="http://localhost/webservices/GetComments" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetCardRecipients">
+      <soap12:operation soapAction="http://localhost/webservices/GetCardRecipients" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetWireOutOrderInfo">
+      <soap12:operation soapAction="http://localhost/webservices/GetWireOutOrderInfo" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAddress">
+      <soap12:operation soapAction="http://localhost/webservices/GetAddress" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPhone">
+      <soap12:operation soapAction="http://localhost/webservices/GetPhone" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPhonedOrderInfo">
+      <soap12:operation soapAction="http://localhost/webservices/GetPhonedOrderInfo" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetSaleChangeStatus">
+      <soap12:operation soapAction="http://localhost/webservices/GetSaleChangeStatus" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetDeliveryDriver">
+      <soap12:operation soapAction="http://localhost/webservices/GetDeliveryDriver" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPOSTransactionForSale">
+      <soap12:operation soapAction="http://localhost/webservices/GetPOSTransactionForSale" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetStandingOrderTemplate">
+      <soap12:operation soapAction="http://localhost/webservices/GetStandingOrderTemplate" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOutOfCountryAndStateProv">
+      <soap12:operation soapAction="http://localhost/webservices/GetOutOfCountryAndStateProv" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetProdCodeByIDAndWireType">
+      <soap12:operation soapAction="http://localhost/webservices/GetProdCodeByIDAndWireType" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetEndOfDayCountInfoData">
+      <soap12:operation soapAction="http://localhost/webservices/GetEndOfDayCountInfoData" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetEndOfDayEmployeeInfo">
+      <soap12:operation soapAction="http://localhost/webservices/GetEndOfDayEmployeeInfo" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetEndOfDayHourlyInfo">
+      <soap12:operation soapAction="http://localhost/webservices/GetEndOfDayHourlyInfo" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOpenDrawerData">
+      <soap12:operation soapAction="http://localhost/webservices/GetOpenDrawerData" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="HasDeclinedCreditCards">
+      <soap12:operation soapAction="http://localhost/webservices/HasDeclinedCreditCards" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="ChangeSaleStatus">
+      <soap12:operation soapAction="http://localhost/webservices/ChangeSaleStatus" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetGiftCardInfo">
+      <soap12:operation soapAction="http://localhost/webservices/GetGiftCardInfo" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CancelSale">
+      <soap12:operation soapAction="http://localhost/webservices/CancelSale" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="ReverseCreditCardsForSale">
+      <soap12:operation soapAction="http://localhost/webservices/ReverseCreditCardsForSale" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="TicketSearch">
+      <soap12:operation soapAction="http://localhost/webservices/TicketSearch" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="TicketSearchByDesigner">
+      <soap12:operation soapAction="http://localhost/webservices/TicketSearchByDesigner" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Initialize">
+      <soap12:operation soapAction="http://localhost/webservices/Initialize" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteTickets">
+      <soap12:operation soapAction="http://localhost/webservices/DeleteTickets" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="RefundSale">
+      <soap12:operation soapAction="http://localhost/webservices/RefundSale" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="UpdateMsgTableTicketID">
+      <soap12:operation soapAction="http://localhost/webservices/UpdateMsgTableTicketID" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SavePOSTerminal">
+      <soap12:operation soapAction="http://localhost/webservices/SavePOSTerminal" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SavePOSTransaction">
+      <soap12:operation soapAction="http://localhost/webservices/SavePOSTransaction" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SavePOSSessionDrawer">
+      <soap12:operation soapAction="http://localhost/webservices/SavePOSSessionDrawer" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveStandingOrderTemplate">
+      <soap12:operation soapAction="http://localhost/webservices/SaveStandingOrderTemplate" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveStandingOrderSchedule">
+      <soap12:operation soapAction="http://localhost/webservices/SaveStandingOrderSchedule" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="AllocatePayment">
+      <soap12:operation soapAction="http://localhost/webservices/AllocatePayment" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAbbrevDetail">
+      <soap12:operation soapAction="http://localhost/webservices/GetAbbrevDetail" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetDesignAnalysis">
+      <soap12:operation soapAction="http://localhost/webservices/GetDesignAnalysis" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetUnpaidTickets">
+      <soap12:operation soapAction="http://localhost/webservices/GetUnpaidTickets" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DoAgingTicketSearch">
+      <soap12:operation soapAction="http://localhost/webservices/DoAgingTicketSearch" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DoSalePaymentAppliedList">
+      <soap12:operation soapAction="http://localhost/webservices/DoSalePaymentAppliedList" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetBarCodeTasks">
+      <soap12:operation soapAction="http://localhost/webservices/GetBarCodeTasks" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="OrderEntryService">
+    <wsdl:documentation xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">FTD Mercury Order entry Web Service</wsdl:documentation>
+    <wsdl:port name="OrderEntryServiceSoap" binding="tns:OrderEntryServiceSoap">
+      <soap:address location="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx" />
+    </wsdl:port>
+    <wsdl:port name="OrderEntryServiceSoap12" binding="tns:OrderEntryServiceSoap12">
+      <soap12:address location="http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx" />
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

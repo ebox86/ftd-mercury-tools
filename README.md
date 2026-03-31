@@ -31,8 +31,8 @@ Utilities and userscripts for improving workflows in FTD's Mercury client and Me
    - Purpose: Emulates legacy `xoap.weather.com` XML endpoints for Mercury dashboard weather gadget on localhost.
 2. **Pi Kiosk Dashboard Starter**
    - Path: `pi-kiosk-dashboard-starter/`
-   - Type: Reference + mock-data + local Node mock server
-   - Purpose: Jumpstart Raspberry Pi workflow dashboard frontend prototyping against Mercury job-stage APIs and Mercury-like contracts.
+   - Type: Reference + local Node workflow bridge + React kiosk app
+   - Purpose: Live Mercury workflow dashboard for ticket, design, and delivery status visibility.
 
 ## Requirements
 
@@ -46,7 +46,7 @@ Utilities and userscripts for improving workflows in FTD's Mercury client and Me
 - `README.md` - root project documentation
 - `mercury-hq-delivery-barcode-lookup/` - barcode lookup userscript and tool-specific docs
 - `weather-xoap-shim/` - local XOAP weather compatibility shim + install scripts
-- `pi-kiosk-dashboard-starter/` - Mercury workflow API snapshots and bogus mock objects for kiosk UI development
+- `pi-kiosk-dashboard-starter/` - Mercury workflow API snapshots, live workflow bridge, and kiosk dashboard UI
 - `public/` - shared static assets (if needed later)
 
 ## Quick Start
