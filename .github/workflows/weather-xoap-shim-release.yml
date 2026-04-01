@@ -100,11 +100,34 @@ jobs:
           "hash=$hash" >> $env:GITHUB_OUTPUT
           "hash_file=$hashFile" >> $env:GITHUB_OUTPUT
 
+      - name: Prepare release notes
+        id: notes
+        run: |
+          $version = "${{ steps.meta.outputs.version }}"
+          $installerFile = "FTD.WeatherXoapShim.Setup.$version.exe"
+          $hash = "${{ steps.hash.outputs.hash }}"
+          $notesPath = Join-Path $env:RUNNER_TEMP "weather-xoap-shim-release-notes.md"
+
+          @"
+          Weather XOAP Shim installer release.
+
+          Included assets:
+          - $installerFile
+          - $installerFile.sha256.txt
+
+          SHA256:
+          - $hash
+          "@ | Set-Content -Path $notesPath
+
+          "body_path=$notesPath" >> $env:GITHUB_OUTPUT
+
       - name: Create or update GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: Weather XOAP Shim ${{ steps.meta.outputs.version }}
+          body_path: ${{ steps.notes.outputs.body_path }}
+          generate_release_notes: false
           files: |
             ${{ steps.hash.outputs.installer }}
             ${{ steps.hash.outputs.hash_file }}
