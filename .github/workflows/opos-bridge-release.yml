@@ -106,6 +106,7 @@ jobs:
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: OPOS Bridge ${{ steps.meta.outputs.version }}
+          make_latest: false
           files: |
             ${{ steps.hash.outputs.installer }}
             ${{ steps.hash.outputs.hash_file }}

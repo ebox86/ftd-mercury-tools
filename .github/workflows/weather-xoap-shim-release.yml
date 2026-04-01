@@ -127,6 +127,7 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: Weather XOAP Shim ${{ steps.meta.outputs.version }}
           body_path: ${{ steps.notes.outputs.body_path }}
+          make_latest: false
           generate_release_notes: false
           files: |
             ${{ steps.hash.outputs.installer }}
