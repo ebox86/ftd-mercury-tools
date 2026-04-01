@@ -1,0 +1,2732 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<wsdl:definitions xmlns:tm="http://microsoft.com/wsdl/mime/textMatching/" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:mime="http://schemas.xmlsoap.org/wsdl/mime/" xmlns:tns="http://localhost/webservices/" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:s="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/" xmlns:http="http://schemas.xmlsoap.org/wsdl/http/" targetNamespace="http://localhost/webservices/" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">
+  <wsdl:documentation xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">Mercury 5.1 - Delivery Processing Web Service</wsdl:documentation>
+  <wsdl:types>
+    <s:schema elementFormDefault="qualified" targetNamespace="http://localhost/webservices/">
+      <s:import namespace="http://tempuri.org/StoreDataset.xsd" />
+      <s:import namespace="http://tempuri.org/PriorityDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/StoreDetailsDataset.xsd" />
+      <s:import namespace="http://tempuri.org/ZoneDataset.xsd" />
+      <s:import namespace="http://tempuri.org/ZoneMIFDataset.xsd" />
+      <s:import namespace="http://tempuri.org/ZoneSummaryDataset.xsd" />
+      <s:import namespace="http://tempuri.org/ZoneTypeDataset.xsd" />
+      <s:import namespace="http://tempuri.org/FailedOrderDataset.xsd" />
+      <s:import namespace="http://tempuri.org/OrderDataset.xsd" />
+      <s:import namespace="http://tempuri.org/ConfigDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/ItemDataset.xsd" />
+      <s:import namespace="http://tempuri.org/OrderDetailsDataset.xsd" />
+      <s:import namespace="http://ftdi.com/RouteDataset.xsd" />
+      <s:import namespace="http://tempuri.org/RouteSummaryDataset.xsd" />
+      <s:import namespace="http://tempuri.org/RouteStopDataset.xsd" />
+      <s:import namespace="http://tempuri.org/DriverEmpDataset.xsd" />
+      <s:import namespace="http://tempuri.org/EmpDataset.xsd" />
+      <s:import namespace="http://tempuri.org/TruckDataset.xsd" />
+      <s:import namespace="http://tempuri.org/TruckReturnDataset.xsd" />
+      <s:import namespace="http://tempuri.org/TruckStopDataset.xsd" />
+      <s:import namespace="http://tempuri.org/NoteCodeDataset.xsd" />
+      <s:import namespace="http://tempuri.org/RemoteDeviceDataset.xsd" />
+      <s:import namespace="http://tempuri.org/RouteCompletedDataSet.xsd" />
+      <s:import namespace="http://ftdi.com/GPSDataset.xsd" />
+      <s:import namespace="http://tempuri.org/StatesDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/PushpinDataset.xsd" />
+      <s:import namespace="http://tempuri.org/AddressList.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=OrderDataset" namespace="http://tempuri.org/OrderDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=TruckReturnDataset" namespace="http://tempuri.org/TruckReturnDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=TruckStopDataset" namespace="http://tempuri.org/TruckStopDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=FailedOrderDataset" namespace="http://tempuri.org/FailedOrderDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=RouteDataset" namespace="http://ftdi.com/RouteDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=RouteStopDataset" namespace="http://tempuri.org/RouteStopDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=PushpinDataset" namespace="http://tempuri.org/PushpinDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=ConfigDataSet" namespace="http://tempuri.org/ConfigDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=PriorityDataSet" namespace="http://tempuri.org/PriorityDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=RouteCompletedDataSet" namespace="http://tempuri.org/RouteCompletedDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=ZoneSummaryDataset" namespace="http://tempuri.org/ZoneSummaryDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=DriverEmpDataset" namespace="http://tempuri.org/DriverEmpDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=ZoneMIFDataset" namespace="http://tempuri.org/ZoneMIFDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=TruckDataset" namespace="http://tempuri.org/TruckDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=RemoteDeviceDataset" namespace="http://tempuri.org/RemoteDeviceDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=StoreDataset" namespace="http://tempuri.org/StoreDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=ZoneDataset" namespace="http://tempuri.org/ZoneDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=NoteCodeDataset" namespace="http://tempuri.org/NoteCodeDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=StoreDetailsDataset" namespace="http://tempuri.org/StoreDetailsDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=AddressList" namespace="http://tempuri.org/AddressList.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=RouteSummaryDataset" namespace="http://tempuri.org/RouteSummaryDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=EmpDataset" namespace="http://tempuri.org/EmpDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=ItemDataset" namespace="http://tempuri.org/ItemDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=GPSDataset" namespace="http://ftdi.com/GPSDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=OrderDetailsDataset" namespace="http://tempuri.org/OrderDetailsDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=StatesDataSet" namespace="http://tempuri.org/StatesDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx?schema=ZoneTypeDataset" namespace="http://tempuri.org/ZoneTypeDataset.xsd" />
+      <s:element name="LoadStore">
+        <s:complexType />
+      </s:element>
+      <s:element name="LoadStoreResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadStoreResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/StoreDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadPriority">
+        <s:complexType />
+      </s:element>
+      <s:element name="LoadPriorityResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadPriorityResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/PriorityDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadMainStore">
+        <s:complexType />
+      </s:element>
+      <s:element name="LoadMainStoreResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadMainStoreResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/StoreDetailsDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="IsMainCanadian">
+        <s:complexType />
+      </s:element>
+      <s:element name="IsMainCanadianResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="IsMainCanadianResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadStoreDetails">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="storeId" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadStoreDetailsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadStoreDetailsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/StoreDetailsDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadZone">
+        <s:complexType />
+      </s:element>
+      <s:element name="LoadZoneResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadZoneResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ZoneDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadZoneByID">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="zones" type="tns:ArrayOfAnyType" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ArrayOfAnyType">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="anyType" nillable="true" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="LoadZoneByIDResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadZoneByIDResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ZoneDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadZoneMIF">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="zones" type="tns:ArrayOfAnyType" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadZoneMIFResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadZoneMIFResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ZoneMIFDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadZoneSummary">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="date" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="thrudate" type="s:dateTime" />
+            <s:element minOccurs="0" maxOccurs="1" name="stores" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="0" maxOccurs="1" name="priorityIDList" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="designedOnly" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadZoneSummaryResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadZoneSummaryResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ZoneSummaryDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadZoneType">
+        <s:complexType />
+      </s:element>
+      <s:element name="LoadZoneTypeResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadZoneTypeResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ZoneTypeDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadFailedDelivery">
+        <s:complexType />
+      </s:element>
+      <s:element name="LoadFailedDeliveryResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadFailedDeliveryResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/FailedOrderDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrder">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryDate" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryThruDate" type="s:dateTime" />
+            <s:element minOccurs="0" maxOccurs="1" name="stores" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="0" maxOccurs="1" name="orderId" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadOrderResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/OrderDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderByZone">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="zones" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryDate" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryThruDate" type="s:dateTime" />
+            <s:element minOccurs="0" maxOccurs="1" name="stores" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="1" maxOccurs="1" name="designedOrders" type="s:boolean" />
+            <s:element minOccurs="0" maxOccurs="1" name="priorityIDList" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderByZoneResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadOrderByZoneResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/OrderDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderByOrderList">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="orders" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryDate" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryThruDate" type="s:dateTime" />
+            <s:element minOccurs="0" maxOccurs="1" name="stores" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="1" maxOccurs="1" name="designedOrders" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderByOrderListResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadOrderByOrderListResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/OrderDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderAllStore">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="zones" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryDate" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryThruDate" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="designedOrders" type="s:boolean" />
+            <s:element minOccurs="0" maxOccurs="1" name="priorityIDList" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderAllStoreResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadOrderAllStoreResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/OrderDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadConfiguration">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="configGroup" type="tns:ConfigurationGroup" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:simpleType name="ConfigurationGroup">
+        <s:restriction base="s:string">
+          <s:enumeration value="CommPool2" />
+          <s:enumeration value="Email" />
+          <s:enumeration value="Fax" />
+          <s:enumeration value="AddressVerification" />
+          <s:enumeration value="WebAddressVerification" />
+        </s:restriction>
+      </s:simpleType>
+      <s:element name="LoadConfigurationResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadConfigurationResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ConfigDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderByZonesAndRoutes">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="zone" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryDate" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryThruDate" type="s:dateTime" />
+            <s:element minOccurs="0" maxOccurs="1" name="stores" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="0" maxOccurs="1" name="routeList" type="tns:ArrayOfAnyType" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderByZonesAndRoutesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadOrderByZonesAndRoutesResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/OrderDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderByRoutes">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="routeList" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryDate" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryThruDate" type="s:dateTime" />
+            <s:element minOccurs="0" maxOccurs="1" name="stores" type="tns:ArrayOfAnyType" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderByRoutesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadOrderByRoutesResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/OrderDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadItems">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="invoiceList" type="tns:ArrayOfAnyType" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadItemsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadItemsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ItemDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderDetails">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ticketID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadOrderDetailsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadOrderDetailsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/OrderDetailsDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadRoute">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="routes" type="tns:ArrayOfAnyType" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadRouteResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadRouteResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://ftdi.com/RouteDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadCompletedRoutes">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="routes" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="1" maxOccurs="1" name="completeInd" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadCompletedRoutesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadCompletedRoutesResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://ftdi.com/RouteDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadRouteByStore">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="stores" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryDate" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryThruDate" type="s:dateTime" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadRouteByStoreResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadRouteByStoreResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://ftdi.com/RouteDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadSavedRouteSummary">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="stores" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="1" maxOccurs="1" name="date" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="thrudate" type="s:dateTime" />
+            <s:element minOccurs="0" maxOccurs="1" name="orderNumber" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadSavedRouteSummaryResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadSavedRouteSummaryResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/RouteSummaryDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetSavedRouteDateRange">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetSavedRouteDateRangeResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetSavedRouteDateRangeResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:element ref="s:schema" />
+                  <s:any />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadInProgressRouteSummary">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="stores" type="tns:ArrayOfAnyType" />
+            <s:element minOccurs="1" maxOccurs="1" name="date" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="thrudate" type="s:dateTime" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadInProgressRouteSummaryResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadInProgressRouteSummaryResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/RouteSummaryDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadStop">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="routes" type="tns:ArrayOfAnyType" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadStopResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadStopResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/RouteStopDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetTaxCodeList">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetTaxCodeListResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetTaxCodeListResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:element ref="s:schema" />
+                  <s:any />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadDriver">
+        <s:complexType />
+      </s:element>
+      <s:element name="LoadDriverResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadDriverResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/DriverEmpDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadEmp">
+        <s:complexType />
+      </s:element>
+      <s:element name="LoadEmpResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadEmpResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/EmpDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadTruck">
+        <s:complexType />
+      </s:element>
+      <s:element name="LoadTruckResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadTruckResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/TruckDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadTruckReturn">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="storeId" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="date" type="s:dateTime" />
+            <s:element minOccurs="1" maxOccurs="1" name="thrudate" type="s:dateTime" />
+            <s:element minOccurs="0" maxOccurs="1" name="orderNumber" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="driverId" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadTruckReturnResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadTruckReturnResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/TruckReturnDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadTruckStop">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="route" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadTruckStopResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadTruckStopResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/TruckStopDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadNoteCodes">
+        <s:complexType />
+      </s:element>
+      <s:element name="LoadNoteCodesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadNoteCodesResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/NoteCodeDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadRemoteDevices">
+        <s:complexType />
+      </s:element>
+      <s:element name="LoadRemoteDevicesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadRemoteDevicesResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/RemoteDeviceDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="IsRouteExists">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="deliveryDate" type="s:dateTime" />
+            <s:element minOccurs="0" maxOccurs="1" name="routeName" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="IsRouteExistsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="IsRouteExistsResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveZone">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="zoneDataSet">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ZoneDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="1" maxOccurs="1" name="overwrite" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveZoneResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="zoneDataSet">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/ZoneDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveRoute">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="routeDataSet">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://ftdi.com/RouteDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="0" maxOccurs="1" name="stopDataSet">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/RouteStopDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="1" maxOccurs="1" name="overwrite" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveRouteResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="routeDataSet">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://ftdi.com/RouteDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="0" maxOccurs="1" name="stopDataSet">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/RouteStopDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveTruckReturn">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="truckReturn">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/TruckReturnDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="1" maxOccurs="1" name="overwrite" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveTruckReturnResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="truckReturn">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/TruckReturnDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveDeliveryStatus">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="deliveryStatus">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/TruckStopDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="1" maxOccurs="1" name="overwrite" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveDeliveryStatusResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="deliveryStatus">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/TruckStopDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="Reroute">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="failedOrderDataSet">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/FailedOrderDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="1" maxOccurs="1" name="overwrite" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="RerouteResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="failedOrderDataSet">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/FailedOrderDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DoAutoAddressVerification">
+        <s:complexType />
+      </s:element>
+      <s:element name="DoAutoAddressVerificationResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="DoAutoAddressVerificationResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="IsGPSDeviceLicensed">
+        <s:complexType />
+      </s:element>
+      <s:element name="IsGPSDeviceLicensedResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="IsGPSDeviceLicensedResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="IsMobileAppLicensed">
+        <s:complexType />
+      </s:element>
+      <s:element name="IsMobileAppLicensedResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="IsMobileAppLicensedResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="RouteCompletedLoad">
+        <s:complexType />
+      </s:element>
+      <s:element name="RouteCompletedLoadResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="RouteCompletedLoadResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/RouteCompletedDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadGPSData">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="routes" type="tns:ArrayOfAnyType" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadGPSDataResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadGPSDataResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://ftdi.com/GPSDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="ModifyRouteAndTicketStatus">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="routeID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="modifyData" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="ModifyRouteAndTicketStatusResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ModifyRouteAndTicketStatusResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="UpdateOrderData">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="orders">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/OrderDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="1" maxOccurs="1" name="overwrite" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="UpdateOrderDataResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="UpdateOrderDataResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/OrderDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+            <s:element minOccurs="0" maxOccurs="1" name="orders">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/OrderDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="UploadMobileAppData">
+        <s:complexType />
+      </s:element>
+      <s:element name="UploadMobileAppDataResponse">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetStates">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetStatesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetStatesResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/StatesDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadSavedPushpins">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="id" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadSavedPushpinsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadSavedPushpinsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/PushpinDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SavePushpin">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="id" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="name" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="color" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="addr" type="tns:Address" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="Address">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:MercuryDataComponentBase">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="ID" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="CityID" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="StateProvinceID" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="CountryID" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="AddressType" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="IndvOrgID" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="IndvOrgTypeCode" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="PrimaryInd" type="s:short" />
+              <s:element minOccurs="0" maxOccurs="1" name="PostalCode" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="StreetAddress" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="VerifiedInd" type="s:short" />
+              <s:element minOccurs="0" maxOccurs="1" name="Latitude" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Longitude" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="FirmName" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="CityName" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="StateProvinceName" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="CountryName" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="CityStateZipUnparsed" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Description" type="s:string" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="MercuryDataComponentBase" abstract="true">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:MercuryComponentBase" />
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="MercuryComponentBase" abstract="true" />
+      <s:element name="SavePushpinResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="id" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeletePushpin">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="id" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeletePushpinResponse">
+        <s:complexType />
+      </s:element>
+      <s:element name="LoadAddressList">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="addrTypeID" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="indvOrgID" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="indvOrgTypCode" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoadAddressListResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="LoadAddressListResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/AddressList.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveAddr">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="OrgId" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="AddrType" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="addr" type="tns:Address" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SaveAddrResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="OrgId" type="s:int" />
+            <s:element minOccurs="0" maxOccurs="1" name="AddrType" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+    </s:schema>
+  </wsdl:types>
+  <wsdl:message name="LoadStoreSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadStore" />
+  </wsdl:message>
+  <wsdl:message name="LoadStoreSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadStoreResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadPrioritySoapIn">
+    <wsdl:part name="parameters" element="tns:LoadPriority" />
+  </wsdl:message>
+  <wsdl:message name="LoadPrioritySoapOut">
+    <wsdl:part name="parameters" element="tns:LoadPriorityResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadMainStoreSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadMainStore" />
+  </wsdl:message>
+  <wsdl:message name="LoadMainStoreSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadMainStoreResponse" />
+  </wsdl:message>
+  <wsdl:message name="IsMainCanadianSoapIn">
+    <wsdl:part name="parameters" element="tns:IsMainCanadian" />
+  </wsdl:message>
+  <wsdl:message name="IsMainCanadianSoapOut">
+    <wsdl:part name="parameters" element="tns:IsMainCanadianResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadStoreDetailsSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadStoreDetails" />
+  </wsdl:message>
+  <wsdl:message name="LoadStoreDetailsSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadStoreDetailsResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadZoneSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadZone" />
+  </wsdl:message>
+  <wsdl:message name="LoadZoneSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadZoneResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadZoneByIDSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadZoneByID" />
+  </wsdl:message>
+  <wsdl:message name="LoadZoneByIDSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadZoneByIDResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadZoneMIFSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadZoneMIF" />
+  </wsdl:message>
+  <wsdl:message name="LoadZoneMIFSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadZoneMIFResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadZoneSummarySoapIn">
+    <wsdl:part name="parameters" element="tns:LoadZoneSummary" />
+  </wsdl:message>
+  <wsdl:message name="LoadZoneSummarySoapOut">
+    <wsdl:part name="parameters" element="tns:LoadZoneSummaryResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadZoneTypeSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadZoneType" />
+  </wsdl:message>
+  <wsdl:message name="LoadZoneTypeSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadZoneTypeResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadFailedDeliverySoapIn">
+    <wsdl:part name="parameters" element="tns:LoadFailedDelivery" />
+  </wsdl:message>
+  <wsdl:message name="LoadFailedDeliverySoapOut">
+    <wsdl:part name="parameters" element="tns:LoadFailedDeliveryResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadOrder" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadOrderResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderByZoneSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadOrderByZone" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderByZoneSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadOrderByZoneResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderByOrderListSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadOrderByOrderList" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderByOrderListSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadOrderByOrderListResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderAllStoreSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadOrderAllStore" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderAllStoreSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadOrderAllStoreResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadConfigurationSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadConfiguration" />
+  </wsdl:message>
+  <wsdl:message name="LoadConfigurationSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadConfigurationResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderByZonesAndRoutesSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadOrderByZonesAndRoutes" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderByZonesAndRoutesSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadOrderByZonesAndRoutesResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderByRoutesSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadOrderByRoutes" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderByRoutesSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadOrderByRoutesResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadItemsSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadItems" />
+  </wsdl:message>
+  <wsdl:message name="LoadItemsSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadItemsResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderDetailsSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadOrderDetails" />
+  </wsdl:message>
+  <wsdl:message name="LoadOrderDetailsSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadOrderDetailsResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadRouteSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadRoute" />
+  </wsdl:message>
+  <wsdl:message name="LoadRouteSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadRouteResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadCompletedRoutesSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadCompletedRoutes" />
+  </wsdl:message>
+  <wsdl:message name="LoadCompletedRoutesSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadCompletedRoutesResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadRouteByStoreSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadRouteByStore" />
+  </wsdl:message>
+  <wsdl:message name="LoadRouteByStoreSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadRouteByStoreResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadSavedRouteSummarySoapIn">
+    <wsdl:part name="parameters" element="tns:LoadSavedRouteSummary" />
+  </wsdl:message>
+  <wsdl:message name="LoadSavedRouteSummarySoapOut">
+    <wsdl:part name="parameters" element="tns:LoadSavedRouteSummaryResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetSavedRouteDateRangeSoapIn">
+    <wsdl:part name="parameters" element="tns:GetSavedRouteDateRange" />
+  </wsdl:message>
+  <wsdl:message name="GetSavedRouteDateRangeSoapOut">
+    <wsdl:part name="parameters" element="tns:GetSavedRouteDateRangeResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadInProgressRouteSummarySoapIn">
+    <wsdl:part name="parameters" element="tns:LoadInProgressRouteSummary" />
+  </wsdl:message>
+  <wsdl:message name="LoadInProgressRouteSummarySoapOut">
+    <wsdl:part name="parameters" element="tns:LoadInProgressRouteSummaryResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadStopSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadStop" />
+  </wsdl:message>
+  <wsdl:message name="LoadStopSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadStopResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetTaxCodeListSoapIn">
+    <wsdl:part name="parameters" element="tns:GetTaxCodeList" />
+  </wsdl:message>
+  <wsdl:message name="GetTaxCodeListSoapOut">
+    <wsdl:part name="parameters" element="tns:GetTaxCodeListResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadDriverSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadDriver" />
+  </wsdl:message>
+  <wsdl:message name="LoadDriverSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadDriverResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadEmpSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadEmp" />
+  </wsdl:message>
+  <wsdl:message name="LoadEmpSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadEmpResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadTruckSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadTruck" />
+  </wsdl:message>
+  <wsdl:message name="LoadTruckSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadTruckResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadTruckReturnSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadTruckReturn" />
+  </wsdl:message>
+  <wsdl:message name="LoadTruckReturnSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadTruckReturnResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadTruckStopSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadTruckStop" />
+  </wsdl:message>
+  <wsdl:message name="LoadTruckStopSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadTruckStopResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadNoteCodesSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadNoteCodes" />
+  </wsdl:message>
+  <wsdl:message name="LoadNoteCodesSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadNoteCodesResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadRemoteDevicesSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadRemoteDevices" />
+  </wsdl:message>
+  <wsdl:message name="LoadRemoteDevicesSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadRemoteDevicesResponse" />
+  </wsdl:message>
+  <wsdl:message name="IsRouteExistsSoapIn">
+    <wsdl:part name="parameters" element="tns:IsRouteExists" />
+  </wsdl:message>
+  <wsdl:message name="IsRouteExistsSoapOut">
+    <wsdl:part name="parameters" element="tns:IsRouteExistsResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveZoneSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveZone" />
+  </wsdl:message>
+  <wsdl:message name="SaveZoneSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveZoneResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveRouteSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveRoute" />
+  </wsdl:message>
+  <wsdl:message name="SaveRouteSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveRouteResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveTruckReturnSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveTruckReturn" />
+  </wsdl:message>
+  <wsdl:message name="SaveTruckReturnSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveTruckReturnResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveDeliveryStatusSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveDeliveryStatus" />
+  </wsdl:message>
+  <wsdl:message name="SaveDeliveryStatusSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveDeliveryStatusResponse" />
+  </wsdl:message>
+  <wsdl:message name="RerouteSoapIn">
+    <wsdl:part name="parameters" element="tns:Reroute" />
+  </wsdl:message>
+  <wsdl:message name="RerouteSoapOut">
+    <wsdl:part name="parameters" element="tns:RerouteResponse" />
+  </wsdl:message>
+  <wsdl:message name="DoAutoAddressVerificationSoapIn">
+    <wsdl:part name="parameters" element="tns:DoAutoAddressVerification" />
+  </wsdl:message>
+  <wsdl:message name="DoAutoAddressVerificationSoapOut">
+    <wsdl:part name="parameters" element="tns:DoAutoAddressVerificationResponse" />
+  </wsdl:message>
+  <wsdl:message name="IsGPSDeviceLicensedSoapIn">
+    <wsdl:part name="parameters" element="tns:IsGPSDeviceLicensed" />
+  </wsdl:message>
+  <wsdl:message name="IsGPSDeviceLicensedSoapOut">
+    <wsdl:part name="parameters" element="tns:IsGPSDeviceLicensedResponse" />
+  </wsdl:message>
+  <wsdl:message name="IsMobileAppLicensedSoapIn">
+    <wsdl:part name="parameters" element="tns:IsMobileAppLicensed" />
+  </wsdl:message>
+  <wsdl:message name="IsMobileAppLicensedSoapOut">
+    <wsdl:part name="parameters" element="tns:IsMobileAppLicensedResponse" />
+  </wsdl:message>
+  <wsdl:message name="RouteCompletedLoadSoapIn">
+    <wsdl:part name="parameters" element="tns:RouteCompletedLoad" />
+  </wsdl:message>
+  <wsdl:message name="RouteCompletedLoadSoapOut">
+    <wsdl:part name="parameters" element="tns:RouteCompletedLoadResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadGPSDataSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadGPSData" />
+  </wsdl:message>
+  <wsdl:message name="LoadGPSDataSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadGPSDataResponse" />
+  </wsdl:message>
+  <wsdl:message name="ModifyRouteAndTicketStatusSoapIn">
+    <wsdl:part name="parameters" element="tns:ModifyRouteAndTicketStatus" />
+  </wsdl:message>
+  <wsdl:message name="ModifyRouteAndTicketStatusSoapOut">
+    <wsdl:part name="parameters" element="tns:ModifyRouteAndTicketStatusResponse" />
+  </wsdl:message>
+  <wsdl:message name="UpdateOrderDataSoapIn">
+    <wsdl:part name="parameters" element="tns:UpdateOrderData" />
+  </wsdl:message>
+  <wsdl:message name="UpdateOrderDataSoapOut">
+    <wsdl:part name="parameters" element="tns:UpdateOrderDataResponse" />
+  </wsdl:message>
+  <wsdl:message name="UploadMobileAppDataSoapIn">
+    <wsdl:part name="parameters" element="tns:UploadMobileAppData" />
+  </wsdl:message>
+  <wsdl:message name="UploadMobileAppDataSoapOut">
+    <wsdl:part name="parameters" element="tns:UploadMobileAppDataResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetStatesSoapIn">
+    <wsdl:part name="parameters" element="tns:GetStates" />
+  </wsdl:message>
+  <wsdl:message name="GetStatesSoapOut">
+    <wsdl:part name="parameters" element="tns:GetStatesResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadSavedPushpinsSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadSavedPushpins" />
+  </wsdl:message>
+  <wsdl:message name="LoadSavedPushpinsSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadSavedPushpinsResponse" />
+  </wsdl:message>
+  <wsdl:message name="SavePushpinSoapIn">
+    <wsdl:part name="parameters" element="tns:SavePushpin" />
+  </wsdl:message>
+  <wsdl:message name="SavePushpinSoapOut">
+    <wsdl:part name="parameters" element="tns:SavePushpinResponse" />
+  </wsdl:message>
+  <wsdl:message name="DeletePushpinSoapIn">
+    <wsdl:part name="parameters" element="tns:DeletePushpin" />
+  </wsdl:message>
+  <wsdl:message name="DeletePushpinSoapOut">
+    <wsdl:part name="parameters" element="tns:DeletePushpinResponse" />
+  </wsdl:message>
+  <wsdl:message name="LoadAddressListSoapIn">
+    <wsdl:part name="parameters" element="tns:LoadAddressList" />
+  </wsdl:message>
+  <wsdl:message name="LoadAddressListSoapOut">
+    <wsdl:part name="parameters" element="tns:LoadAddressListResponse" />
+  </wsdl:message>
+  <wsdl:message name="SaveAddrSoapIn">
+    <wsdl:part name="parameters" element="tns:SaveAddr" />
+  </wsdl:message>
+  <wsdl:message name="SaveAddrSoapOut">
+    <wsdl:part name="parameters" element="tns:SaveAddrResponse" />
+  </wsdl:message>
+  <wsdl:portType name="DPServiceSoap">
+    <wsdl:operation name="LoadStore">
+      <wsdl:input message="tns:LoadStoreSoapIn" />
+      <wsdl:output message="tns:LoadStoreSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadPriority">
+      <wsdl:input message="tns:LoadPrioritySoapIn" />
+      <wsdl:output message="tns:LoadPrioritySoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadMainStore">
+      <wsdl:input message="tns:LoadMainStoreSoapIn" />
+      <wsdl:output message="tns:LoadMainStoreSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="IsMainCanadian">
+      <wsdl:input message="tns:IsMainCanadianSoapIn" />
+      <wsdl:output message="tns:IsMainCanadianSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadStoreDetails">
+      <wsdl:input message="tns:LoadStoreDetailsSoapIn" />
+      <wsdl:output message="tns:LoadStoreDetailsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadZone">
+      <wsdl:input message="tns:LoadZoneSoapIn" />
+      <wsdl:output message="tns:LoadZoneSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadZoneByID">
+      <wsdl:input message="tns:LoadZoneByIDSoapIn" />
+      <wsdl:output message="tns:LoadZoneByIDSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadZoneMIF">
+      <wsdl:input message="tns:LoadZoneMIFSoapIn" />
+      <wsdl:output message="tns:LoadZoneMIFSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadZoneSummary">
+      <wsdl:input message="tns:LoadZoneSummarySoapIn" />
+      <wsdl:output message="tns:LoadZoneSummarySoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadZoneType">
+      <wsdl:input message="tns:LoadZoneTypeSoapIn" />
+      <wsdl:output message="tns:LoadZoneTypeSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadFailedDelivery">
+      <wsdl:input message="tns:LoadFailedDeliverySoapIn" />
+      <wsdl:output message="tns:LoadFailedDeliverySoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrder">
+      <wsdl:input message="tns:LoadOrderSoapIn" />
+      <wsdl:output message="tns:LoadOrderSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderByZone">
+      <wsdl:input message="tns:LoadOrderByZoneSoapIn" />
+      <wsdl:output message="tns:LoadOrderByZoneSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderByOrderList">
+      <wsdl:input message="tns:LoadOrderByOrderListSoapIn" />
+      <wsdl:output message="tns:LoadOrderByOrderListSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderAllStore">
+      <wsdl:input message="tns:LoadOrderAllStoreSoapIn" />
+      <wsdl:output message="tns:LoadOrderAllStoreSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadConfiguration">
+      <wsdl:input message="tns:LoadConfigurationSoapIn" />
+      <wsdl:output message="tns:LoadConfigurationSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderByZonesAndRoutes">
+      <wsdl:input message="tns:LoadOrderByZonesAndRoutesSoapIn" />
+      <wsdl:output message="tns:LoadOrderByZonesAndRoutesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderByRoutes">
+      <wsdl:input message="tns:LoadOrderByRoutesSoapIn" />
+      <wsdl:output message="tns:LoadOrderByRoutesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadItems">
+      <wsdl:input message="tns:LoadItemsSoapIn" />
+      <wsdl:output message="tns:LoadItemsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderDetails">
+      <wsdl:input message="tns:LoadOrderDetailsSoapIn" />
+      <wsdl:output message="tns:LoadOrderDetailsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadRoute">
+      <wsdl:input message="tns:LoadRouteSoapIn" />
+      <wsdl:output message="tns:LoadRouteSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadCompletedRoutes">
+      <wsdl:input message="tns:LoadCompletedRoutesSoapIn" />
+      <wsdl:output message="tns:LoadCompletedRoutesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadRouteByStore">
+      <wsdl:input message="tns:LoadRouteByStoreSoapIn" />
+      <wsdl:output message="tns:LoadRouteByStoreSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadSavedRouteSummary">
+      <wsdl:input message="tns:LoadSavedRouteSummarySoapIn" />
+      <wsdl:output message="tns:LoadSavedRouteSummarySoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetSavedRouteDateRange">
+      <wsdl:input message="tns:GetSavedRouteDateRangeSoapIn" />
+      <wsdl:output message="tns:GetSavedRouteDateRangeSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadInProgressRouteSummary">
+      <wsdl:input message="tns:LoadInProgressRouteSummarySoapIn" />
+      <wsdl:output message="tns:LoadInProgressRouteSummarySoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadStop">
+      <wsdl:input message="tns:LoadStopSoapIn" />
+      <wsdl:output message="tns:LoadStopSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetTaxCodeList">
+      <wsdl:input message="tns:GetTaxCodeListSoapIn" />
+      <wsdl:output message="tns:GetTaxCodeListSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadDriver">
+      <wsdl:input message="tns:LoadDriverSoapIn" />
+      <wsdl:output message="tns:LoadDriverSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadEmp">
+      <wsdl:input message="tns:LoadEmpSoapIn" />
+      <wsdl:output message="tns:LoadEmpSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadTruck">
+      <wsdl:input message="tns:LoadTruckSoapIn" />
+      <wsdl:output message="tns:LoadTruckSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadTruckReturn">
+      <wsdl:input message="tns:LoadTruckReturnSoapIn" />
+      <wsdl:output message="tns:LoadTruckReturnSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadTruckStop">
+      <wsdl:input message="tns:LoadTruckStopSoapIn" />
+      <wsdl:output message="tns:LoadTruckStopSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadNoteCodes">
+      <wsdl:input message="tns:LoadNoteCodesSoapIn" />
+      <wsdl:output message="tns:LoadNoteCodesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadRemoteDevices">
+      <wsdl:input message="tns:LoadRemoteDevicesSoapIn" />
+      <wsdl:output message="tns:LoadRemoteDevicesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="IsRouteExists">
+      <wsdl:input message="tns:IsRouteExistsSoapIn" />
+      <wsdl:output message="tns:IsRouteExistsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SaveZone">
+      <wsdl:input message="tns:SaveZoneSoapIn" />
+      <wsdl:output message="tns:SaveZoneSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SaveRoute">
+      <wsdl:input message="tns:SaveRouteSoapIn" />
+      <wsdl:output message="tns:SaveRouteSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SaveTruckReturn">
+      <wsdl:input message="tns:SaveTruckReturnSoapIn" />
+      <wsdl:output message="tns:SaveTruckReturnSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SaveDeliveryStatus">
+      <wsdl:input message="tns:SaveDeliveryStatusSoapIn" />
+      <wsdl:output message="tns:SaveDeliveryStatusSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="Reroute">
+      <wsdl:input message="tns:RerouteSoapIn" />
+      <wsdl:output message="tns:RerouteSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="DoAutoAddressVerification">
+      <wsdl:input message="tns:DoAutoAddressVerificationSoapIn" />
+      <wsdl:output message="tns:DoAutoAddressVerificationSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="IsGPSDeviceLicensed">
+      <wsdl:input message="tns:IsGPSDeviceLicensedSoapIn" />
+      <wsdl:output message="tns:IsGPSDeviceLicensedSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="IsMobileAppLicensed">
+      <wsdl:input message="tns:IsMobileAppLicensedSoapIn" />
+      <wsdl:output message="tns:IsMobileAppLicensedSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="RouteCompletedLoad">
+      <wsdl:input message="tns:RouteCompletedLoadSoapIn" />
+      <wsdl:output message="tns:RouteCompletedLoadSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadGPSData">
+      <wsdl:input message="tns:LoadGPSDataSoapIn" />
+      <wsdl:output message="tns:LoadGPSDataSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="ModifyRouteAndTicketStatus">
+      <wsdl:input message="tns:ModifyRouteAndTicketStatusSoapIn" />
+      <wsdl:output message="tns:ModifyRouteAndTicketStatusSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="UpdateOrderData">
+      <wsdl:input message="tns:UpdateOrderDataSoapIn" />
+      <wsdl:output message="tns:UpdateOrderDataSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="UploadMobileAppData">
+      <wsdl:input message="tns:UploadMobileAppDataSoapIn" />
+      <wsdl:output message="tns:UploadMobileAppDataSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetStates">
+      <wsdl:input message="tns:GetStatesSoapIn" />
+      <wsdl:output message="tns:GetStatesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadSavedPushpins">
+      <wsdl:input message="tns:LoadSavedPushpinsSoapIn" />
+      <wsdl:output message="tns:LoadSavedPushpinsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SavePushpin">
+      <wsdl:input message="tns:SavePushpinSoapIn" />
+      <wsdl:output message="tns:SavePushpinSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="DeletePushpin">
+      <wsdl:input message="tns:DeletePushpinSoapIn" />
+      <wsdl:output message="tns:DeletePushpinSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="LoadAddressList">
+      <wsdl:input message="tns:LoadAddressListSoapIn" />
+      <wsdl:output message="tns:LoadAddressListSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="SaveAddr">
+      <wsdl:input message="tns:SaveAddrSoapIn" />
+      <wsdl:output message="tns:SaveAddrSoapOut" />
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="DPServiceSoap" type="tns:DPServiceSoap">
+    <soap:binding transport="http://schemas.xmlsoap.org/soap/http" />
+    <wsdl:operation name="LoadStore">
+      <soap:operation soapAction="http://localhost/webservices/LoadStore" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadPriority">
+      <soap:operation soapAction="http://localhost/webservices/LoadPriority" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadMainStore">
+      <soap:operation soapAction="http://localhost/webservices/LoadMainStore" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="IsMainCanadian">
+      <soap:operation soapAction="http://localhost/webservices/IsMainCanadian" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadStoreDetails">
+      <soap:operation soapAction="http://localhost/webservices/LoadStoreDetails" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadZone">
+      <soap:operation soapAction="http://localhost/webservices/LoadZone" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadZoneByID">
+      <soap:operation soapAction="http://localhost/webservices/LoadZoneByID" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadZoneMIF">
+      <soap:operation soapAction="http://localhost/webservices/LoadZoneMIF" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadZoneSummary">
+      <soap:operation soapAction="http://localhost/webservices/LoadZoneSummary" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadZoneType">
+      <soap:operation soapAction="http://localhost/webservices/LoadZoneType" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadFailedDelivery">
+      <soap:operation soapAction="http://localhost/webservices/LoadFailedDelivery" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrder">
+      <soap:operation soapAction="http://localhost/webservices/LoadOrder" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderByZone">
+      <soap:operation soapAction="http://localhost/webservices/LoadOrderByZone" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderByOrderList">
+      <soap:operation soapAction="http://localhost/webservices/LoadOrderByOrderList" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderAllStore">
+      <soap:operation soapAction="http://localhost/webservices/LoadOrderAllStore" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadConfiguration">
+      <soap:operation soapAction="http://localhost/webservices/LoadConfiguration" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderByZonesAndRoutes">
+      <soap:operation soapAction="http://localhost/webservices/LoadOrderByZonesAndRoutes" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderByRoutes">
+      <soap:operation soapAction="http://localhost/webservices/LoadOrderByRoutes" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadItems">
+      <soap:operation soapAction="http://localhost/webservices/LoadItems" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderDetails">
+      <soap:operation soapAction="http://localhost/webservices/LoadOrderDetails" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadRoute">
+      <soap:operation soapAction="http://localhost/webservices/LoadRoute" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadCompletedRoutes">
+      <soap:operation soapAction="http://localhost/webservices/LoadCompletedRoutes" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadRouteByStore">
+      <soap:operation soapAction="http://localhost/webservices/LoadRouteByStore" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadSavedRouteSummary">
+      <soap:operation soapAction="http://localhost/webservices/LoadSavedRouteSummary" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetSavedRouteDateRange">
+      <soap:operation soapAction="http://localhost/webservices/GetSavedRouteDateRange" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadInProgressRouteSummary">
+      <soap:operation soapAction="http://localhost/webservices/LoadInProgressRouteSummary" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadStop">
+      <soap:operation soapAction="http://localhost/webservices/LoadStop" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetTaxCodeList">
+      <soap:operation soapAction="http://localhost/webservices/GetTaxCodeList" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadDriver">
+      <soap:operation soapAction="http://localhost/webservices/LoadDriver" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadEmp">
+      <soap:operation soapAction="http://localhost/webservices/LoadEmp" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadTruck">
+      <soap:operation soapAction="http://localhost/webservices/LoadTruck" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadTruckReturn">
+      <soap:operation soapAction="http://localhost/webservices/LoadTruckReturn" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadTruckStop">
+      <soap:operation soapAction="http://localhost/webservices/LoadTruckStop" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadNoteCodes">
+      <soap:operation soapAction="http://localhost/webservices/LoadNoteCodes" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadRemoteDevices">
+      <soap:operation soapAction="http://localhost/webservices/LoadRemoteDevices" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="IsRouteExists">
+      <soap:operation soapAction="http://localhost/webservices/IsRouteExists" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveZone">
+      <soap:operation soapAction="http://localhost/webservices/SaveZone" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveRoute">
+      <soap:operation soapAction="http://localhost/webservices/SaveRoute" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveTruckReturn">
+      <soap:operation soapAction="http://localhost/webservices/SaveTruckReturn" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveDeliveryStatus">
+      <soap:operation soapAction="http://localhost/webservices/SaveDeliveryStatus" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Reroute">
+      <soap:operation soapAction="http://localhost/webservices/Reroute" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DoAutoAddressVerification">
+      <soap:operation soapAction="http://localhost/webservices/DoAutoAddressVerification" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="IsGPSDeviceLicensed">
+      <soap:operation soapAction="http://localhost/webservices/IsGPSDeviceLicensed" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="IsMobileAppLicensed">
+      <soap:operation soapAction="http://localhost/webservices/IsMobileAppLicensed" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="RouteCompletedLoad">
+      <soap:operation soapAction="http://localhost/webservices/RouteCompletedLoad" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadGPSData">
+      <soap:operation soapAction="http://localhost/webservices/LoadGPSData" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="ModifyRouteAndTicketStatus">
+      <soap:operation soapAction="http://localhost/webservices/ModifyRouteAndTicketStatus" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="UpdateOrderData">
+      <soap:operation soapAction="http://localhost/webservices/UpdateOrderData" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="UploadMobileAppData">
+      <soap:operation soapAction="http://localhost/webservices/UploadMobileAppData" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetStates">
+      <soap:operation soapAction="http://localhost/webservices/GetStates" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadSavedPushpins">
+      <soap:operation soapAction="http://localhost/webservices/LoadSavedPushpins" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SavePushpin">
+      <soap:operation soapAction="http://localhost/webservices/SavePushpin" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeletePushpin">
+      <soap:operation soapAction="http://localhost/webservices/DeletePushpin" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadAddressList">
+      <soap:operation soapAction="http://localhost/webservices/LoadAddressList" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveAddr">
+      <soap:operation soapAction="http://localhost/webservices/SaveAddr" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:binding name="DPServiceSoap12" type="tns:DPServiceSoap">
+    <soap12:binding transport="http://schemas.xmlsoap.org/soap/http" />
+    <wsdl:operation name="LoadStore">
+      <soap12:operation soapAction="http://localhost/webservices/LoadStore" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadPriority">
+      <soap12:operation soapAction="http://localhost/webservices/LoadPriority" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadMainStore">
+      <soap12:operation soapAction="http://localhost/webservices/LoadMainStore" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="IsMainCanadian">
+      <soap12:operation soapAction="http://localhost/webservices/IsMainCanadian" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadStoreDetails">
+      <soap12:operation soapAction="http://localhost/webservices/LoadStoreDetails" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadZone">
+      <soap12:operation soapAction="http://localhost/webservices/LoadZone" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadZoneByID">
+      <soap12:operation soapAction="http://localhost/webservices/LoadZoneByID" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadZoneMIF">
+      <soap12:operation soapAction="http://localhost/webservices/LoadZoneMIF" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadZoneSummary">
+      <soap12:operation soapAction="http://localhost/webservices/LoadZoneSummary" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadZoneType">
+      <soap12:operation soapAction="http://localhost/webservices/LoadZoneType" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadFailedDelivery">
+      <soap12:operation soapAction="http://localhost/webservices/LoadFailedDelivery" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrder">
+      <soap12:operation soapAction="http://localhost/webservices/LoadOrder" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderByZone">
+      <soap12:operation soapAction="http://localhost/webservices/LoadOrderByZone" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderByOrderList">
+      <soap12:operation soapAction="http://localhost/webservices/LoadOrderByOrderList" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderAllStore">
+      <soap12:operation soapAction="http://localhost/webservices/LoadOrderAllStore" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadConfiguration">
+      <soap12:operation soapAction="http://localhost/webservices/LoadConfiguration" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderByZonesAndRoutes">
+      <soap12:operation soapAction="http://localhost/webservices/LoadOrderByZonesAndRoutes" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderByRoutes">
+      <soap12:operation soapAction="http://localhost/webservices/LoadOrderByRoutes" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadItems">
+      <soap12:operation soapAction="http://localhost/webservices/LoadItems" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadOrderDetails">
+      <soap12:operation soapAction="http://localhost/webservices/LoadOrderDetails" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadRoute">
+      <soap12:operation soapAction="http://localhost/webservices/LoadRoute" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadCompletedRoutes">
+      <soap12:operation soapAction="http://localhost/webservices/LoadCompletedRoutes" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadRouteByStore">
+      <soap12:operation soapAction="http://localhost/webservices/LoadRouteByStore" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadSavedRouteSummary">
+      <soap12:operation soapAction="http://localhost/webservices/LoadSavedRouteSummary" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetSavedRouteDateRange">
+      <soap12:operation soapAction="http://localhost/webservices/GetSavedRouteDateRange" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadInProgressRouteSummary">
+      <soap12:operation soapAction="http://localhost/webservices/LoadInProgressRouteSummary" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadStop">
+      <soap12:operation soapAction="http://localhost/webservices/LoadStop" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetTaxCodeList">
+      <soap12:operation soapAction="http://localhost/webservices/GetTaxCodeList" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadDriver">
+      <soap12:operation soapAction="http://localhost/webservices/LoadDriver" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadEmp">
+      <soap12:operation soapAction="http://localhost/webservices/LoadEmp" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadTruck">
+      <soap12:operation soapAction="http://localhost/webservices/LoadTruck" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadTruckReturn">
+      <soap12:operation soapAction="http://localhost/webservices/LoadTruckReturn" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadTruckStop">
+      <soap12:operation soapAction="http://localhost/webservices/LoadTruckStop" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadNoteCodes">
+      <soap12:operation soapAction="http://localhost/webservices/LoadNoteCodes" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadRemoteDevices">
+      <soap12:operation soapAction="http://localhost/webservices/LoadRemoteDevices" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="IsRouteExists">
+      <soap12:operation soapAction="http://localhost/webservices/IsRouteExists" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveZone">
+      <soap12:operation soapAction="http://localhost/webservices/SaveZone" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveRoute">
+      <soap12:operation soapAction="http://localhost/webservices/SaveRoute" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveTruckReturn">
+      <soap12:operation soapAction="http://localhost/webservices/SaveTruckReturn" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveDeliveryStatus">
+      <soap12:operation soapAction="http://localhost/webservices/SaveDeliveryStatus" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Reroute">
+      <soap12:operation soapAction="http://localhost/webservices/Reroute" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DoAutoAddressVerification">
+      <soap12:operation soapAction="http://localhost/webservices/DoAutoAddressVerification" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="IsGPSDeviceLicensed">
+      <soap12:operation soapAction="http://localhost/webservices/IsGPSDeviceLicensed" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="IsMobileAppLicensed">
+      <soap12:operation soapAction="http://localhost/webservices/IsMobileAppLicensed" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="RouteCompletedLoad">
+      <soap12:operation soapAction="http://localhost/webservices/RouteCompletedLoad" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadGPSData">
+      <soap12:operation soapAction="http://localhost/webservices/LoadGPSData" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="ModifyRouteAndTicketStatus">
+      <soap12:operation soapAction="http://localhost/webservices/ModifyRouteAndTicketStatus" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="UpdateOrderData">
+      <soap12:operation soapAction="http://localhost/webservices/UpdateOrderData" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="UploadMobileAppData">
+      <soap12:operation soapAction="http://localhost/webservices/UploadMobileAppData" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetStates">
+      <soap12:operation soapAction="http://localhost/webservices/GetStates" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadSavedPushpins">
+      <soap12:operation soapAction="http://localhost/webservices/LoadSavedPushpins" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SavePushpin">
+      <soap12:operation soapAction="http://localhost/webservices/SavePushpin" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeletePushpin">
+      <soap12:operation soapAction="http://localhost/webservices/DeletePushpin" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="LoadAddressList">
+      <soap12:operation soapAction="http://localhost/webservices/LoadAddressList" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SaveAddr">
+      <soap12:operation soapAction="http://localhost/webservices/SaveAddr" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="DPService">
+    <wsdl:documentation xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">Mercury 5.1 - Delivery Processing Web Service</wsdl:documentation>
+    <wsdl:port name="DPServiceSoap" binding="tns:DPServiceSoap">
+      <soap:address location="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx" />
+    </wsdl:port>
+    <wsdl:port name="DPServiceSoap12" binding="tns:DPServiceSoap12">
+      <soap12:address location="http://192.168.1.50/WsMercuryWebAPI/delivery.asmx" />
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

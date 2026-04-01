@@ -1,0 +1,7 @@
+# Generated installer/package build outputs
+/mercury-orders-tv-dashboard/artifacts/
+/mercury-orders-tv-dashboard/dist/
+/opos-browser-bridge/artifacts/
+/opos-browser-bridge/dist/
+/weather-xoap-shim/artifacts/
+/weather-xoap-shim/dist/

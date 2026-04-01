@@ -1,0 +1,494 @@
+﻿[
+    {
+        "service":  "Accounting",
+        "op_count":  -1,
+        "operations":  [
+                           "ERROR: The remote server returned an error: (500) Internal Server Error."
+                       ]
+    },
+    {
+        "service":  "AddressVerification",
+        "op_count":  8,
+        "operations":  [
+                           "GetCityStateByPostalCode",
+                           "GetWebAddrVerificationSettings",
+                           "IsWebAddressVerificationEnabled",
+                           "LoadDefaultCountryOfStore",
+                           "ValidateAddress",
+                           "ValidateAddressAndAssignZone",
+                           "VerifyAddressAndAssignZone",
+                           "VerifyPostalCode"
+                       ]
+    },
+    {
+        "service":  "AuditTrail",
+        "op_count":  4,
+        "operations":  [
+                           "GetAuditTrailConfig",
+                           "GetAuditTrailEmployeeAccess",
+                           "SaveAuditTrailEvent",
+                           "SaveCustAuditTrailEvent"
+                       ]
+    },
+    {
+        "service":  "Billing",
+        "op_count":  23,
+        "operations":  [
+                           "BuildStatements",
+                           "BuildStatementsNew",
+                           "DeleteFinanceCharge",
+                           "DeleteFinanceCharges",
+                           "DeleteStatementBatch",
+                           "GetBatchID",
+                           "GetBillingCycles",
+                           "GetClientPrinterRouting",
+                           "GetFaxEmailConfig",
+                           "GetFaxEmailCoverLetters",
+                           "GetFinanceCharges",
+                           "GetFinanceChargesConfig",
+                           "GetStatement",
+                           "GetStatementBatches",
+                           "GetStatementDetail",
+                           "GetStatementsInBatch",
+                           "GetStatementsInBatchFromBatch",
+                           "GetStoreInfo",
+                           "GetTicketIDsForStatement",
+                           "GetTicketsForBatch",
+                           "GetTicketsForInvoiceBilling",
+                           "IsStatementGenerationValid",
+                           "StatementGenConfig"
+                       ]
+    },
+    {
+        "service":  "Collector",
+        "op_count":  2,
+        "operations":  [
+                           "GetClientInstance",
+                           "SetInfoFromClient"
+                       ]
+    },
+    {
+        "service":  "Configuration",
+        "op_count":  4,
+        "operations":  [
+                           "GetConfigSettings",
+                           "GetStealthConfigInfo",
+                           "GetTextConfig",
+                           "Initialize"
+                       ]
+    },
+    {
+        "service":  "CP2GenericInternetProtocol",
+        "op_count":  1,
+        "operations":  [
+                           "CP2InternetNotification"
+                       ]
+    },
+    {
+        "service":  "CreditCard",
+        "op_count":  10,
+        "operations":  [
+                           "CreateCreditFromCCInfo",
+                           "CreateVoidFromCCInfo",
+                           "CreditCardSearch",
+                           "DeclineCVVMismatch",
+                           "DeleteCreditCardTransaction",
+                           "GetCCAPIAccounts",
+                           "RemoveAllCOFID",
+                           "UnsettledCreditCardSearch",
+                           "UpdateAuthorizationInformation",
+                           "UpdateCreditCardForSale"
+                       ]
+    },
+    {
+        "service":  "Customer",
+        "op_count":  17,
+        "operations":  [
+                           "AddBatchGroup",
+                           "CustomerMerge",
+                           "CustomerSearch",
+                           "DeleteCustomerEmail",
+                           "DeleteRecipient",
+                           "DeleteStandingOrder",
+                           "GetCustomerAuditDetails",
+                           "GetCustomerDetail",
+                           "GetCustomerDetailItems",
+                           "GetCustomerDetails",
+                           "GetCustomerEmail",
+                           "GetCustomerInfo",
+                           "GetEmailConfig",
+                           "GetStandingOrders",
+                           "IsAccountIDValidForCustomer",
+                           "SaveCustomerDetails",
+                           "SaveCustomerEmail"
+                       ]
+    },
+    {
+        "service":  "Dashboard",
+        "op_count":  10,
+        "operations":  [
+                           "DeleteMarketingMessages",
+                           "GetDashboardEnabled",
+                           "GetDashboardEvents",
+                           "GetDashboardEventsNow",
+                           "GetMarketingMessages",
+                           "GetStates",
+                           "GetUndeliveredOrders",
+                           "GetWeatherGadgetRefreshTime",
+                           "MarkMessageRead",
+                           "PublishDashboardEventType"
+                       ]
+    },
+    {
+        "service":  "Delivery",
+        "op_count":  55,
+        "operations":  [
+                           "DeletePushpin",
+                           "DoAutoAddressVerification",
+                           "GetSavedRouteDateRange",
+                           "GetStates",
+                           "GetTaxCodeList",
+                           "IsGPSDeviceLicensed",
+                           "IsMainCanadian",
+                           "IsMobileAppLicensed",
+                           "IsRouteExists",
+                           "LoadAddressList",
+                           "LoadCompletedRoutes",
+                           "LoadConfiguration",
+                           "LoadDriver",
+                           "LoadEmp",
+                           "LoadFailedDelivery",
+                           "LoadGPSData",
+                           "LoadInProgressRouteSummary",
+                           "LoadItems",
+                           "LoadMainStore",
+                           "LoadNoteCodes",
+                           "LoadOrder",
+                           "LoadOrderAllStore",
+                           "LoadOrderByOrderList",
+                           "LoadOrderByRoutes",
+                           "LoadOrderByZone",
+                           "LoadOrderByZonesAndRoutes",
+                           "LoadOrderDetails",
+                           "LoadPriority",
+                           "LoadRemoteDevices",
+                           "LoadRoute",
+                           "LoadRouteByStore",
+                           "LoadSavedPushpins",
+                           "LoadSavedRouteSummary",
+                           "LoadStop",
+                           "LoadStore",
+                           "LoadStoreDetails",
+                           "LoadTruck",
+                           "LoadTruckReturn",
+                           "LoadTruckStop",
+                           "LoadZone",
+                           "LoadZoneByID",
+                           "LoadZoneMIF",
+                           "LoadZoneSummary",
+                           "LoadZoneType",
+                           "ModifyRouteAndTicketStatus",
+                           "Reroute",
+                           "RouteCompletedLoad",
+                           "SaveAddr",
+                           "SaveDeliveryStatus",
+                           "SavePushpin",
+                           "SaveRoute",
+                           "SaveTruckReturn",
+                           "SaveZone",
+                           "UpdateOrderData",
+                           "UploadMobileAppData"
+                       ]
+    },
+    {
+        "service":  "Email",
+        "op_count":  5,
+        "operations":  [
+                           "DeleteEmail",
+                           "LoadEmailJobs",
+                           "RetryEmail",
+                           "SendEmail",
+                           "UpdateEmailAddress"
+                       ]
+    },
+    {
+        "service":  "Employee",
+        "op_count":  2,
+        "operations":  [
+                           "EmployeeSearch",
+                           "EmployeeSearchByID"
+                       ]
+    },
+    {
+        "service":  "Facility",
+        "op_count":  2,
+        "operations":  [
+                           "FacilitySearch",
+                           "FacilitySingleLookup"
+                       ]
+    },
+    {
+        "service":  "Fax",
+        "op_count":  5,
+        "operations":  [
+                           "DeleteFax",
+                           "LoadFaxTasks",
+                           "RetryFax",
+                           "SendFax",
+                           "UpdateFaxNumber"
+                       ]
+    },
+    {
+        "service":  "Florist",
+        "op_count":  17,
+        "operations":  [
+                           "CheckDirectoryAvailable",
+                           "CheckInternetConnection",
+                           "ClosestCitySearch",
+                           "FloristGetInfo",
+                           "FloristSearch",
+                           "FloristSingleLookup",
+                           "GetCurrencySettings",
+                           "GetFloristDetails",
+                           "GetMyListings",
+                           "GetUnityWebPageURL",
+                           "GetUnityWebServiceInfo",
+                           "GetWireServiceProducts",
+                           "IsUnityEnabled",
+                           "SaveFlorist",
+                           "UpdateFloristStatus",
+                           "UpdateNotes",
+                           "UpdateRotationNumber"
+                       ]
+    },
+    {
+        "service":  "Framework",
+        "op_count":  15,
+        "operations":  [
+                           "AuthenticateUser",
+                           "ConfigUpdateNotification",
+                           "EmployeeLogin",
+                           "GetEmployeeSinglePermission",
+                           "GetLicenseConfiguration",
+                           "GetPermissions",
+                           "GetServerTime",
+                           "GetStoreList",
+                           "InsertRetryInvoiceReporterJob",
+                           "IsADAuthEnabled",
+                           "IsDatabaseSQLStandard",
+                           "LoadConfiguration",
+                           "LoadPermissions",
+                           "ReleaseUserLicense",
+                           "RequestUserLicense"
+                       ]
+    },
+    {
+        "service":  "Funeral",
+        "op_count":  6,
+        "operations":  [
+                           "FuneralAdd",
+                           "FuneralDelete",
+                           "GetFuneralDetails",
+                           "GetFuneralLogAddlTrifoldCards",
+                           "GetFunerals",
+                           "Initialize"
+                       ]
+    },
+    {
+        "service":  "Marketing",
+        "op_count":  21,
+        "operations":  [
+                           "DeleteCampaigns",
+                           "ExecuteQuery",
+                           "GetAllCampaignDetailsToDisplay",
+                           "GetAllCampaignNames",
+                           "GetAllCriteriaFields",
+                           "GetAllCriteriaOptionValue",
+                           "GetAllOutputFields",
+                           "GetCampaignDetail",
+                           "GetCampaignSchedule",
+                           "GetCustomerList",
+                           "GetFileContent",
+                           "GetFileName",
+                           "GetListCategoryMappingInformation",
+                           "GetReferralCodeReportInformation",
+                           "GetReferralTypeInformation",
+                           "GetSelectedCampaign",
+                           "GetSelectedCriteria",
+                           "GetSelectedOutputFields",
+                           "GetTemplateInformation",
+                           "SaveCampaignDetail",
+                           "SaveNewReferralType"
+                       ]
+    },
+    {
+        "service":  "Message",
+        "op_count":  15,
+        "operations":  [
+                           "AcknowledgeMessage",
+                           "DeleteMessage",
+                           "DeleteRecPending",
+                           "EndMsgBatch",
+                           "GetMessageDetail",
+                           "GetMessageList",
+                           "GetMsgBatchNum",
+                           "GetOrderMsgHistory",
+                           "GetRecPending",
+                           "GetRelatedMessages",
+                           "LockMessage",
+                           "SaveRecPending",
+                           "SendMercuryMessage",
+                           "SendRecPending",
+                           "SetRequiresAttention"
+                       ]
+    },
+    {
+        "service":  "OrderEntry",
+        "op_count":  74,
+        "operations":  [
+                           "AllocatePayment",
+                           "CancelSale",
+                           "ChangeSaleStatus",
+                           "CompleteSale",
+                           "DeleteTickets",
+                           "DoAgingTicketSearch",
+                           "DoSalePaymentAppliedList",
+                           "GetAbbrevDetail",
+                           "GetAddress",
+                           "GetAnswers",
+                           "GetAttachedWireInfo",
+                           "GetAuthorization",
+                           "GetBarCodeTasks",
+                           "GetCardRecipients",
+                           "GetComments",
+                           "GetCreditCardInfoForPayments",
+                           "GetCreditCardPaymentFromID",
+                           "GetCreditCardPayments",
+                           "GetDeliveryDriver",
+                           "GetDesignAnalysis",
+                           "GetEndOfDayCountInfoData",
+                           "GetEndOfDayEmployeeInfo",
+                           "GetEndOfDayHourlyInfo",
+                           "GetGiftCardInfo",
+                           "GetItems",
+                           "GetItemsPerSale",
+                           "GetNewID",
+                           "GetOpenDrawerData",
+                           "GetOutOfCountryAndStateProv",
+                           "GetPayments",
+                           "GetPhone",
+                           "GetPhonedOrderInfo",
+                           "GetPOSManualEntry",
+                           "GetPOSPriorOpeningBalanceAmt",
+                           "GetPOSReceipt",
+                           "GetPOSSessionDetail",
+                           "GetPOSSessionHistory",
+                           "GetPOSTerminal",
+                           "GetPOSTerminalList",
+                           "GetPOSTransactionForSale",
+                           "GetProdCodeByIDAndWireType",
+                           "GetRecipient",
+                           "GetSale",
+                           "GetSaleChangeStatus",
+                           "GetStandingOrderTemplate",
+                           "GetTicketIDs",
+                           "GetTickets",
+                           "GetTicketStatus",
+                           "GetUnpaidTickets",
+                           "GetWireOutInfo",
+                           "GetWireOutOrderInfo",
+                           "HasDeclinedCreditCards",
+                           "Initialize",
+                           "RefundSale",
+                           "RemoveGiftCardDesignerIDs",
+                           "ReverseCreditCardsForSale",
+                           "Save_Item_Designer_Change",
+                           "Save_Item_Status_Change",
+                           "SaveCreditCard",
+                           "SaveDebitCard",
+                           "SaveGiftCardResponse",
+                           "SaveNote",
+                           "SavePinPadCard",
+                           "SavePOSSessionDrawer",
+                           "SavePOSTerminal",
+                           "SavePOSTransaction",
+                           "SaveSale",
+                           "SaveStandingOrderSchedule",
+                           "SaveStandingOrderTemplate",
+                           "SaveTicketStatus",
+                           "SetInvoiceEmailSent",
+                           "TicketSearch",
+                           "TicketSearchByDesigner",
+                           "UpdateMsgTableTicketID"
+                       ]
+    },
+    {
+        "service":  "OrderLifeCycle",
+        "op_count":  5,
+        "operations":  [
+                           "OLCAuditMessageSingle",
+                           "OLCAuditMessageTable",
+                           "OLCGetBySERVICE_MSG_NUM",
+                           "OLCGetByTicket",
+                           "OLCOutgoingMessage"
+                       ]
+    },
+    {
+        "service":  "Picture",
+        "op_count":  15,
+        "operations":  [
+                           "AttachPicture",
+                           "CreateASKMessage",
+                           "GetCustomerEmails",
+                           "GetEmailConfigDataSet",
+                           "GetEmailOptionDataSet",
+                           "GetEmployeeName",
+                           "GetMNAPIConfigDataSet",
+                           "GetPictureConfigDataSet",
+                           "GetPictureInfo",
+                           "GetPictureList",
+                           "GetPictureTicketInfo",
+                           "RemovePicture",
+                           "UpdatePictureUrl",
+                           "UpdateSentIndicator",
+                           "ViewPicture"
+                       ]
+    },
+    {
+        "service":  "Product",
+        "op_count":  3,
+        "operations":  [
+                           "GetProductTaxCodeID",
+                           "GetSelGuideProducts",
+                           "ProductSearch"
+                       ]
+    },
+    {
+        "service":  "Scheduler",
+        "op_count":  3,
+        "operations":  [
+                           "DeleteTask",
+                           "LoadTasks",
+                           "RescheduleTask"
+                       ]
+    },
+    {
+        "service":  "SoftwareUpdate",
+        "op_count":  13,
+        "operations":  [
+                           "GetAvailableUpdates",
+                           "GetClientConfiguration",
+                           "GetLicenseAvailable",
+                           "GetSuspendDatesForClient",
+                           "InsertPrintJob",
+                           "RegisterClientForASU",
+                           "RemoveSuspendDate",
+                           "ResetPackages",
+                           "SaveAvailablePackage",
+                           "SaveAvailableSlice",
+                           "SaveInstallationStatus",
+                           "SaveSuspendDate",
+                           "UpdateSliceStatus"
+                       ]
+    }
+]

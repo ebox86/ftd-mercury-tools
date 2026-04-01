@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MercuryHQ - Single Request Barcode
 // @namespace    https://ebox86.com/
-// @version      0.4.28
+// @version      0.4.33
 // @description  Adds a barcode-assisted delivery request tab to MercuryHQ and prepopulates the Single Request form from Mercury services.
 // @author       Evan
 // @match        https://mercuryhq.com/create-delivery-service-request*
@@ -102,6 +102,7 @@
     bridgeLeaseChain: Promise.resolve(),
     scanModalClose: null,
     scanModalNonce: 0,
+    submitStabilizeBypassUntil: 0,
   };
 
   function log(...args) {
@@ -337,17 +338,50 @@
     return sel ? qs(sel) : null;
   }
 
+  function syncReactValueTracker(el, previousValue, options = {}) {
+    const { forceMismatch = false } = options;
+    if (!el || typeof el !== 'object') return;
+    const tracker = el._valueTracker;
+    if (!tracker || typeof tracker.setValue !== 'function') return;
+    const previous = String(previousValue ?? '');
+    const trackerValue = forceMismatch ? `${previous}\u0000` : previous;
+    try {
+      tracker.setValue(trackerValue);
+    } catch (error) {
+      log('Unable to sync React value tracker', error);
+    }
+  }
+
   function setNativeValue(el, value, options = {}) {
     const {
       dispatchBlur = false,
       dispatchInput = true,
       dispatchChange = true,
+      forceTrackerMismatch = false,
     } = options;
     if (!el) return;
-    const proto = Object.getPrototypeOf(el);
-    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
-    if (descriptor?.set) descriptor.set.call(el, value);
-    else el.value = value;
+    const hasValueProp = 'value' in el;
+    const previousValue = hasValueProp ? String(el.value ?? '') : '';
+    const nextValue = value == null ? '' : String(value);
+
+    let setter = null;
+    if (el instanceof HTMLInputElement) {
+      setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set || null;
+    } else if (el instanceof HTMLTextAreaElement) {
+      setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set || null;
+    } else if (el instanceof HTMLSelectElement) {
+      setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set || null;
+    } else {
+      const proto = Object.getPrototypeOf(el);
+      setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set || null;
+    }
+
+    if (typeof setter === 'function') setter.call(el, nextValue);
+    else if (hasValueProp) el.value = nextValue;
+
+    const normalizedCurrent = hasValueProp ? String(el.value ?? '') : '';
+    const shouldForceMismatch = !!forceTrackerMismatch && normalizedCurrent === previousValue;
+    syncReactValueTracker(el, previousValue, { forceMismatch: shouldForceMismatch });
     if (dispatchInput) el.dispatchEvent(new Event('input', { bubbles: true }));
     if (dispatchChange) el.dispatchEvent(new Event('change', { bubbles: true }));
     if (dispatchBlur) el.dispatchEvent(new Event('blur', { bubbles: true }));
@@ -753,11 +787,33 @@
   function bindSubmitSuccessHooks() {
     const submitButton = getSubmitButton();
     const startWatchIfNeeded = () => {
-      enforceCountryDefault();
+      stabilizeFormStateBeforeSubmit();
       if (state.activeMode !== 'barcode') return;
       const expectedReference = String(getInput('referenceNumber')?.value || '').trim();
       if (expectedReference) startSubmitSuccessWatch(expectedReference);
     };
+
+    if (submitButton && submitButton.dataset.mhqSubmitStabilizerBound !== '1') {
+      submitButton.dataset.mhqSubmitStabilizerBound = '1';
+      submitButton.addEventListener('click', event => {
+        if (state.activeMode !== 'barcode') return;
+        if (Date.now() < state.submitStabilizeBypassUntil) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+        stabilizeFormStateBeforeSubmit();
+        state.submitStabilizeBypassUntil = Date.now() + 1500;
+        setTimeout(() => {
+          const latestButton = getSubmitButton();
+          if (latestButton instanceof HTMLElement) {
+            latestButton.click();
+            return;
+          }
+          const mainForm = getMainRequestForm();
+          if (mainForm && typeof mainForm.requestSubmit === 'function') mainForm.requestSubmit();
+        }, 60);
+      }, true);
+    }
 
     if (submitButton && submitButton.dataset.mhqSubmitWatchBound !== '1') {
       submitButton.dataset.mhqSubmitWatchBound = '1';
@@ -786,6 +842,26 @@
     }
 
     const form = submitButton?.closest('form') || getMainRequestForm();
+    if (form && form.dataset.mhqSubmitStabilizerBound !== '1') {
+      form.dataset.mhqSubmitStabilizerBound = '1';
+      form.addEventListener('submit', event => {
+        if (state.activeMode !== 'barcode') return;
+        if (Date.now() < state.submitStabilizeBypassUntil) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+        stabilizeFormStateBeforeSubmit();
+        state.submitStabilizeBypassUntil = Date.now() + 1500;
+        setTimeout(() => {
+          if (typeof form.requestSubmit === 'function') form.requestSubmit();
+          else {
+            const latestButton = getSubmitButton();
+            if (latestButton instanceof HTMLElement) latestButton.click();
+          }
+        }, 60);
+      }, true);
+    }
+
     if (form && form.dataset.mhqSubmitWatchBound !== '1') {
       form.dataset.mhqSubmitWatchBound = '1';
       form.addEventListener('submit', () => {
@@ -1773,9 +1849,98 @@
     return (hour24 * 60) + minute;
   }
 
-  function getNextHalfHourMinuteOfDay(now = new Date()) {
-    const totalMinutes = (now.getHours() * 60) + now.getMinutes();
-    return Math.ceil(totalMinutes / 30) * 30;
+  function extractFirstMeridianTime(raw) {
+    const text = String(raw || '').trim().toUpperCase();
+    if (!text) return '';
+    const direct = parseMeridianTimeToMinutes(text);
+    if (direct != null) return text;
+    const embedded = text.match(/(\d{1,2}(?::\d{2})?\s*(?:AM|PM))/i);
+    return embedded?.[1] ? String(embedded[1]).trim().toUpperCase() : '';
+  }
+
+  function parseOptionTimeMinutes(rawText, rawValue = '') {
+    const fromText = extractFirstMeridianTime(rawText);
+    const minutesFromText = parseMeridianTimeToMinutes(fromText);
+    if (minutesFromText != null) return minutesFromText;
+    const fromValue = extractFirstMeridianTime(rawValue);
+    return parseMeridianTimeToMinutes(fromValue);
+  }
+
+  function isSelectOptionEnabled(option) {
+    if (!option) return false;
+    if (option.disabled) return false;
+    const ariaDisabled = String(option.getAttribute('aria-disabled') || '').trim().toLowerCase();
+    if (ariaDisabled === 'true') return false;
+    const dataDisabled = String(option.getAttribute('data-disabled') || option.getAttribute('data-is-disabled') || '').trim().toLowerCase();
+    if (dataDisabled === 'true' || dataDisabled === '1' || dataDisabled === 'yes') return false;
+    if (option.hasAttribute('disabled')) return false;
+    const className = String(option.className || '').toLowerCase();
+    if (/\bdisabled\b|\bunavailable\b|\binactive\b/.test(className)) return false;
+    return true;
+  }
+
+  function getCurrentLocalMinuteOfDay(now = new Date()) {
+    return (now.getHours() * 60) + now.getMinutes();
+  }
+
+  function isElementLikelyVisible(el) {
+    if (!(el instanceof HTMLElement)) return false;
+    const style = window.getComputedStyle(el);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    if (Number(style.opacity || '1') === 0) return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function getCustomPickupCandidates() {
+    const candidateSelectors = [
+      '[data-testid^="web_picker_pickUpDateTime_"]',
+      '[data-testid^="web_picker_pickupDateTime_"]',
+      '[data-testid*="pickUpDateTime_"]',
+      '[data-testid*="pickupDateTime_"]',
+      '.react-datepicker__time-list-item',
+      '[role="option"]',
+    ];
+    const nodes = candidateSelectors.flatMap(sel => qsa(sel));
+    const seen = new Set();
+    const out = [];
+    for (const node of nodes) {
+      if (!(node instanceof HTMLElement)) continue;
+      if (!isElementLikelyVisible(node)) continue;
+      const text = String(node.textContent || '').trim();
+      const value = String(node.getAttribute('data-value') || node.getAttribute('value') || node.getAttribute('data-testid') || '').trim();
+      const looksPlaceholder = !text || /^select\b/i.test(text) || /^choose\b/i.test(text);
+      const disabled = !isSelectOptionEnabled(node);
+      const minutes = parseOptionTimeMinutes(text, value);
+      if (looksPlaceholder || disabled || !Number.isFinite(minutes)) continue;
+      const key = `${minutes}|${text.toLowerCase()}|${value.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ el: node, text, value, minutes });
+    }
+    return out.sort((a, b) => a.minutes - b.minutes);
+  }
+
+  function openPickupDropdown(pickup) {
+    if (!(pickup instanceof HTMLElement)) return;
+    const trigger = pickup.closest('[role="combobox"]') || pickup.closest('[data-testid*="pickUpDateTime"]') || pickup;
+    if (!(trigger instanceof HTMLElement)) return;
+    try {
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      trigger.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      trigger.click();
+      if (trigger instanceof HTMLInputElement || trigger instanceof HTMLTextAreaElement) {
+        trigger.focus();
+        trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      }
+    } catch (error) {
+      log('Could not open pickup dropdown', error);
+    }
+  }
+
+  function pickNearestFutureLikeSlot(candidates, thresholdMinutes) {
+    if (!Array.isArray(candidates) || !candidates.length) return null;
+    return candidates.find(entry => entry.minutes >= thresholdMinutes) || candidates[0] || null;
   }
 
   function clearPickupTimeFieldForToday() {
@@ -1796,32 +1961,62 @@
 
   function selectNextAvailablePickupTimeForToday() {
     const pickup = getInput('pickUpDateTime');
-    if (!(pickup instanceof HTMLSelectElement)) return false;
-    const thresholdMinutes = getNextHalfHourMinuteOfDay(new Date());
+    if (!pickup) return false;
+    const thresholdMinutes = getCurrentLocalMinuteOfDay(new Date());
 
-    const candidates = Array.from(pickup.options || [])
-      .map(opt => {
-        const text = String(opt.textContent || opt.label || opt.value || '').trim();
-        const value = String(opt.value || '').trim();
-        const disabled = !!opt.disabled || String(opt.getAttribute('aria-disabled') || '').toLowerCase() === 'true';
-        const looksPlaceholder = !text || /^select\b/i.test(text) || /^choose\b/i.test(text);
-        const minutes = parseMeridianTimeToMinutes(text);
-        return { opt, text, value, disabled, looksPlaceholder, minutes };
-      })
-      .filter(entry => !entry.disabled && !entry.looksPlaceholder && !!entry.value && Number.isFinite(entry.minutes));
+    if (pickup instanceof HTMLSelectElement) {
+      const candidates = Array.from(pickup.options || [])
+        .map(opt => {
+          const text = String(opt.textContent || opt.label || opt.value || '').trim();
+          const value = String(opt.value || '').trim();
+          const disabled = !isSelectOptionEnabled(opt);
+          const looksPlaceholder = !text || /^select\b/i.test(text) || /^choose\b/i.test(text);
+          const minutes = parseOptionTimeMinutes(text, value);
+          return { opt, text, value, disabled, looksPlaceholder, minutes };
+        })
+        .filter(entry => !entry.disabled && !entry.looksPlaceholder && !!entry.value && Number.isFinite(entry.minutes))
+        .sort((a, b) => a.minutes - b.minutes);
 
-    if (!candidates.length) return false;
+      const selected = pickNearestFutureLikeSlot(candidates, thresholdMinutes);
+      if (!selected) return false;
+      setNativeValue(pickup, selected.value);
+      const selectedOption = pickup.options[pickup.selectedIndex] || null;
+      if (!selectedOption || !isSelectOptionEnabled(selectedOption)) return false;
+      const selectedText = String(selectedOption.textContent || selectedOption.label || selectedOption.value || '').trim();
+      if (!selectedText || /^select\b/i.test(selectedText) || /^choose\b/i.test(selectedText)) return false;
+      markFilled(pickup, `Today delivery: auto-selected next available pickup time (${selectedText})`);
+      return true;
+    }
 
-    const selected = candidates.find(entry => entry.minutes >= thresholdMinutes) || candidates[0];
-    if (!selected) return false;
-    setNativeValue(pickup, selected.value);
-    const selectedOption = pickup.options[pickup.selectedIndex] || null;
-    if (!selectedOption) return false;
-    const selectedDisabled = !!selectedOption.disabled || String(selectedOption.getAttribute('aria-disabled') || '').toLowerCase() === 'true';
-    if (selectedDisabled) return false;
-    const selectedText = String(selectedOption.textContent || selectedOption.label || selectedOption.value || '').trim();
-    if (!selectedText || /^select\b/i.test(selectedText) || /^choose\b/i.test(selectedText)) return false;
-    markFilled(pickup, `Today delivery: auto-selected next available pickup time (${selectedText})`);
+    let customCandidates = getCustomPickupCandidates();
+    if (!customCandidates.length) {
+      openPickupDropdown(pickup);
+      customCandidates = getCustomPickupCandidates();
+    }
+    if (!customCandidates.length) {
+      log('Pickup auto-select: no visible time options detected for custom picker');
+    }
+    const chosen = pickNearestFutureLikeSlot(customCandidates, thresholdMinutes);
+    if (!chosen?.el) return false;
+    chosen.el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    chosen.el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    chosen.el.click();
+    if (pickup instanceof HTMLInputElement || pickup instanceof HTMLTextAreaElement) {
+      const hasCommittedValue = String(pickup.value || '').trim() !== '';
+      if (!hasCommittedValue) {
+        // Fallback for readonly/custom pickers when click does not immediately update input value.
+        setNativeValue(pickup, chosen.text || chosen.value, {
+          dispatchInput: true,
+          dispatchChange: true,
+          forceTrackerMismatch: true,
+        });
+      } else {
+        dispatchInputAndChange(pickup);
+      }
+    } else {
+      dispatchInputAndChange(pickup);
+    }
+    markFilled(pickup, `Today delivery: auto-selected next available pickup time (${chosen.text || chosen.value})`);
     return true;
   }
 
@@ -1999,13 +2194,16 @@
       clearPickupTimeFieldForToday();
       const selectedNow = selectNextAvailablePickupTimeForToday();
       if (!selectedNow) {
-        setTimeout(() => {
-          const selectedLate = selectNextAvailablePickupTimeForToday();
-          if (selectedLate) return;
-          const pickup = getInput('pickUpDateTime');
-          if (pickup) markReview(pickup, 'Today delivery: choose the next available pickup time manually');
-        }, 220);
-        setTimeout(() => { selectNextAvailablePickupTimeForToday(); }, 700);
+        const retryDelays = [220, 700, 1300, 2200];
+        retryDelays.forEach((delay, index) => {
+          setTimeout(() => {
+            const selectedLate = selectNextAvailablePickupTimeForToday();
+            if (selectedLate) return;
+            if (index < retryDelays.length - 1) return;
+            const pickup = getInput('pickUpDateTime');
+            if (pickup) markReview(pickup, 'Today delivery: choose the next available pickup time manually');
+          }, delay);
+        });
       }
     } else {
       fillField('pickUpDateTime', orderData.pickUpDateTime, 'Future delivery: defaulted by configuration', { source: orderData.pickUpDateTime ? 'service' : 'manual', maxLength: 20 });
@@ -2043,6 +2241,70 @@
     'country',
   ];
 
+  const REQUIRED_SUBMIT_FIELD_KEYS = [
+    'deliveryDate',
+    'pickUpDateTime',
+    'referenceNumber',
+    'NoOfItems',
+    'totalItemValue',
+    'itemDescription',
+    'recipient_name',
+    'lastName',
+    'phone',
+    'addressLine1',
+    'city',
+    'state',
+    'zip',
+    'country',
+    'locationType',
+    'specialDeliveryInstructions',
+    'undeliverableAction',
+  ];
+
+  function commitElementValueState(el, options = {}) {
+    if (!el) return;
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+      setNativeValue(el, String(el.value ?? ''), {
+        dispatchInput: true,
+        dispatchChange: true,
+        forceTrackerMismatch: true,
+        ...options,
+      });
+      return;
+    }
+    dispatchChangeOnly(el);
+  }
+
+  function commitAutofilledFieldState() {
+    for (const key of AUTO_FILLED_FIELD_KEYS) {
+      const el = getInput(key);
+      if (!el) continue;
+      commitElementValueState(el);
+    }
+  }
+
+  function commitRequiredFieldState() {
+    for (const key of REQUIRED_SUBMIT_FIELD_KEYS) {
+      const el = getInput(key);
+      if (!el) continue;
+      commitElementValueState(el, { dispatchBlur: true });
+      if (el instanceof HTMLElement) {
+        try {
+          el.blur();
+        } catch (error) {
+          log(`Unable to blur required field "${key}"`, error);
+        }
+      }
+    }
+  }
+
+  function stabilizeFormStateBeforeSubmit() {
+    enforceCountryDefault();
+    commitAutofilledFieldState();
+    commitRequiredFieldState();
+    commitAddressVerificationState(state.addressVerificationCommitToken);
+  }
+
   function dispatchInputAndChange(el) {
     if (!el) return;
     el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -2058,7 +2320,7 @@
     if (token !== state.addressVerificationCommitToken) return;
     for (const key of ADDRESS_VERIFICATION_FIELD_KEYS) {
       const el = getInput(key);
-      dispatchChangeOnly(el);
+      commitElementValueState(el);
     }
   }
 
@@ -2084,6 +2346,7 @@
     // Commit once after all address fields are filled, then once later to beat stale async responses.
     setTimeout(() => commitAddressVerificationState(token), 90);
     setTimeout(() => commitAddressVerificationState(token), 420);
+    setTimeout(() => commitAddressVerificationState(token), 900);
     setTimeout(() => reconcileAddressLine1VisualState(token), 950);
   }
 

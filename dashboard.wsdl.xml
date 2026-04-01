@@ -1,0 +1,476 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<wsdl:definitions xmlns:tm="http://microsoft.com/wsdl/mime/textMatching/" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:mime="http://schemas.xmlsoap.org/wsdl/mime/" xmlns:tns="http://localhost/webservices/" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:s="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/" xmlns:http="http://schemas.xmlsoap.org/wsdl/http/" targetNamespace="http://localhost/webservices/" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">
+  <wsdl:documentation xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">Mercury - Dashboard Web Service</wsdl:documentation>
+  <wsdl:types>
+    <s:schema elementFormDefault="qualified" targetNamespace="http://localhost/webservices/">
+      <s:import namespace="http://tempuri.org/DashboardEventDataset.xsd" />
+      <s:import namespace="http://tempuri.org/StatesDataSet.xsd" />
+      <s:import namespace="http://tempuri.org/MarketingMessageDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/dashboard.asmx?schema=DashboardEventDataset" namespace="http://tempuri.org/DashboardEventDataset.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/dashboard.asmx?schema=StatesDataSet" namespace="http://tempuri.org/StatesDataSet.xsd" />
+      <s:import schemaLocation="http://192.168.1.50/WsMercuryWebAPI/dashboard.asmx?schema=MarketingMessageDataset" namespace="http://tempuri.org/MarketingMessageDataset.xsd" />
+      <s:element name="GetDashboardEventsNow">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetDashboardEventsNowResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetDashboardEventsNowResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/DashboardEventDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetDashboardEvents">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetDashboardEventsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetDashboardEventsResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/DashboardEventDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetUndeliveredOrders">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetUndeliveredOrdersResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetUndeliveredOrdersResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/DashboardEventDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetStates">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetStatesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetStatesResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/StatesDataSet.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetMarketingMessages">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="maxMsgNumberClient" type="s:int" />
+            <s:element minOccurs="1" maxOccurs="1" name="msgTotalClient" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetMarketingMessagesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetMarketingMessagesResult">
+              <s:complexType>
+                <s:sequence>
+                  <s:any namespace="http://tempuri.org/MarketingMessageDataset.xsd" />
+                </s:sequence>
+              </s:complexType>
+            </s:element>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeleteMarketingMessages">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="msgIds" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeleteMarketingMessagesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="DeleteMarketingMessagesResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="MarkMessageRead">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="msgID" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="MarkMessageReadResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="MarkMessageReadResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetWeatherGadgetRefreshTime">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetWeatherGadgetRefreshTimeResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="GetWeatherGadgetRefreshTimeResult" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetDashboardEnabled">
+        <s:complexType />
+      </s:element>
+      <s:element name="GetDashboardEnabledResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="GetDashboardEnabledResult" type="s:boolean" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="PublishDashboardEventType">
+        <s:complexType />
+      </s:element>
+      <s:element name="PublishDashboardEventTypeResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="PublishDashboardEventTypeResult" type="tns:DashboardEventType" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:simpleType name="DashboardEventType">
+        <s:restriction base="s:string">
+          <s:enumeration value="DashboardEnabled" />
+          <s:enumeration value="PollingInterval" />
+          <s:enumeration value="MercuryMessages" />
+          <s:enumeration value="DeclinedCreditCard" />
+          <s:enumeration value="UnauthorizedCreditCard" />
+          <s:enumeration value="CODOrders" />
+          <s:enumeration value="PickupOrders" />
+          <s:enumeration value="IncompleteOrPendingOrders" />
+          <s:enumeration value="FiledOrders" />
+          <s:enumeration value="UnableToAccessMercuryInternet" />
+          <s:enumeration value="ProtocolsUnavailable" />
+          <s:enumeration value="BackupStatus" />
+          <s:enumeration value="NotDeliveredOrders" />
+          <s:enumeration value="StoreMainCode" />
+          <s:enumeration value="LastOrderSequenceNumber" />
+          <s:enumeration value="MercuryMessageAlert" />
+          <s:enumeration value="InternetConnectionStatus" />
+          <s:enumeration value="MobileAppEnabled" />
+        </s:restriction>
+      </s:simpleType>
+    </s:schema>
+  </wsdl:types>
+  <wsdl:message name="GetDashboardEventsNowSoapIn">
+    <wsdl:part name="parameters" element="tns:GetDashboardEventsNow" />
+  </wsdl:message>
+  <wsdl:message name="GetDashboardEventsNowSoapOut">
+    <wsdl:part name="parameters" element="tns:GetDashboardEventsNowResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetDashboardEventsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetDashboardEvents" />
+  </wsdl:message>
+  <wsdl:message name="GetDashboardEventsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetDashboardEventsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetUndeliveredOrdersSoapIn">
+    <wsdl:part name="parameters" element="tns:GetUndeliveredOrders" />
+  </wsdl:message>
+  <wsdl:message name="GetUndeliveredOrdersSoapOut">
+    <wsdl:part name="parameters" element="tns:GetUndeliveredOrdersResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetStatesSoapIn">
+    <wsdl:part name="parameters" element="tns:GetStates" />
+  </wsdl:message>
+  <wsdl:message name="GetStatesSoapOut">
+    <wsdl:part name="parameters" element="tns:GetStatesResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetMarketingMessagesSoapIn">
+    <wsdl:part name="parameters" element="tns:GetMarketingMessages" />
+  </wsdl:message>
+  <wsdl:message name="GetMarketingMessagesSoapOut">
+    <wsdl:part name="parameters" element="tns:GetMarketingMessagesResponse" />
+  </wsdl:message>
+  <wsdl:message name="DeleteMarketingMessagesSoapIn">
+    <wsdl:part name="parameters" element="tns:DeleteMarketingMessages" />
+  </wsdl:message>
+  <wsdl:message name="DeleteMarketingMessagesSoapOut">
+    <wsdl:part name="parameters" element="tns:DeleteMarketingMessagesResponse" />
+  </wsdl:message>
+  <wsdl:message name="MarkMessageReadSoapIn">
+    <wsdl:part name="parameters" element="tns:MarkMessageRead" />
+  </wsdl:message>
+  <wsdl:message name="MarkMessageReadSoapOut">
+    <wsdl:part name="parameters" element="tns:MarkMessageReadResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetWeatherGadgetRefreshTimeSoapIn">
+    <wsdl:part name="parameters" element="tns:GetWeatherGadgetRefreshTime" />
+  </wsdl:message>
+  <wsdl:message name="GetWeatherGadgetRefreshTimeSoapOut">
+    <wsdl:part name="parameters" element="tns:GetWeatherGadgetRefreshTimeResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetDashboardEnabledSoapIn">
+    <wsdl:part name="parameters" element="tns:GetDashboardEnabled" />
+  </wsdl:message>
+  <wsdl:message name="GetDashboardEnabledSoapOut">
+    <wsdl:part name="parameters" element="tns:GetDashboardEnabledResponse" />
+  </wsdl:message>
+  <wsdl:message name="PublishDashboardEventTypeSoapIn">
+    <wsdl:part name="parameters" element="tns:PublishDashboardEventType" />
+  </wsdl:message>
+  <wsdl:message name="PublishDashboardEventTypeSoapOut">
+    <wsdl:part name="parameters" element="tns:PublishDashboardEventTypeResponse" />
+  </wsdl:message>
+  <wsdl:portType name="DashboardServiceSoap">
+    <wsdl:operation name="GetDashboardEventsNow">
+      <wsdl:input message="tns:GetDashboardEventsNowSoapIn" />
+      <wsdl:output message="tns:GetDashboardEventsNowSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetDashboardEvents">
+      <wsdl:input message="tns:GetDashboardEventsSoapIn" />
+      <wsdl:output message="tns:GetDashboardEventsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetUndeliveredOrders">
+      <wsdl:input message="tns:GetUndeliveredOrdersSoapIn" />
+      <wsdl:output message="tns:GetUndeliveredOrdersSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetStates">
+      <wsdl:input message="tns:GetStatesSoapIn" />
+      <wsdl:output message="tns:GetStatesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetMarketingMessages">
+      <wsdl:input message="tns:GetMarketingMessagesSoapIn" />
+      <wsdl:output message="tns:GetMarketingMessagesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="DeleteMarketingMessages">
+      <wsdl:input message="tns:DeleteMarketingMessagesSoapIn" />
+      <wsdl:output message="tns:DeleteMarketingMessagesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="MarkMessageRead">
+      <wsdl:input message="tns:MarkMessageReadSoapIn" />
+      <wsdl:output message="tns:MarkMessageReadSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetWeatherGadgetRefreshTime">
+      <wsdl:input message="tns:GetWeatherGadgetRefreshTimeSoapIn" />
+      <wsdl:output message="tns:GetWeatherGadgetRefreshTimeSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetDashboardEnabled">
+      <wsdl:input message="tns:GetDashboardEnabledSoapIn" />
+      <wsdl:output message="tns:GetDashboardEnabledSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="PublishDashboardEventType">
+      <wsdl:input message="tns:PublishDashboardEventTypeSoapIn" />
+      <wsdl:output message="tns:PublishDashboardEventTypeSoapOut" />
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="DashboardServiceSoap" type="tns:DashboardServiceSoap">
+    <soap:binding transport="http://schemas.xmlsoap.org/soap/http" />
+    <wsdl:operation name="GetDashboardEventsNow">
+      <soap:operation soapAction="http://localhost/webservices/GetDashboardEventsNow" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetDashboardEvents">
+      <soap:operation soapAction="http://localhost/webservices/GetDashboardEvents" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetUndeliveredOrders">
+      <soap:operation soapAction="http://localhost/webservices/GetUndeliveredOrders" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetStates">
+      <soap:operation soapAction="http://localhost/webservices/GetStates" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetMarketingMessages">
+      <soap:operation soapAction="http://localhost/webservices/GetMarketingMessages" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteMarketingMessages">
+      <soap:operation soapAction="http://localhost/webservices/DeleteMarketingMessages" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="MarkMessageRead">
+      <soap:operation soapAction="http://localhost/webservices/MarkMessageRead" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetWeatherGadgetRefreshTime">
+      <soap:operation soapAction="http://localhost/webservices/GetWeatherGadgetRefreshTime" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetDashboardEnabled">
+      <soap:operation soapAction="http://localhost/webservices/GetDashboardEnabled" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="PublishDashboardEventType">
+      <soap:operation soapAction="http://localhost/webservices/PublishDashboardEventType" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:binding name="DashboardServiceSoap12" type="tns:DashboardServiceSoap">
+    <soap12:binding transport="http://schemas.xmlsoap.org/soap/http" />
+    <wsdl:operation name="GetDashboardEventsNow">
+      <soap12:operation soapAction="http://localhost/webservices/GetDashboardEventsNow" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetDashboardEvents">
+      <soap12:operation soapAction="http://localhost/webservices/GetDashboardEvents" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetUndeliveredOrders">
+      <soap12:operation soapAction="http://localhost/webservices/GetUndeliveredOrders" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetStates">
+      <soap12:operation soapAction="http://localhost/webservices/GetStates" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetMarketingMessages">
+      <soap12:operation soapAction="http://localhost/webservices/GetMarketingMessages" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteMarketingMessages">
+      <soap12:operation soapAction="http://localhost/webservices/DeleteMarketingMessages" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="MarkMessageRead">
+      <soap12:operation soapAction="http://localhost/webservices/MarkMessageRead" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetWeatherGadgetRefreshTime">
+      <soap12:operation soapAction="http://localhost/webservices/GetWeatherGadgetRefreshTime" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetDashboardEnabled">
+      <soap12:operation soapAction="http://localhost/webservices/GetDashboardEnabled" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="PublishDashboardEventType">
+      <soap12:operation soapAction="http://localhost/webservices/PublishDashboardEventType" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="DashboardService">
+    <wsdl:documentation xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">Mercury - Dashboard Web Service</wsdl:documentation>
+    <wsdl:port name="DashboardServiceSoap" binding="tns:DashboardServiceSoap">
+      <soap:address location="http://192.168.1.50/WsMercuryWebAPI/dashboard.asmx" />
+    </wsdl:port>
+    <wsdl:port name="DashboardServiceSoap12" binding="tns:DashboardServiceSoap12">
+      <soap12:address location="http://192.168.1.50/WsMercuryWebAPI/dashboard.asmx" />
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

@@ -1,0 +1,184 @@
+﻿{
+  "generated_at_utc": "2026-03-27T00:00:00Z",
+  "focus": "Mercury job workflow dashboard",
+  "pipeline_stages": [
+    {
+      "stage": "incoming",
+      "description": "New jobs/messages enter from network feeds.",
+      "signals": [
+        "DashboardEventType=MercuryMessages",
+        "MessageItems rows in DashboardEventDataset"
+      ]
+    },
+    {
+      "stage": "queued_not_designed",
+      "description": "Order exists but design not complete.",
+      "signals": [
+        "DeliveryZones.NOT_DESIGNED > 0",
+        "TicketStatus.DesignerStatus=Not Assigned"
+      ]
+    },
+    {
+      "stage": "designed",
+      "description": "Design complete and waiting for route/truck dispatch.",
+      "signals": [
+        "DeliveryZones.DESIGNED > 0",
+        "TicketStatus.DesignerStatus=Designed"
+      ]
+    },
+    {
+      "stage": "saved_or_staged",
+      "description": "Prepared and staged for dispatch.",
+      "signals": [
+        "DeliveryZones.SAVED > 0"
+      ]
+    },
+    {
+      "stage": "on_truck",
+      "description": "Assigned to route/driver and out for delivery.",
+      "signals": [
+        "DeliveryZones.ON_TRUCK > 0",
+        "TicketStatus.DeliveryRoute not empty"
+      ]
+    },
+    {
+      "stage": "delivered_or_exception",
+      "description": "Delivered or undelivered exception bucket.",
+      "signals": [
+        "DeliveryZones.DELIVERED > 0",
+        "GetUndeliveredOrders dataset for exceptions"
+      ]
+    }
+  ],
+  "mvp_apis": [
+    {
+      "service": "Dashboard",
+      "operation": "GetDashboardEventsNow",
+      "http_post_path": "/WsMercuryWebAPI/dashboard.asmx/GetDashboardEventsNow",
+      "params": [],
+      "returns": "DashboardEventDataset",
+      "why": "Primary live board feed: event counts + order rows + delivery zone stage counts."
+    },
+    {
+      "service": "Dashboard",
+      "operation": "GetUndeliveredOrders",
+      "http_post_path": "/WsMercuryWebAPI/dashboard.asmx/GetUndeliveredOrders",
+      "params": [],
+      "returns": "DashboardEventDataset",
+      "why": "Exception feed for jobs that did not reach successful delivery."
+    },
+    {
+      "service": "OrderEntry",
+      "operation": "GetTicketStatus",
+      "http_post_path": "/WsMercuryWebAPI/OrderEntry.asmx/GetTicketStatus",
+      "params": ["ticketID"],
+      "returns": "TicketStatusDataSet",
+      "why": "Current per-ticket stage details (designer/delivery fields)."
+    },
+    {
+      "service": "Delivery",
+      "operation": "LoadOrderDetails",
+      "http_post_path": "/WsMercuryWebAPI/Delivery.asmx/LoadOrderDetails",
+      "params": ["ticketID"],
+      "returns": "OrderDetailsDataset",
+      "why": "Expanded job card details for modal/detail pane."
+    },
+    {
+      "service": "OrderLifeCycle",
+      "operation": "OLCGetByTicket",
+      "http_post_path": "/WsMercuryWebAPI/OrderLifeCycle.asmx/OLCGetByTicket",
+      "params": ["TicketID"],
+      "returns": "OrderLifeCycleMsgDataSet",
+      "why": "Timeline/history stream for a single job through lifecycle events."
+    }
+  ],
+  "optional_support_apis": [
+    {
+      "service": "Framework",
+      "operation": "GetServerTime",
+      "http_post_path": "/WsMercuryWebAPI/Framework.asmx/GetServerTime",
+      "params": [],
+      "returns": "DateTime/string",
+      "why": "Clock sync and stale-feed detection in kiosk mode."
+    },
+    {
+      "service": "Dashboard",
+      "operation": "GetDashboardEnabled",
+      "http_post_path": "/WsMercuryWebAPI/dashboard.asmx/GetDashboardEnabled",
+      "params": [],
+      "returns": "boolean",
+      "why": "Feature toggle guard for dashboard widgets."
+    }
+  ],
+  "nice_to_have_apis": [
+    {
+      "service": "Delivery",
+      "operation": "LoadZoneSummary",
+      "http_post_path": "/WsMercuryWebAPI/Delivery.asmx/LoadZoneSummary",
+      "params": ["date", "thrudate", "priorityIDList", "designedOnly"],
+      "returns": "ZoneSummaryDataSet",
+      "why": "High-value aggregate stage counts by delivery zone/priority."
+    },
+    {
+      "service": "Delivery",
+      "operation": "LoadInProgressRouteSummary",
+      "http_post_path": "/WsMercuryWebAPI/Delivery.asmx/LoadInProgressRouteSummary",
+      "params": ["date", "thrudate"],
+      "returns": "InProgressRouteSummaryDataSet",
+      "why": "Live route workload board for dispatch operations."
+    },
+    {
+      "service": "Delivery",
+      "operation": "LoadFailedDelivery",
+      "http_post_path": "/WsMercuryWebAPI/Delivery.asmx/LoadFailedDelivery",
+      "params": [],
+      "returns": "FailedDeliveryDataSet",
+      "why": "Exception queue for failed attempts and follow-up."
+    },
+    {
+      "service": "Delivery",
+      "operation": "LoadOrderByZone",
+      "http_post_path": "/WsMercuryWebAPI/Delivery.asmx/LoadOrderByZone",
+      "params": ["deliveryDate", "deliveryThruDate", "designedOrders", "priorityIDList"],
+      "returns": "DeliveryOrdersByZoneDataSet",
+      "why": "Zone-level drilldown from summary counts to individual jobs."
+    },
+    {
+      "service": "Delivery",
+      "operation": "LoadOrderByRoutes",
+      "http_post_path": "/WsMercuryWebAPI/Delivery.asmx/LoadOrderByRoutes",
+      "params": ["deliveryDate", "deliveryThruDate"],
+      "returns": "DeliveryOrdersByRoutesDataSet",
+      "why": "Route-level drilldown for active and exception stops."
+    },
+    {
+      "service": "Message",
+      "operation": "GetMessageList",
+      "http_post_path": "/WsMercuryWebAPI/message.asmx/GetMessageList",
+      "params": [
+        "wireService",
+        "storeID",
+        "msgType",
+        "msgDirection",
+        "delivDate",
+        "msgDate",
+        "memberCode",
+        "ticketNum",
+        "recipientName",
+        "mercuryNum",
+        "maxRows",
+        "msgID"
+      ],
+      "returns": "MercuryMessageListDataSet",
+      "why": "Detailed message queue view for inbound/outbound workflow context."
+    },
+    {
+      "service": "OrderLifeCycle",
+      "operation": "OLCGetBySERVICE_MSG_NUM",
+      "http_post_path": "/WsMercuryWebAPI/OrderLifeCycle.asmx/OLCGetBySERVICE_MSG_NUM",
+      "params": ["SERVICE_MSG_NUM"],
+      "returns": "OrderLifeCycleMsgDataSet",
+      "why": "Cross-reference lifecycle entries by network/service message ID."
+    }
+  ]
+}

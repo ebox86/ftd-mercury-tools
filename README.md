@@ -1,6 +1,15 @@
-# FTD Mercury Tools
+<table>
+  <tr>
+    <td>
+      <img src="public/ftd.png" alt="FTD logo" width="120" />
+    </td>
+    <td>
+      <h1>FTD Mercury Tools</h1>
+    </td>
+  </tr>
+</table>
 
-Utilities and userscripts for improving workflows in MercuryHQ.
+Utilities and userscripts for improving workflows in FTD's Mercury client and MercuryHQ webApp.
 
 ## Available Plugins
 
@@ -14,6 +23,17 @@ Utilities and userscripts for improving workflows in MercuryHQ.
 
 1. **Tampermonkey** (required to run userscripts)
 
+## Available Services
+
+1. **Weather XOAP Compatibility Shim**
+   - Path: `weather-xoap-shim/`
+   - Type: IIS-hosted ASP.NET compatibility layer
+   - Purpose: Emulates legacy `xoap.weather.com` XML endpoints for Mercury dashboard weather gadget on localhost.
+2. **Pi Kiosk Dashboard Starter**
+   - Path: `mercury-orders-tv-dashboard/`
+   - Type: Reference + local Node workflow bridge + React kiosk app
+   - Purpose: Live Mercury workflow dashboard for ticket, design, and delivery status visibility.
+
 ## Requirements
 
 1. **Tampermonkey** browser extension (Chrome/Edge/Firefox).
@@ -25,6 +45,8 @@ Utilities and userscripts for improving workflows in MercuryHQ.
 
 - `README.md` - root project documentation
 - `mercury-hq-delivery-barcode-lookup/` - barcode lookup userscript and tool-specific docs
+- `weather-xoap-shim/` - local XOAP weather compatibility shim + install scripts
+- `mercury-orders-tv-dashboard/` - Mercury workflow API snapshots, live workflow bridge, and kiosk dashboard UI
 - `public/` - shared static assets (if needed later)
 
 ## Quick Start
@@ -32,3 +54,9 @@ Utilities and userscripts for improving workflows in MercuryHQ.
 1. Install the Tampermonkey extension in your browser.
 2. Open the tool-specific README for install/config details:
    - `mercury-hq-delivery-barcode-lookup/README.md`
+
+## Legal Disclaimer
+
+> **Disclaimer**
+> This is a personal project. I am not affiliated with, associated with, authorized by, endorsed by, or in any way officially connected with FTD.
+> Use this project at your own risk. You are solely responsible for any changes, outcomes, or impacts in your environment.

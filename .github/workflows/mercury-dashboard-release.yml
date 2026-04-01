@@ -1,0 +1,166 @@
+name: Mercury Dashboard Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semantic version (example: 1.2.0)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "mercury-dashboard-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    env:
+      NODE_RUNTIME_VERSION: v20.19.0
+      NSSM_VERSION: "2.24"
+
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version metadata
+        id: meta
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}"
+          } else {
+            $refName = "${{ github.ref_name }}"
+            $prefix = "mercury-dashboard-v"
+            if (-not $refName.StartsWith($prefix)) {
+              throw "Tag must use prefix '$prefix'. Got: $refName"
+            }
+            $version = $refName.Substring($prefix.Length)
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') {
+            throw "Invalid version format: $version"
+          }
+
+          $tag = "mercury-dashboard-v$version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "Version=$version"
+          Write-Host "Tag=$tag"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+
+      - name: Install kiosk dependencies
+        working-directory: mercury-orders-tv-dashboard/kiosk-app
+        run: npm ci
+
+      - name: Build kiosk app
+        working-directory: mercury-orders-tv-dashboard/kiosk-app
+        run: npm run build
+
+      - name: Verify bridge and web host scripts
+        run: |
+          node --check mercury-orders-tv-dashboard/workflow-bridge/server.mjs
+          node --check mercury-orders-tv-dashboard/service-host/dashboard-web-server.mjs
+
+      - name: Install Inno Setup compiler
+        run: choco install innosetup --no-progress -y
+
+      - name: Download installer tooling (Node runtime + nssm)
+        id: tooling
+        run: |
+          $toolsRoot = Join-Path $PWD "mercury-orders-tv-dashboard\artifacts\tooling"
+          if (-not (Test-Path $toolsRoot)) {
+            New-Item -ItemType Directory -Path $toolsRoot | Out-Null
+          }
+
+          $nssmZip = Join-Path $toolsRoot "nssm-$env:NSSM_VERSION.zip"
+          $nssmExtract = Join-Path $toolsRoot "nssm"
+          Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-$env:NSSM_VERSION.zip" -OutFile $nssmZip
+          if (Test-Path $nssmExtract) {
+            Remove-Item -Recurse -Force $nssmExtract
+          }
+          Expand-Archive -Path $nssmZip -DestinationPath $nssmExtract -Force
+
+          $nssmExe = Get-ChildItem -Path $nssmExtract -Recurse -Filter nssm.exe |
+            Where-Object { $_.FullName -match '\\win64\\' } |
+            Select-Object -First 1
+          if (-not $nssmExe) {
+            $nssmExe = Get-ChildItem -Path $nssmExtract -Recurse -Filter nssm.exe | Select-Object -First 1
+          }
+          if (-not $nssmExe) {
+            throw "Could not locate nssm.exe in $nssmExtract"
+          }
+
+          $nodeZipName = "node-$env:NODE_RUNTIME_VERSION-win-x64.zip"
+          $nodeZip = Join-Path $toolsRoot $nodeZipName
+          $nodeExtract = Join-Path $toolsRoot "node-runtime"
+          Invoke-WebRequest -Uri "https://nodejs.org/dist/$env:NODE_RUNTIME_VERSION/$nodeZipName" -OutFile $nodeZip
+          if (Test-Path $nodeExtract) {
+            Remove-Item -Recurse -Force $nodeExtract
+          }
+          Expand-Archive -Path $nodeZip -DestinationPath $nodeExtract -Force
+
+          $nodeRuntimeDir = Join-Path $nodeExtract "node-$env:NODE_RUNTIME_VERSION-win-x64"
+          if (-not (Test-Path (Join-Path $nodeRuntimeDir "node.exe"))) {
+            throw "node.exe not found in extracted runtime: $nodeRuntimeDir"
+          }
+
+          "nssm_exe=$($nssmExe.FullName)" >> $env:GITHUB_OUTPUT
+          "node_runtime_dir=$nodeRuntimeDir" >> $env:GITHUB_OUTPUT
+
+      - name: Build Mercury dashboard installer
+        run: |
+          $publisherUrl = "https://github.com/${{ github.repository }}"
+          .\mercury-orders-tv-dashboard\tools\build-installer.ps1 `
+            -Version "${{ steps.meta.outputs.version }}" `
+            -Publisher "FTD" `
+            -PublisherUrl $publisherUrl `
+            -NodeRuntimeDir "${{ steps.tooling.outputs.node_runtime_dir }}" `
+            -NssmExePath "${{ steps.tooling.outputs.nssm_exe }}"
+
+      - name: Hash installer
+        id: hash
+        run: |
+          $version = "${{ steps.meta.outputs.version }}"
+          $installer = Join-Path $PWD "mercury-orders-tv-dashboard\dist\FTD.MercuryDashboard.Setup.$version.exe"
+          if (-not (Test-Path $installer)) {
+            throw "Installer not found: $installer"
+          }
+
+          $hash = (Get-FileHash -Path $installer -Algorithm SHA256).Hash.ToUpperInvariant()
+          $hashFile = "$installer.sha256.txt"
+          Set-Content -Path $hashFile -Value "$hash  $(Split-Path -Leaf $installer)"
+
+          "installer=$installer" >> $env:GITHUB_OUTPUT
+          "hash=$hash" >> $env:GITHUB_OUTPUT
+          "hash_file=$hashFile" >> $env:GITHUB_OUTPUT
+
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: Mercury Dashboard ${{ steps.meta.outputs.version }}
+          files: |
+            ${{ steps.hash.outputs.installer }}
+            ${{ steps.hash.outputs.hash_file }}
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mercury-dashboard-installer-${{ steps.meta.outputs.version }}
+          path: |
+            ${{ steps.hash.outputs.installer }}
+            ${{ steps.hash.outputs.hash_file }}
