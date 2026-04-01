@@ -36,7 +36,7 @@ OutputBaseFilename=FTD.MercuryDashboard.Setup.{#MyAppVersion}
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequiredOverridesAllowed=none
 UninstallDisplayName={#MyAppName}
 SetupLogging=yes
 

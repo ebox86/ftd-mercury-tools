@@ -631,7 +631,9 @@ function filterByDateRange(rows, fieldName, startValue, endValue) {
     if (startEpoch !== null && rowEpoch < startEpoch) {
       return false;
     }
-    if (endEpoch !== null && rowEpoch > endEpoch) {
+    // Treat the range as [start, end) to avoid day-window overlap when
+    // callers pass end as the next-day midnight boundary.
+    if (endEpoch !== null && rowEpoch >= endEpoch) {
       return false;
     }
     return true;

@@ -3201,7 +3201,6 @@ export default function App() {
               type="checkbox"
               checked={includeNextDay}
               onChange={(event) => {
-                requestActiveOrdersRefreshSpinner();
                 setIncludeNextDay(event.target.checked);
               }}
             />
