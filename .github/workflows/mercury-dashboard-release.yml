@@ -86,28 +86,118 @@ jobs:
             New-Item -ItemType Directory -Path $toolsRoot | Out-Null
           }
 
-          $nssmZip = Join-Path $toolsRoot "nssm-$env:NSSM_VERSION.zip"
           $nssmExtract = Join-Path $toolsRoot "nssm"
-          Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-$env:NSSM_VERSION.zip" -OutFile $nssmZip
           if (Test-Path $nssmExtract) {
             Remove-Item -Recurse -Force $nssmExtract
           }
-          Expand-Archive -Path $nssmZip -DestinationPath $nssmExtract -Force
 
-          $nssmExe = Get-ChildItem -Path $nssmExtract -Recurse -Filter nssm.exe |
-            Where-Object { $_.FullName -match '\\win64\\' } |
-            Select-Object -First 1
+          function Invoke-DownloadWithRetry {
+            param(
+              [Parameter(Mandatory = $true)] [string]$Uri,
+              [Parameter(Mandatory = $true)] [string]$OutFile,
+              [int]$Attempts = 3,
+              [int]$DelaySeconds = 3
+            )
+
+            $lastError = $null
+            for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+              try {
+                if (Test-Path $OutFile) {
+                  Remove-Item -Force $OutFile
+                }
+                Invoke-WebRequest -Uri $Uri -OutFile $OutFile
+                return
+              }
+              catch {
+                $lastError = $_
+                if ($attempt -lt $Attempts) {
+                  Start-Sleep -Seconds $DelaySeconds
+                }
+              }
+            }
+
+            if ($null -ne $lastError) {
+              throw $lastError
+            }
+
+            throw "Download failed for $Uri"
+          }
+
+          $nssmExe = $null
+          $nssmZip = Join-Path $toolsRoot "nssm-$env:NSSM_VERSION.zip"
+          try {
+            Write-Host "Trying nssm.cc download..."
+            Invoke-DownloadWithRetry -Uri "https://nssm.cc/release/nssm-$env:NSSM_VERSION.zip" -OutFile $nssmZip
+            Expand-Archive -Path $nssmZip -DestinationPath $nssmExtract -Force
+            $nssmExe = Get-ChildItem -Path $nssmExtract -Recurse -Filter nssm.exe |
+              Where-Object { $_.FullName -match '\\win64\\' } |
+              Select-Object -First 1
+            if (-not $nssmExe) {
+              $nssmExe = Get-ChildItem -Path $nssmExtract -Recurse -Filter nssm.exe | Select-Object -First 1
+            }
+          }
+          catch {
+            Write-Warning "nssm.cc download failed: $($_.Exception.Message)"
+          }
+
           if (-not $nssmExe) {
-            $nssmExe = Get-ChildItem -Path $nssmExtract -Recurse -Filter nssm.exe | Select-Object -First 1
+            Write-Host "Falling back to Chocolatey nssm package..."
+            try {
+              choco install nssm --no-progress -y | Out-Host
+            }
+            catch {
+              Write-Warning "choco install nssm failed: $($_.Exception.Message)"
+            }
+
+            $chocoLib = Join-Path $env:ProgramData "chocolatey\lib"
+            if (Test-Path $chocoLib) {
+              $nssmExe = Get-ChildItem -Path $chocoLib -Recurse -Filter nssm.exe -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '\\win64\\' } |
+                Select-Object -First 1
+              if (-not $nssmExe) {
+                $nssmExe = Get-ChildItem -Path $chocoLib -Recurse -Filter nssm.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+              }
+            }
+          }
+
+          if (-not $nssmExe) {
+            Write-Host "Falling back to direct Chocolatey package download..."
+            $nupkgPath = Join-Path $toolsRoot "nssm-package.nupkg"
+            $nupkgZipPath = Join-Path $toolsRoot "nssm-package.zip"
+            $nupkgExtract = Join-Path $toolsRoot "nssm-package"
+
+            Invoke-DownloadWithRetry -Uri "https://community.chocolatey.org/api/v2/package/nssm" -OutFile $nupkgPath
+            Copy-Item -Path $nupkgPath -Destination $nupkgZipPath -Force
+            if (Test-Path $nupkgExtract) {
+              Remove-Item -Recurse -Force $nupkgExtract
+            }
+            Expand-Archive -Path $nupkgZipPath -DestinationPath $nupkgExtract -Force
+
+            $embeddedZip = Get-ChildItem -Path $nupkgExtract -Recurse -Filter "nssm-*.zip" | Select-Object -First 1
+            if ($embeddedZip) {
+              Expand-Archive -Path $embeddedZip.FullName -DestinationPath $nssmExtract -Force
+              $nssmExe = Get-ChildItem -Path $nssmExtract -Recurse -Filter nssm.exe |
+                Where-Object { $_.FullName -match '\\win64\\' } |
+                Select-Object -First 1
+              if (-not $nssmExe) {
+                $nssmExe = Get-ChildItem -Path $nssmExtract -Recurse -Filter nssm.exe | Select-Object -First 1
+              }
+            }
+          }
+
+          if ($nssmExe) {
+            New-Item -ItemType Directory -Path $nssmExtract -Force | Out-Null
+            Copy-Item -Path $nssmExe.FullName -Destination (Join-Path $nssmExtract "nssm.exe") -Force
+            $nssmExe = Get-Item (Join-Path $nssmExtract "nssm.exe")
           }
           if (-not $nssmExe) {
-            throw "Could not locate nssm.exe in $nssmExtract"
+            throw "Could not locate nssm.exe from either nssm.cc or Chocolatey."
           }
 
           $nodeZipName = "node-$env:NODE_RUNTIME_VERSION-win-x64.zip"
           $nodeZip = Join-Path $toolsRoot $nodeZipName
           $nodeExtract = Join-Path $toolsRoot "node-runtime"
-          Invoke-WebRequest -Uri "https://nodejs.org/dist/$env:NODE_RUNTIME_VERSION/$nodeZipName" -OutFile $nodeZip
+          Invoke-DownloadWithRetry -Uri "https://nodejs.org/dist/$env:NODE_RUNTIME_VERSION/$nodeZipName" -OutFile $nodeZip
           if (Test-Path $nodeExtract) {
             Remove-Item -Recurse -Force $nodeExtract
           }

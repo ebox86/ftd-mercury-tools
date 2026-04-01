@@ -55,13 +55,11 @@ if (-not $iscc) {
 $defineVersion = "/DMyAppVersion=$Version"
 $definePublisher = '/DMyAppPublisher="' + $Publisher + '"'
 $defineUrl = '/DMyAppURL="' + $PublisherUrl + '"'
-$defineStageDir = '/DStageDir="' + $stageRoot + '"'
 
 $compileArgs = @(
   $defineVersion,
   $definePublisher,
   $defineUrl,
-  $defineStageDir,
   $installerProjectPath
 )
 
