@@ -23,7 +23,6 @@ jobs:
 
     env:
       NODE_RUNTIME_VERSION: v20.19.0
-      NSSM_VERSION: "2.24"
 
     outputs:
       version: ${{ steps.meta.outputs.version }}
@@ -57,6 +56,11 @@ jobs:
           Write-Host "Version=$version"
           Write-Host "Tag=$tag"
 
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -75,20 +79,32 @@ jobs:
           node --check mercury-orders-tv-dashboard/workflow-bridge/server.mjs
           node --check mercury-orders-tv-dashboard/service-host/dashboard-web-server.mjs
 
+      - name: Validate PowerShell installer scripts
+        run: |
+          $files = @(
+            "mercury-orders-tv-dashboard/service/install-mercury-dashboard-services.ps1",
+            "mercury-orders-tv-dashboard/service/uninstall-mercury-dashboard-services.ps1",
+            "mercury-orders-tv-dashboard/tools/build-installer.ps1"
+          )
+          foreach ($file in $files) {
+            $raw = Get-Content -Raw -Path $file
+            [void][scriptblock]::Create($raw)
+            Write-Host "Parsed OK: $file"
+          }
+
+      - name: Build dashboard service host
+        run: |
+          dotnet build mercury-orders-tv-dashboard/service-host/FTD.Mercury.Dashboard.ServiceHost/FTD.Mercury.Dashboard.ServiceHost.csproj -c Release
+
       - name: Install Inno Setup compiler
         run: choco install innosetup --no-progress -y
 
-      - name: Download installer tooling (Node runtime + nssm)
+      - name: Download installer tooling (Node runtime)
         id: tooling
         run: |
           $toolsRoot = Join-Path $PWD "mercury-orders-tv-dashboard\artifacts\tooling"
           if (-not (Test-Path $toolsRoot)) {
             New-Item -ItemType Directory -Path $toolsRoot | Out-Null
-          }
-
-          $nssmExtract = Join-Path $toolsRoot "nssm"
-          if (Test-Path $nssmExtract) {
-            Remove-Item -Recurse -Force $nssmExtract
           }
 
           function Invoke-DownloadWithRetry {
@@ -123,77 +139,6 @@ jobs:
             throw "Download failed for $Uri"
           }
 
-          $nssmExe = $null
-          $nssmZip = Join-Path $toolsRoot "nssm-$env:NSSM_VERSION.zip"
-          try {
-            Write-Host "Trying nssm.cc download..."
-            Invoke-DownloadWithRetry -Uri "https://nssm.cc/release/nssm-$env:NSSM_VERSION.zip" -OutFile $nssmZip
-            Expand-Archive -Path $nssmZip -DestinationPath $nssmExtract -Force
-            $nssmExe = Get-ChildItem -Path $nssmExtract -Recurse -Filter nssm.exe |
-              Where-Object { $_.FullName -match '\\win64\\' } |
-              Select-Object -First 1
-            if (-not $nssmExe) {
-              $nssmExe = Get-ChildItem -Path $nssmExtract -Recurse -Filter nssm.exe | Select-Object -First 1
-            }
-          }
-          catch {
-            Write-Warning "nssm.cc download failed: $($_.Exception.Message)"
-          }
-
-          if (-not $nssmExe) {
-            Write-Host "Falling back to Chocolatey nssm package..."
-            try {
-              choco install nssm --no-progress -y | Out-Host
-            }
-            catch {
-              Write-Warning "choco install nssm failed: $($_.Exception.Message)"
-            }
-
-            $chocoLib = Join-Path $env:ProgramData "chocolatey\lib"
-            if (Test-Path $chocoLib) {
-              $nssmExe = Get-ChildItem -Path $chocoLib -Recurse -Filter nssm.exe -ErrorAction SilentlyContinue |
-                Where-Object { $_.FullName -match '\\win64\\' } |
-                Select-Object -First 1
-              if (-not $nssmExe) {
-                $nssmExe = Get-ChildItem -Path $chocoLib -Recurse -Filter nssm.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-              }
-            }
-          }
-
-          if (-not $nssmExe) {
-            Write-Host "Falling back to direct Chocolatey package download..."
-            $nupkgPath = Join-Path $toolsRoot "nssm-package.nupkg"
-            $nupkgZipPath = Join-Path $toolsRoot "nssm-package.zip"
-            $nupkgExtract = Join-Path $toolsRoot "nssm-package"
-
-            Invoke-DownloadWithRetry -Uri "https://community.chocolatey.org/api/v2/package/nssm" -OutFile $nupkgPath
-            Copy-Item -Path $nupkgPath -Destination $nupkgZipPath -Force
-            if (Test-Path $nupkgExtract) {
-              Remove-Item -Recurse -Force $nupkgExtract
-            }
-            Expand-Archive -Path $nupkgZipPath -DestinationPath $nupkgExtract -Force
-
-            $embeddedZip = Get-ChildItem -Path $nupkgExtract -Recurse -Filter "nssm-*.zip" | Select-Object -First 1
-            if ($embeddedZip) {
-              Expand-Archive -Path $embeddedZip.FullName -DestinationPath $nssmExtract -Force
-              $nssmExe = Get-ChildItem -Path $nssmExtract -Recurse -Filter nssm.exe |
-                Where-Object { $_.FullName -match '\\win64\\' } |
-                Select-Object -First 1
-              if (-not $nssmExe) {
-                $nssmExe = Get-ChildItem -Path $nssmExtract -Recurse -Filter nssm.exe | Select-Object -First 1
-              }
-            }
-          }
-
-          if ($nssmExe) {
-            New-Item -ItemType Directory -Path $nssmExtract -Force | Out-Null
-            Copy-Item -Path $nssmExe.FullName -Destination (Join-Path $nssmExtract "nssm.exe") -Force
-            $nssmExe = Get-Item (Join-Path $nssmExtract "nssm.exe")
-          }
-          if (-not $nssmExe) {
-            throw "Could not locate nssm.exe from either nssm.cc or Chocolatey."
-          }
-
           $nodeZipName = "node-$env:NODE_RUNTIME_VERSION-win-x64.zip"
           $nodeZip = Join-Path $toolsRoot $nodeZipName
           $nodeExtract = Join-Path $toolsRoot "node-runtime"
@@ -208,7 +153,6 @@ jobs:
             throw "node.exe not found in extracted runtime: $nodeRuntimeDir"
           }
 
-          "nssm_exe=$($nssmExe.FullName)" >> $env:GITHUB_OUTPUT
           "node_runtime_dir=$nodeRuntimeDir" >> $env:GITHUB_OUTPUT
 
       - name: Build Mercury dashboard installer
@@ -218,8 +162,7 @@ jobs:
             -Version "${{ steps.meta.outputs.version }}" `
             -Publisher "FTD" `
             -PublisherUrl $publisherUrl `
-            -NodeRuntimeDir "${{ steps.tooling.outputs.node_runtime_dir }}" `
-            -NssmExePath "${{ steps.tooling.outputs.nssm_exe }}"
+            -NodeRuntimeDir "${{ steps.tooling.outputs.node_runtime_dir }}"
 
       - name: Hash installer
         id: hash

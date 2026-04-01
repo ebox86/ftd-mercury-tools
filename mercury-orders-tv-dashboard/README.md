@@ -51,13 +51,14 @@ $env:MERCURY_BASE_URL='http://localhost/WsMercuryWebAPI'
 
 ## Windows Installer + Service
 
-The repository includes a release workflow that builds a Windows installer and configures auto-start services:
+The repository includes a release workflow that builds a Windows installer and configures auto-start services using a compiled `.NET` Windows service host executable (no PowerShell required for installer setup):
 
 - Workflow: `.github/workflows/mercury-dashboard-release.yml`
 - Installer output: `mercury-orders-tv-dashboard/dist/FTD.MercuryDashboard.Setup.<version>.exe`
 - Services created by installer:
   - `FTD Mercury Workflow Bridge` (default port `17344`)
   - `FTD Mercury Dashboard Web` (default port `5173`)
+- Service host executable installed at: `service-runtime/FTD.Mercury.Dashboard.ServiceHost.exe`
 
 Optional installer switches:
 
@@ -68,3 +69,5 @@ Optional installer switches:
 - `/BRIDGEHOST=0.0.0.0`
 - `/WEBHOST=0.0.0.0`
 - `/LOCALNETWORKONLY=true`
+
+Optional PowerShell wrappers are still available under `service/` for manual admin tooling, but they now call the same compiled service host executable.

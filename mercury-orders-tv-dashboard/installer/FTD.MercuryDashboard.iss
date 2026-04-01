@@ -44,15 +44,24 @@ SetupLogging=yes
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
-  Parameters: "{code:GetInstallParameters}"; \
-  StatusMsg: "Installing Mercury dashboard Windows services..."; \
+Filename: "{app}\service-runtime\FTD.Mercury.Dashboard.ServiceHost.exe"; \
+  Parameters: "{code:GetInstallBridgeParameters}"; \
+  StatusMsg: "Installing Mercury workflow bridge service..."; \
+  Flags: runhidden waituntilterminated
+Filename: "{app}\service-runtime\FTD.Mercury.Dashboard.ServiceHost.exe"; \
+  Parameters: "{code:GetInstallWebParameters}"; \
+  StatusMsg: "Installing Mercury dashboard web service..."; \
   Flags: runhidden waituntilterminated
 
 [UninstallRun]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
-  Parameters: "{code:GetUninstallParameters}"; \
-  Flags: runhidden waituntilterminated
+Filename: "{app}\service-runtime\FTD.Mercury.Dashboard.ServiceHost.exe"; \
+  Parameters: "{code:GetUninstallWebParameters}"; \
+  Flags: runhidden waituntilterminated; \
+  RunOnceId: "FTD.MercuryDashboard.Uninstall.Web"
+Filename: "{app}\service-runtime\FTD.Mercury.Dashboard.ServiceHost.exe"; \
+  Parameters: "{code:GetUninstallBridgeParameters}"; \
+  Flags: runhidden waituntilterminated; \
+  RunOnceId: "FTD.MercuryDashboard.Uninstall.Bridge"
 
 [Code]
 var
@@ -112,6 +121,16 @@ begin
   end;
 
   Result := '';
+end;
+
+function EscapeCmdValue(const Value: string): string;
+begin
+  Result := StringChangeEx(Value, '"', '\"', True);
+end;
+
+function QuoteCmdValue(const Value: string): string;
+begin
+  Result := '"' + EscapeCmdValue(Value) + '"';
 end;
 
 function InitializeSetup(): Boolean;
@@ -185,28 +204,43 @@ begin
   Result := True;
 end;
 
-function GetInstallParameters(Param: string): string;
+function GetInstallBridgeParameters(Param: string): string;
 begin
-  Result := '-NoProfile -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{app}\service\install-mercury-dashboard-services.ps1') +
-    '" -NodeExePath "' + ExpandConstant('{app}\runtime\node.exe') +
-    '" -NssmExePath "' + ExpandConstant('{app}\bin\nssm.exe') +
-    '" -BridgeServiceName "' + CmdBridgeServiceName +
-    '" -WebServiceName "' + CmdWebServiceName +
-    '" -BridgePort ' + CmdBridgePort +
-    ' -WebPort ' + CmdWebPort +
-    ' -MercuryBaseUrl "' + CmdMercuryBase +
-    '" -MercurySoapNamespace "' + CmdSoapNamespace +
-    '" -MercuryLocalNetworkOnly "' + CmdLocalNetworkOnly +
-    '" -BridgeHost "' + CmdBridgeHost +
-    '" -WebHost "' + CmdWebHost + '"';
+  Result :=
+    '--service-install ' +
+    '--service-role=bridge ' +
+    '--service-name=' + QuoteCmdValue(CmdBridgeServiceName) + ' ' +
+    '--bridge-port=' + CmdBridgePort + ' ' +
+    '--bridge-host=' + QuoteCmdValue(CmdBridgeHost) + ' ' +
+    '--mercury-base-url=' + QuoteCmdValue(CmdMercuryBase) + ' ' +
+    '--mercury-soap-namespace=' + QuoteCmdValue(CmdSoapNamespace) + ' ' +
+    '--mercury-local-network-only=' + CmdLocalNetworkOnly;
 end;
 
-function GetUninstallParameters(Param: string): string;
+function GetInstallWebParameters(Param: string): string;
 begin
-  Result := '-NoProfile -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{app}\service\uninstall-mercury-dashboard-services.ps1') +
-    '" -NssmExePath "' + ExpandConstant('{app}\bin\nssm.exe') +
-    '" -BridgeServiceName "' + CmdBridgeServiceName +
-    '" -WebServiceName "' + CmdWebServiceName + '"';
+  Result :=
+    '--service-install ' +
+    '--service-role=web ' +
+    '--service-name=' + QuoteCmdValue(CmdWebServiceName) + ' ' +
+    '--depends-on-service=' + QuoteCmdValue(CmdBridgeServiceName) + ' ' +
+    '--web-port=' + CmdWebPort + ' ' +
+    '--web-host=' + QuoteCmdValue(CmdWebHost) + ' ' +
+    '--workflow-api-base-url=' + QuoteCmdValue('http://127.0.0.1:' + CmdBridgePort);
+end;
+
+function GetUninstallWebParameters(Param: string): string;
+begin
+  Result :=
+    '--service-uninstall ' +
+    '--service-role=web ' +
+    '--service-name=' + QuoteCmdValue(CmdWebServiceName);
+end;
+
+function GetUninstallBridgeParameters(Param: string): string;
+begin
+  Result :=
+    '--service-uninstall ' +
+    '--service-role=bridge ' +
+    '--service-name=' + QuoteCmdValue(CmdBridgeServiceName);
 end;

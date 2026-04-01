@@ -1,6 +1,6 @@
 param(
+  [string]$ServiceHostExePath = "",
   [string]$NodeExePath = "",
-  [string]$NssmExePath = "",
   [string]$BridgeServiceName = "FTD Mercury Workflow Bridge",
   [string]$WebServiceName = "FTD Mercury Dashboard Web",
   [int]$BridgePort = 17344,
@@ -15,159 +15,98 @@ param(
 Set-StrictMode -Version 2
 $ErrorActionPreference = "Stop"
 
-function Test-ValidPort {
-  param([int]$Port)
-  return ($Port -ge 1 -and $Port -le 65535)
+function Assert-Admin {
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+  if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw "Run this script from an elevated PowerShell session (Run as Administrator)."
+  }
 }
 
-function Test-ServiceExists {
-  param([string]$Name)
-  return $null -ne (Get-Service -Name $Name -ErrorAction SilentlyContinue)
+function Assert-PortRange {
+  param([int]$Port, [string]$Name)
+  if ($Port -lt 1 -or $Port -gt 65535) {
+    throw "$Name must be between 1 and 65535. Got: $Port"
+  }
 }
 
-if (-not (Test-ValidPort -Port $BridgePort)) {
-  throw "BridgePort must be between 1 and 65535. Got: $BridgePort"
+function Normalize-BoolString {
+  param([string]$Value)
+  $text = ("" + $Value).Trim().ToLowerInvariant()
+  if ($text -in @("1", "true", "yes", "on")) { return "true" }
+  if ($text -in @("0", "false", "no", "off")) { return "false" }
+  throw "MercuryLocalNetworkOnly must be true/false (or yes/no, 1/0). Got: $Value"
 }
-if (-not (Test-ValidPort -Port $WebPort)) {
-  throw "WebPort must be between 1 and 65535. Got: $WebPort"
+
+function Invoke-ServiceHost {
+  param(
+    [Parameter(Mandatory = $true)] [string]$ExePath,
+    [Parameter(Mandatory = $true)] [string[]]$Arguments
+  )
+
+  & $ExePath @Arguments
+  if ($LASTEXITCODE -ne 0) {
+    throw "Service host command failed with exit code ${LASTEXITCODE}: $($Arguments -join ' ')"
+  }
 }
+
+Assert-PortRange -Port $BridgePort -Name "BridgePort"
+Assert-PortRange -Port $WebPort -Name "WebPort"
 if ($BridgePort -eq $WebPort) {
   throw "BridgePort and WebPort must be different."
 }
 
+Assert-Admin
+
 $appRoot = Split-Path -Parent $PSScriptRoot
-
-if (-not $NodeExePath) {
-  $NodeExePath = Join-Path $appRoot "runtime\node.exe"
+if (-not $ServiceHostExePath) {
+  $ServiceHostExePath = Join-Path $appRoot "service-runtime\FTD.Mercury.Dashboard.ServiceHost.exe"
 }
-if (-not $NssmExePath) {
-  $NssmExePath = Join-Path $appRoot "bin\nssm.exe"
-}
-
-$NodeExePath = [System.IO.Path]::GetFullPath($NodeExePath)
-$NssmExePath = [System.IO.Path]::GetFullPath($NssmExePath)
-
-$bridgeScriptPath = Join-Path $appRoot "workflow-bridge\server.mjs"
-$webScriptPath = Join-Path $appRoot "service-host\dashboard-web-server.mjs"
-$bridgeWorkingDir = Join-Path $appRoot "workflow-bridge"
-$webWorkingDir = Join-Path $appRoot "service-host"
-$logDir = Join-Path $appRoot "logs"
-
-if (-not (Test-Path $NodeExePath)) {
-  throw "Node executable not found: $NodeExePath"
-}
-if (-not (Test-Path $NssmExePath)) {
-  throw "nssm executable not found: $NssmExePath"
-}
-if (-not (Test-Path $bridgeScriptPath)) {
-  throw "Bridge script not found: $bridgeScriptPath"
-}
-if (-not (Test-Path $webScriptPath)) {
-  throw "Web host script not found: $webScriptPath"
-}
-if (-not (Test-Path $logDir)) {
-  New-Item -ItemType Directory -Path $logDir | Out-Null
+$ServiceHostExePath = [System.IO.Path]::GetFullPath($ServiceHostExePath)
+if (-not (Test-Path $ServiceHostExePath)) {
+  throw "Service host executable not found: $ServiceHostExePath"
 }
 
-function Invoke-Nssm {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string[]]$Arguments
-  )
-  & $NssmExePath @Arguments | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    throw "nssm failed (exit $LASTEXITCODE): $($Arguments -join ' ')"
+$resolvedNodeExePath = ""
+if ($NodeExePath) {
+  $resolvedNodeExePath = [System.IO.Path]::GetFullPath($NodeExePath)
+  if (-not (Test-Path $resolvedNodeExePath)) {
+    throw "Node executable not found: $resolvedNodeExePath"
   }
 }
 
-function Remove-ServiceIfPresent {
-  param([string]$Name)
-  if (-not (Test-ServiceExists -Name $Name)) {
-    return
-  }
+$normalizedLocalNetworkOnly = Normalize-BoolString -Value $MercuryLocalNetworkOnly
 
-  try {
-    Invoke-Nssm -Arguments @("stop", $Name)
-  } catch {
-    # continue cleanup even if stop fails
-  }
-  Start-Sleep -Milliseconds 300
-
-  try {
-    Invoke-Nssm -Arguments @("remove", $Name, "confirm")
-  } catch {
-    & sc.exe delete $Name | Out-Null
-  }
-}
-
-function Configure-Service {
-  param(
-    [string]$Name,
-    [string]$ScriptPath,
-    [string]$WorkingDir,
-    [string]$LogPrefix,
-    [string[]]$EnvironmentEntries,
-    [string]$DependsOnService = ""
-  )
-
-  Invoke-Nssm -Arguments @("install", $Name, $NodeExePath, $ScriptPath)
-  Invoke-Nssm -Arguments @("set", $Name, "AppDirectory", $WorkingDir)
-  Invoke-Nssm -Arguments @("set", $Name, "Start", "SERVICE_AUTO_START")
-  Invoke-Nssm -Arguments @("set", $Name, "AppStdout", (Join-Path $logDir "$LogPrefix.out.log"))
-  Invoke-Nssm -Arguments @("set", $Name, "AppStderr", (Join-Path $logDir "$LogPrefix.err.log"))
-  Invoke-Nssm -Arguments @("set", $Name, "AppRotateFiles", "1")
-  Invoke-Nssm -Arguments @("set", $Name, "AppRotateOnline", "1")
-  Invoke-Nssm -Arguments @("set", $Name, "AppRotateBytes", "10485760")
-  Invoke-Nssm -Arguments @("set", $Name, "AppRotateSeconds", "86400")
-  Invoke-Nssm -Arguments @("set", $Name, "AppExit", "Default", "Restart")
-
-  $envBlock = ($EnvironmentEntries | Where-Object { $_ -and $_.Contains("=") }) -join "`n"
-  if ($envBlock) {
-    Invoke-Nssm -Arguments @("set", $Name, "AppEnvironmentExtra", $envBlock)
-  }
-
-  if ($DependsOnService) {
-    Invoke-Nssm -Arguments @("set", $Name, "DependOnService", $DependsOnService)
-  }
-}
-
-Write-Host "Installing Mercury dashboard services..."
-Write-Host "App root: $appRoot"
-Write-Host "Bridge service: $BridgeServiceName ($BridgeHost:$BridgePort)"
-Write-Host "Web service: $WebServiceName ($WebHost:$WebPort)"
-
-Remove-ServiceIfPresent -Name $WebServiceName
-Remove-ServiceIfPresent -Name $BridgeServiceName
-
-$bridgeEnv = @(
-  "PORT=$BridgePort",
-  "BRIDGE_HOST=$BridgeHost",
-  "MERCURY_BASE_URL=$MercuryBaseUrl",
-  "MERCURY_SOAP_NAMESPACE=$MercurySoapNamespace",
-  "MERCURY_LOCAL_NETWORK_ONLY=$MercuryLocalNetworkOnly"
-)
-$webEnv = @(
-  "WEB_PORT=$WebPort",
-  "WEB_HOST=$WebHost",
-  "WORKFLOW_API_BASE_URL=http://127.0.0.1:$BridgePort"
+$bridgeArgs = @(
+  "--service-install",
+  "--service-role=bridge",
+  "--service-name=$BridgeServiceName",
+  "--bridge-port=$BridgePort",
+  "--bridge-host=$BridgeHost",
+  "--mercury-base-url=$MercuryBaseUrl",
+  "--mercury-soap-namespace=$MercurySoapNamespace",
+  "--mercury-local-network-only=$normalizedLocalNetworkOnly"
 )
 
-Configure-Service `
-  -Name $BridgeServiceName `
-  -ScriptPath $bridgeScriptPath `
-  -WorkingDir $bridgeWorkingDir `
-  -LogPrefix "workflow-bridge" `
-  -EnvironmentEntries $bridgeEnv
+if ($resolvedNodeExePath) {
+  $bridgeArgs += "--node-exe=$resolvedNodeExePath"
+}
 
-Configure-Service `
-  -Name $WebServiceName `
-  -ScriptPath $webScriptPath `
-  -WorkingDir $webWorkingDir `
-  -LogPrefix "dashboard-web" `
-  -EnvironmentEntries $webEnv `
-  -DependsOnService $BridgeServiceName
+$webArgs = @(
+  "--service-install",
+  "--service-role=web",
+  "--service-name=$WebServiceName",
+  "--depends-on-service=$BridgeServiceName",
+  "--web-port=$WebPort",
+  "--web-host=$WebHost",
+  "--workflow-api-base-url=http://127.0.0.1:$BridgePort"
+)
 
-Invoke-Nssm -Arguments @("start", $BridgeServiceName)
-Invoke-Nssm -Arguments @("start", $WebServiceName)
+if ($resolvedNodeExePath) {
+  $webArgs += "--node-exe=$resolvedNodeExePath"
+}
 
+Write-Host "Installing Mercury dashboard services using compiled service host..."
+Invoke-ServiceHost -ExePath $ServiceHostExePath -Arguments $bridgeArgs
+Invoke-ServiceHost -ExePath $ServiceHostExePath -Arguments $webArgs
 Write-Host "Services installed successfully."
