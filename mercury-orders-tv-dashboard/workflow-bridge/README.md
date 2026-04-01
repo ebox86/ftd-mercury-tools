@@ -13,11 +13,23 @@ MERCURY_TIMEOUT_MS=12000
 ## Run
 
 ```bash
-cd pi-kiosk-dashboard-starter/workflow-bridge
+cd mercury-orders-tv-dashboard/workflow-bridge
 npm start
 ```
 
 Default port: `17344`
+
+## Local Network Access Policy
+
+By default, the bridge now allows only localhost + private LAN ranges (`10.x`, `172.16-31.x`, `192.168.x`, `169.254.x`, and local IPv6 ranges).  
+This keeps the board easy to access from other machines on your local network while blocking non-LAN clients.
+
+Optional environment variables:
+
+- `BRIDGE_HOST` (default: `0.0.0.0`)
+- `MERCURY_LOCAL_NETWORK_ONLY` (default: `true`)
+- `MERCURY_TRUST_PROXY_HEADERS` (default: `false`)
+- `MERCURY_API_KEY` (default: empty; when set, send key in `X-Mercury-Key`, `X-API-Key`, or `?key=...`)
 
 ## Workflow JSON Endpoints
 

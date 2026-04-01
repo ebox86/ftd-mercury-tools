@@ -30,7 +30,7 @@ Utilities and userscripts for improving workflows in FTD's Mercury client and Me
    - Type: IIS-hosted ASP.NET compatibility layer
    - Purpose: Emulates legacy `xoap.weather.com` XML endpoints for Mercury dashboard weather gadget on localhost.
 2. **Pi Kiosk Dashboard Starter**
-   - Path: `pi-kiosk-dashboard-starter/`
+   - Path: `mercury-orders-tv-dashboard/`
    - Type: Reference + local Node workflow bridge + React kiosk app
    - Purpose: Live Mercury workflow dashboard for ticket, design, and delivery status visibility.
 
@@ -46,7 +46,7 @@ Utilities and userscripts for improving workflows in FTD's Mercury client and Me
 - `README.md` - root project documentation
 - `mercury-hq-delivery-barcode-lookup/` - barcode lookup userscript and tool-specific docs
 - `weather-xoap-shim/` - local XOAP weather compatibility shim + install scripts
-- `pi-kiosk-dashboard-starter/` - Mercury workflow API snapshots, live workflow bridge, and kiosk dashboard UI
+- `mercury-orders-tv-dashboard/` - Mercury workflow API snapshots, live workflow bridge, and kiosk dashboard UI
 - `public/` - shared static assets (if needed later)
 
 ## Quick Start

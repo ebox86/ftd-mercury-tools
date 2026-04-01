@@ -28,6 +28,10 @@ const ordersByRoutes = { dataset: 'DeliveryOrdersByRoutesDataSet', table: 'LoadO
 const messageList = { dataset: 'MercuryMessageListDataSet', table: 'GetMessageList', rows: [] };
 
 const port = Number(process.env.PORT || 17344);
+const host = String(process.env.BRIDGE_HOST || '0.0.0.0').trim() || '0.0.0.0';
+const localNetworkOnly = !/^(0|false|no)$/i.test(String(process.env.MERCURY_LOCAL_NETWORK_ONLY || 'true').trim());
+const trustProxyHeaders = /^(1|true|yes)$/i.test(String(process.env.MERCURY_TRUST_PROXY_HEADERS || '').trim());
+const apiKey = String(process.env.MERCURY_API_KEY || '').trim();
 const xmlNs = 'http://localhost/webservices/';
 const liveEnabled = true;
 const liveMercuryBaseUrl = String(process.env.MERCURY_BASE_URL || '').trim() || 'http://127.0.0.1/WsMercuryWebAPI';
@@ -516,6 +520,75 @@ function parseBoolean(value, defaultValue = false) {
 function parseNumber(value, defaultValue = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : defaultValue;
+}
+
+function firstHeaderValue(raw) {
+  if (Array.isArray(raw)) return String(raw[0] || '').trim();
+  return String(raw || '').trim();
+}
+
+function normalizeClientIp(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  const base = text.split(',')[0]?.trim() || '';
+  const withoutZone = base.includes('%') ? base.slice(0, base.indexOf('%')) : base;
+  if (withoutZone.startsWith('::ffff:')) {
+    return withoutZone.slice('::ffff:'.length);
+  }
+  return withoutZone;
+}
+
+function isPrivateClientIp(rawIp) {
+  const ip = normalizeClientIp(rawIp);
+  if (!ip) return false;
+  if (ip === '127.0.0.1' || ip === '::1') return true;
+
+  const ipv4 = ip.match(/^(\d{1,3})(?:\.(\d{1,3})){3}$/);
+  if (ipv4) {
+    const octets = ip.split('.').map(part => Number(part));
+    if (octets.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+    const [a, b] = octets;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 169 && b === 254) return true;
+    return false;
+  }
+
+  const lowered = ip.toLowerCase();
+  if (lowered.startsWith('fc') || lowered.startsWith('fd')) return true;
+  if (lowered.startsWith('fe8') || lowered.startsWith('fe9') || lowered.startsWith('fea') || lowered.startsWith('feb')) return true;
+  return false;
+}
+
+function extractClientIp(req) {
+  if (trustProxyHeaders) {
+    const forwarded = firstHeaderValue(req.headers['x-forwarded-for']);
+    const forwardedIp = normalizeClientIp(forwarded);
+    if (forwardedIp) return forwardedIp;
+  }
+  return normalizeClientIp(req.socket?.remoteAddress || '');
+}
+
+function isRequestAllowed(req) {
+  const clientIp = extractClientIp(req);
+  if (localNetworkOnly && !isPrivateClientIp(clientIp)) {
+    return {
+      allowed: false,
+      status: 403,
+      reason: 'Access is restricted to localhost and private LAN ranges.',
+      clientIp: clientIp || 'unknown'
+    };
+  }
+  return { allowed: true, clientIp };
+}
+
+function hasValidApiKey(req, url) {
+  if (!apiKey) return true;
+  const headerValue = firstHeaderValue(req.headers['x-mercury-key']) || firstHeaderValue(req.headers['x-api-key']);
+  const queryValue = String(url?.searchParams?.get('key') || '').trim();
+  return headerValue === apiKey || queryValue === apiKey;
 }
 
 function formatMercuryDateTimeLocal(date) {
@@ -1669,6 +1742,12 @@ async function routeJson(res, url, pathname) {
       service: serviceName,
       mode: 'live',
       mercuryBaseUrl: liveMercuryBaseUrl,
+      host,
+      networkPolicy: {
+        localNetworkOnly,
+        trustProxyHeaders,
+        apiKeyRequired: Boolean(apiKey)
+      },
       liveCache: {
         ttlMs: Math.max(0, Math.floor(liveApiCacheTtlMs)),
         maxEntries: Math.max(50, Math.floor(Number(liveApiCacheMaxEntries) || 0)),
@@ -2096,6 +2175,12 @@ async function routeJson(res, url, pathname) {
       message: 'Mercury workflow dashboard live bridge is running.',
       mode: 'live',
       mercuryBaseUrl: liveMercuryBaseUrl,
+      host,
+      networkPolicy: {
+        localNetworkOnly,
+        trustProxyHeaders,
+        apiKeyRequired: Boolean(apiKey)
+      },
       liveCache: {
         ttlMs: Math.max(0, Math.floor(liveApiCacheTtlMs)),
         maxEntries: Math.max(50, Math.floor(Number(liveApiCacheMaxEntries) || 0)),
@@ -2334,18 +2419,34 @@ function routeMercuryLike(res, route, url, body) {
 }
 
 const server = createServer(async (req, res) => {
+  const baseHost = String(req.headers.host || `${host}:${port}`).trim() || `${host}:${port}`;
+  const url = new URL(req.url || '/', `http://${baseHost}`);
+  const pathname = url.pathname;
+
+  const requestGate = isRequestAllowed(req);
+  if (!requestGate.allowed) {
+    sendJson(res, requestGate.status || 403, {
+      error: requestGate.reason || 'Forbidden',
+      clientIp: requestGate.clientIp || 'unknown',
+      localNetworkOnly
+    });
+    return;
+  }
+
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
+      'Access-Control-Allow-Headers': 'Content-Type, X-Mercury-Key, X-API-Key'
     });
     res.end();
     return;
   }
 
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const pathname = url.pathname;
+  if (!hasValidApiKey(req, url)) {
+    sendJson(res, 401, { error: 'Invalid API key' });
+    return;
+  }
 
   const jsonHandled = await routeJson(res, url, pathname);
   if (jsonHandled !== false) {
@@ -2366,6 +2467,6 @@ const server = createServer(async (req, res) => {
   sendJson(res, 404, { error: 'Not found', path: pathname });
 });
 
-server.listen(port, () => {
-  console.log(`Live bridge listening on http://127.0.0.1:${port} -> ${liveMercuryBaseUrl}`);
+server.listen(port, host, () => {
+  console.log(`Live bridge listening on http://${host}:${port} -> ${liveMercuryBaseUrl}`);
 });

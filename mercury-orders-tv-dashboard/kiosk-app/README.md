@@ -45,14 +45,14 @@ Dev proxy target (when running `npm run dev`):
 ## Run (when Node/npm are available)
 
 ```bash
-cd pi-kiosk-dashboard-starter/kiosk-app
+cd mercury-orders-tv-dashboard/kiosk-app
 npm install
 npm run dev -- --host
 ```
 
 ## One-Command MVP Boot
 
-From `pi-kiosk-dashboard-starter`:
+From `mercury-orders-tv-dashboard`:
 
 - Windows PowerShell: `.\start-mvp.ps1`
 - Windows cmd: `start-mvp.cmd`
@@ -75,7 +75,7 @@ Then run:
 
 If the UI shows API connection errors:
 
-1. Confirm launcher was run from `pi-kiosk-dashboard-starter` (not `kiosk-app`).
+1. Confirm launcher was run from `mercury-orders-tv-dashboard` (not `kiosk-app`).
 2. If using `npm run dev`, confirm the proxy target host is reachable from the dev machine:
    - Example: `http://<WORKFLOW_API_BASE_URL>/api/workflow/events-now`
 3. If needed, run:

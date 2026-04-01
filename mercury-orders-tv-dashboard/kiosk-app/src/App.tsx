@@ -30,6 +30,7 @@ import {
 
 type GroupedCards = Record<StatusStage, BoardCard[]>;
 type IntakeKind = 'uncreated' | 'ask';
+type IntakeMessageTypeKey = 'ask' | 'ans' | 'con' | 'cancel' | 'other' | 'unknown';
 
 interface IntakeTicketCard {
   id: string;
@@ -41,6 +42,8 @@ interface IntakeTicketCard {
   notes: string;
   wireService: string;
   msgType: string;
+  messageTypeKey: IntakeMessageTypeKey;
+  messageTypeLabel: string;
   kind: IntakeKind;
   relatedOrderNumber: string;
   relatedTicketId: string;
@@ -339,6 +342,21 @@ async function fetchRowsWithRetry<T>(
   throw lastError instanceof Error ? lastError : new Error('Feed request failed after retries.');
 }
 
+async function allSettledInBatches<TInput, TResult>(
+  items: TInput[],
+  batchSize: number,
+  worker: (item: TInput) => Promise<TResult>,
+): Promise<Array<PromiseSettledResult<TResult>>> {
+  const size = Math.max(1, batchSize);
+  const settledResults: Array<PromiseSettledResult<TResult>> = [];
+  for (let offset = 0; offset < items.length; offset += size) {
+    const batch = items.slice(offset, offset + size);
+    const settled = await Promise.allSettled(batch.map(item => worker(item)));
+    settledResults.push(...settled);
+  }
+  return settledResults;
+}
+
 function isAskDebugEnabledFromBrowser(): boolean {
   if (typeof window === 'undefined') return false;
   try {
@@ -534,7 +552,58 @@ function isAskMessage(message: MessageItem): boolean {
     String(message.SUMMARY_TEXT || ''),
     String(message.MSG_NOTES || ''),
   ].join(' ');
-  return /\bask\b/i.test(raw);
+  const isAskKeyword = /\bask\b/i.test(raw);
+  const isCancelRequest = /\b(cancel(?:lation)?\s*(?:request|req|rqt)?|cxl\s*(?:request|req)?|stop\s+delivery|do\s*not\s+deliver|dont\s+deliver|void\s+order|cancel\s+order)\b/i.test(raw);
+  return isAskKeyword || isCancelRequest;
+}
+
+function classifyIncomingMessageType(message: MessageItem): { key: IntakeMessageTypeKey; label: string } {
+  const typeRaw = firstNonEmptyText(String(message.MSG_TYPE || '')).trim();
+  const raw = [
+    typeRaw,
+    String(message.SUMMARY_TEXT || ''),
+    String(message.MSG_NOTES || ''),
+  ].join(' ');
+  const typeToken = normalizeText(typeRaw);
+
+  const hasCancelSignal = /\b(cancel(?:lation)?|cxl|void\s+order|stop\s+delivery|do\s*not\s+deliver|dont\s+deliver)\b/i.test(raw)
+    || typeToken.startsWith('cxl')
+    || typeToken.includes('cancel');
+  if (hasCancelSignal) return { key: 'cancel', label: 'CANCEL' };
+
+  const hasAskSignal = /\bask\b/i.test(raw)
+    || typeToken === 'ask'
+    || typeToken === 'qry'
+    || typeToken.includes('question');
+  if (hasAskSignal) return { key: 'ask', label: 'ASK' };
+
+  const hasAnswerSignal = /\b(ans|answer|answered|response|responded)\b/i.test(raw)
+    || typeToken.startsWith('ans')
+    || typeToken.includes('answer')
+    || typeToken === 'response';
+  if (hasAnswerSignal) return { key: 'ans', label: 'ANS' };
+
+  const hasConfirmSignal = /\b(con|confirm|confirmation|confirmed)\b/i.test(raw)
+    || typeToken === 'con'
+    || typeToken.includes('confirm');
+  if (hasConfirmSignal) return { key: 'con', label: 'CON' };
+
+  return { key: 'unknown', label: '' };
+}
+
+function intakeBadgeForTicket(ticket: IntakeTicketCard): { label: string; className: string } {
+  if (ticket.messageTypeKey === 'cancel') return { label: ticket.messageTypeLabel || 'CANCEL', className: 'badge--msg-cancel' };
+  if (ticket.messageTypeKey === 'ans') return { label: ticket.messageTypeLabel || 'ANS', className: 'badge--msg-ans' };
+  if (ticket.messageTypeKey === 'con') return { label: ticket.messageTypeLabel || 'CON', className: 'badge--msg-con' };
+  if (ticket.messageTypeKey === 'other' && ticket.messageTypeLabel) return { label: ticket.messageTypeLabel, className: 'badge--msg-other' };
+  if (ticket.messageTypeKey === 'ask') return { label: 'ASK', className: 'badge--ask' };
+  if (ticket.kind === 'ask') return { label: 'ASK', className: 'badge--ask' };
+  return { label: 'UNCREATED', className: 'badge--alert' };
+}
+
+function shouldShowSourceBadge(ticket: IntakeTicketCard): boolean {
+  if (ticket.messageTypeKey === 'unknown') return ticket.kind === 'uncreated';
+  return ticket.messageTypeKey !== 'ask';
 }
 
 function parseMessageDirection(rawDirection: string | undefined): 'in' | 'out' | 'unknown' {
@@ -1512,6 +1581,7 @@ function buildPendingIntakeTickets(
     const msgDateRaw = String(message.MSG_DATE || '').trim();
     const deliveryDateRaw = String(message.DELIVERY_DATE || '').trim();
     const msgType = String(message.MSG_TYPE || '').trim();
+    const messageType = classifyIncomingMessageType(message);
     const msgDirection = String(message.MSG_DIRECTION || '').toLowerCase();
     const category = String(message.CATEGORY || '').trim();
     const notes = String(message.MSG_NOTES || '').trim();
@@ -1687,6 +1757,8 @@ function buildPendingIntakeTickets(
       notes,
       wireService,
       msgType,
+      messageTypeKey: messageType.key,
+      messageTypeLabel: messageType.label,
       kind,
       relatedOrderNumber: displayOrderId || '',
       relatedTicketId: resolvedLinkedOrder?.ticketId || '',
@@ -1744,6 +1816,8 @@ export default function App() {
   const unresolvedAskLogRef = useRef<Map<string, string>>(new Map());
   const activePaneSpinnerRequestedRef = useRef(true);
   const activePaneSpinnerInFlightRef = useRef(0);
+  const pollInFlightRef = useRef(false);
+  const pollQueuedRef = useRef(false);
   const askDebugEnabled = useMemo(() => isAskDebugEnabledFromBrowser(), []);
   const requestActiveOrdersRefreshSpinner = useCallback(() => {
     activePaneSpinnerRequestedRef.current = true;
@@ -1777,6 +1851,94 @@ export default function App() {
     }
     try {
       setError('');
+      const ticketStatusCache = new Map<string, ReturnType<typeof fetchTicketStatus>>();
+      const lifecycleCache = new Map<string, ReturnType<typeof fetchLifecycleLatest>>();
+      const orderDetailsCache = new Map<string, ReturnType<typeof fetchOrderDetails>>();
+      const lifecycleByServiceMsgCache = new Map<string, ReturnType<typeof fetchLifecycleByServiceMsg>>();
+      const messageDetailCache = new Map<string, ReturnType<typeof fetchMessageDetail>>();
+      const messageListCache = new Map<string, ReturnType<typeof fetchMessageList>>();
+
+      const getTicketStatusCached = (ticketIdRaw: string): ReturnType<typeof fetchTicketStatus> => {
+        const ticketId = String(ticketIdRaw || '').trim();
+        if (!ticketId) return Promise.resolve(null);
+        const cacheKey = normalizeIdLike(ticketId);
+        const existing = ticketStatusCache.get(cacheKey);
+        if (existing) return existing;
+        const next = fetchTicketStatus(ticketId);
+        ticketStatusCache.set(cacheKey, next);
+        return next;
+      };
+
+      const getLifecycleByTicketCached = (ticketIdRaw: string): ReturnType<typeof fetchLifecycleLatest> => {
+        const ticketId = String(ticketIdRaw || '').trim();
+        if (!ticketId) return Promise.resolve(null);
+        const cacheKey = normalizeIdLike(ticketId);
+        const existing = lifecycleCache.get(cacheKey);
+        if (existing) return existing;
+        const next = fetchLifecycleLatest(ticketId);
+        lifecycleCache.set(cacheKey, next);
+        return next;
+      };
+
+      const getOrderDetailsCached = (ticketIdRaw: string): ReturnType<typeof fetchOrderDetails> => {
+        const ticketId = String(ticketIdRaw || '').trim();
+        if (!ticketId) return Promise.resolve(null);
+        const cacheKey = normalizeIdLike(ticketId);
+        const existing = orderDetailsCache.get(cacheKey);
+        if (existing) return existing;
+        const next = fetchOrderDetails(ticketId);
+        orderDetailsCache.set(cacheKey, next);
+        return next;
+      };
+
+      const getLifecycleByServiceMsgCached = (serviceMsgRaw: string): ReturnType<typeof fetchLifecycleByServiceMsg> => {
+        const serviceMsg = String(serviceMsgRaw || '').trim();
+        if (!serviceMsg) return Promise.resolve(null);
+        const cacheKey = normalizeIdLike(serviceMsg);
+        const existing = lifecycleByServiceMsgCache.get(cacheKey);
+        if (existing) return existing;
+        const next = fetchLifecycleByServiceMsg(serviceMsg);
+        lifecycleByServiceMsgCache.set(cacheKey, next);
+        return next;
+      };
+
+      const getMessageDetailCached = (
+        msgIDRaw: string,
+        params?: {
+          mercID?: string;
+          isCanadian?: boolean;
+        },
+      ): ReturnType<typeof fetchMessageDetail> => {
+        const msgID = String(msgIDRaw || '').trim();
+        if (!msgID) return Promise.resolve(null);
+        const mercID = String(params?.mercID || '').trim();
+        const isCanadian = Boolean(params?.isCanadian);
+        const cacheKey = [
+          normalizeIdLike(msgID),
+          normalizeIdLike(mercID),
+          isCanadian ? '1' : '0',
+        ].join('|');
+        const existing = messageDetailCache.get(cacheKey);
+        if (existing) return existing;
+        const next = fetchMessageDetail(msgID, { mercID, isCanadian });
+        messageDetailCache.set(cacheKey, next);
+        return next;
+      };
+
+      const getMessageListCached = (
+        params?: Parameters<typeof fetchMessageList>[0],
+      ): ReturnType<typeof fetchMessageList> => {
+        const cacheKey = Object.entries(params || {})
+          .map(([key, value]) => `${key}:${String(value ?? '')}`)
+          .sort((a, b) => a.localeCompare(b))
+          .join('|');
+        const existing = messageListCache.get(cacheKey);
+        if (existing) return existing;
+        const next = fetchMessageList(params);
+        messageListCache.set(cacheKey, next);
+        return next;
+      };
+
       const [events, undelivered, ticketSearchFeeds, zoneFeeds, routeFeeds, messageFeedIn, messageFeedOut] = await Promise.all([
         fetchEventsNow(),
         fetchUndeliveredOrders().catch(() => ({
@@ -1818,8 +1980,8 @@ export default function App() {
             )
           )),
         ),
-        fetchMessageList({ maxRows: 300, msgDirection: 1 }).catch(() => ({ rows: [] as MercuryMessageListRow[] })),
-        fetchMessageList({ maxRows: 300, msgDirection: 2 }).catch(() => ({ rows: [] as MercuryMessageListRow[] })),
+        getMessageListCached({ maxRows: 300, msgDirection: 1 }).catch(() => ({ rows: [] as MercuryMessageListRow[] })),
+        getMessageListCached({ maxRows: 300, msgDirection: 2 }).catch(() => ({ rows: [] as MercuryMessageListRow[] })),
       ]);
       const eventOrders = events?.tables?.OrderItems || [];
       const ticketSearchRows = ticketSearchFeeds.flatMap(rows => rows || []);
@@ -2002,8 +2164,8 @@ export default function App() {
           const zoneEnrichmentResults = await Promise.allSettled(
             batch.map(async ticketId => {
               const [ticketStatus, lifecycle] = await Promise.all([
-                fetchTicketStatus(ticketId),
-                fetchLifecycleLatest(ticketId),
+                getTicketStatusCached(ticketId),
+                getLifecycleByTicketCached(ticketId),
               ]);
 
               const syntheticOrder = {
@@ -2110,16 +2272,18 @@ export default function App() {
         indexExternalStage(keys, stage, reason);
       }
 
-      const enrichments = await Promise.allSettled(
-        orders.map(async order => {
+      const enrichments = await allSettledInBatches(
+        orders,
+        40,
+        async order => {
           const lookupCandidates = orderEnrichmentLookupCandidates(order);
           let ticketStatus: TicketStatusRow | null = null;
           let lifecycle: LifecycleRow | null = null;
 
           for (const lookupId of lookupCandidates) {
             const [ticketStatusCandidate, lifecycleCandidate] = await Promise.all([
-              fetchTicketStatus(lookupId),
-              fetchLifecycleLatest(lookupId),
+              getTicketStatusCached(lookupId),
+              getLifecycleByTicketCached(lookupId),
             ]);
 
             if (!ticketStatus && ticketStatusCandidate) {
@@ -2136,7 +2300,7 @@ export default function App() {
           }
 
           return { ticketId: order.ID, ticketStatus, lifecycle };
-        }),
+        },
       );
 
       const byTicket = new Map<string, OrderEnrichment>(
@@ -2453,11 +2617,13 @@ export default function App() {
       const askDetailTargets = Array.from(askDetailTargetsById.values()).slice(0, 120);
 
       if (askDetailTargets.length > 0) {
-        const askDetailResults = await Promise.allSettled(
-          askDetailTargets.map(async message => {
+        const askDetailResults = await allSettledInBatches(
+          askDetailTargets,
+          24,
+          async message => {
             const messageId = String(message.ID || '').trim();
             if (!messageId) return null;
-            const detail = await fetchMessageDetail(messageId, {
+            const detail = await getMessageDetailCached(messageId, {
               mercID: String(message.MERCURY_NUM || '').trim(),
               isCanadian: false,
             });
@@ -2508,7 +2674,7 @@ export default function App() {
               mercNum,
               recipientFromDetail,
             };
-          }),
+          },
         );
 
         for (const result of askDetailResults) {
@@ -2560,16 +2726,18 @@ export default function App() {
       ).slice(0, 120);
 
       if (serviceMsgCandidates.length > 0) {
-        const serviceMsgResults = await Promise.allSettled(
-          serviceMsgCandidates.map(async serviceMsg => {
-            const lifecycleByServiceMsg = await fetchLifecycleByServiceMsg(serviceMsg);
+        const serviceMsgResults = await allSettledInBatches(
+          serviceMsgCandidates,
+          24,
+          async serviceMsg => {
+            const lifecycleByServiceMsg = await getLifecycleByServiceMsgCached(serviceMsg);
             const ticketId = String(lifecycleByServiceMsg?.TICKET_ID || '').trim();
             if (!ticketId) return null;
 
             const [details, ticketStatus, lifecycleLatest] = await Promise.all([
-              fetchOrderDetails(ticketId),
-              fetchTicketStatus(ticketId),
-              fetchLifecycleLatest(ticketId),
+              getOrderDetailsCached(ticketId),
+              getTicketStatusCached(ticketId),
+              getLifecycleByTicketCached(ticketId),
             ]);
 
             const statusRaw = String(lifecycleLatest?.STATUS_CD || ticketStatus?.DeliveryStatus || '');
@@ -2595,7 +2763,7 @@ export default function App() {
                 STAGE_LABEL: stageLabel,
               },
             };
-          }),
+          },
         );
 
         const orderIdByServiceMsg = new Map<string, string>();
@@ -2639,16 +2807,18 @@ export default function App() {
 
       const unresolvedAskQueries = Array.from(unresolvedAskBuckets.values()).slice(0, 120);
       if (unresolvedAskQueries.length > 0) {
-        const unresolvedAskResults = await Promise.allSettled(
-          unresolvedAskQueries.map(async query => {
-            const lookup = await fetchMessageList({
+        const unresolvedAskResults = await allSettledInBatches(
+          unresolvedAskQueries,
+          18,
+          async query => {
+            const lookup = await getMessageListCached({
               maxRows: 220,
               msgDirection: 0,
               recipientName: query.recipientName,
               delivDate: query.delivDate,
             });
             return { query, rows: lookup?.rows || [] };
-          }),
+          },
         );
 
         for (const result of unresolvedAskResults) {
@@ -2728,12 +2898,14 @@ export default function App() {
       ).slice(0, 260);
 
       if (askLookupTicketIds.length > 0) {
-        const askLookupResults = await Promise.allSettled(
-          askLookupTicketIds.map(async ticketId => {
+        const askLookupResults = await allSettledInBatches(
+          askLookupTicketIds,
+          30,
+          async ticketId => {
             const [details, ticketStatus, lifecycle] = await Promise.all([
-              fetchOrderDetails(ticketId),
-              fetchTicketStatus(ticketId),
-              fetchLifecycleLatest(ticketId),
+              getOrderDetailsCached(ticketId),
+              getTicketStatusCached(ticketId),
+              getLifecycleByTicketCached(ticketId),
             ]);
 
             const statusRaw = String(lifecycle?.STATUS_CD || ticketStatus?.DeliveryStatus || '');
@@ -2754,7 +2926,7 @@ export default function App() {
               SALE_ID: saleId || orderNumber,
               STAGE_LABEL: stageLabel,
             };
-          }),
+          },
         );
 
         for (const lookup of askLookupResults) {
@@ -2777,25 +2949,29 @@ export default function App() {
       );
 
       const unresolvedAsks = pending.filter(ticket => ticket.kind === 'ask' && !ticket.relatedOrderNumber && ticket.askDebugSummary);
-      const activeLogIds = new Set<string>();
-      for (const ticket of unresolvedAsks) {
-        activeLogIds.add(ticket.id);
-        const signature = `${ticket.askDebugSummary}|${ticket.askDebugDetails.join('|')}`;
-        if (unresolvedAskLogRef.current.get(ticket.id) === signature) continue;
-        unresolvedAskLogRef.current.set(ticket.id, signature);
-        // Temporary deep-trace console output for unresolved ASK cards.
-        console.warn('[ASK LINK DEBUG] Unresolved ASK linkage', {
-          messageId: ticket.id,
-          recipient: ticket.recipientName,
-          messageKeys: ticket.askMessageKeys,
-          candidateFailures: ticket.askDebugDetails,
-          summary: ticket.askDebugSummary,
-        });
-      }
-      for (const cachedId of Array.from(unresolvedAskLogRef.current.keys())) {
-        if (!activeLogIds.has(cachedId)) {
-          unresolvedAskLogRef.current.delete(cachedId);
+      if (askDebugEnabled) {
+        const activeLogIds = new Set<string>();
+        for (const ticket of unresolvedAsks) {
+          activeLogIds.add(ticket.id);
+          const signature = `${ticket.askDebugSummary}|${ticket.askDebugDetails.join('|')}`;
+          if (unresolvedAskLogRef.current.get(ticket.id) === signature) continue;
+          unresolvedAskLogRef.current.set(ticket.id, signature);
+          // Temporary deep-trace console output for unresolved ASK cards.
+          console.warn('[ASK LINK DEBUG] Unresolved ASK linkage', {
+            messageId: ticket.id,
+            recipient: ticket.recipientName,
+            messageKeys: ticket.askMessageKeys,
+            candidateFailures: ticket.askDebugDetails,
+            summary: ticket.askDebugSummary,
+          });
         }
+        for (const cachedId of Array.from(unresolvedAskLogRef.current.keys())) {
+          if (!activeLogIds.has(cachedId)) {
+            unresolvedAskLogRef.current.delete(cachedId);
+          }
+        }
+      } else if (unresolvedAskLogRef.current.size > 0) {
+        unresolvedAskLogRef.current.clear();
       }
 
       setGroups(nextGroups);
@@ -2835,13 +3011,30 @@ export default function App() {
     }
   }, [allowedDeliveryDateKeys, rangeWindows, showDelivered, ticketSearchRangeWindows]);
 
+  const runPoll = useCallback(async () => {
+    if (pollInFlightRef.current) {
+      pollQueuedRef.current = true;
+      return;
+    }
+
+    pollInFlightRef.current = true;
+    try {
+      do {
+        pollQueuedRef.current = false;
+        await pollBoard();
+      } while (pollQueuedRef.current);
+    } finally {
+      pollInFlightRef.current = false;
+    }
+  }, [pollBoard]);
+
   useEffect(() => {
-    void pollBoard();
+    void runPoll();
     const timer = window.setInterval(() => {
-      void pollBoard();
+      void runPoll();
     }, POLL_MS);
     return () => window.clearInterval(timer);
-  }, [pollBoard]);
+  }, [runPoll]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -3069,52 +3262,56 @@ export default function App() {
                 {pendingTickets.length === 0 ? (
                   <div className="lane__empty">No pending intake tickets right now.</div>
                 ) : (
-                  pendingTickets.map(ticket => (
-                    <article
-                      key={ticket.id}
-                      className={`ticket-card${ticket.isFlashing ? ' ticket-card--flash' : ''}${ticket.isMarketplace ? ' ticket-card--marketplace' : ''}${ticket.isStaleAsk ? ' ticket-card--ask-stale' : ''}`}
-                    >
-                      <header className="ticket-card__header">
-                        <div className="ticket-card__kind-pills">
-                          <span className={`badge ${ticket.kind === 'ask' ? 'badge--ask' : 'badge--alert'}`}>
-                            {ticket.kind === 'ask' ? 'ASK' : 'UNCREATED'}
-                          </span>
-                          {ticket.kind === 'uncreated' ? (
-                            <span className="badge badge--source">{sourcePillLabel(ticket.wireService)}</span>
-                          ) : null}
-                        </div>
-                        <div className="ticket-card__pills">
-                          {ticket.relatedOrderNumber ? (
-                            <span className="badge badge--linked">Order {ticket.relatedOrderNumber}</span>
-                          ) : null}
-                          {ticket.relatedOrderStatus ? <span className="badge badge--stage">{ticket.relatedOrderStatus}</span> : null}
-                          {askDebugEnabled && ticket.kind === 'ask' && !ticket.relatedOrderNumber && ticket.askDebugSummary ? (
-                            <span
-                              className="badge badge--debug"
-                              title={[
-                                ticket.askDebugSummary,
-                                ticket.askMessageKeys.length ? `Keys: ${ticket.askMessageKeys.join(', ')}` : 'Keys: none',
-                                ...ticket.askDebugDetails,
-                              ].join('\n')}
-                            >
-                              ASK DEBUG
+                  pendingTickets.map(ticket => {
+                    const intakeBadge = intakeBadgeForTicket(ticket);
+                    const showSourceBadge = shouldShowSourceBadge(ticket);
+                    return (
+                      <article
+                        key={ticket.id}
+                        className={`ticket-card${ticket.kind === 'uncreated' && ticket.messageTypeKey === 'unknown' ? ' ticket-card--uncreated' : ''}${ticket.isFlashing ? ' ticket-card--flash' : ''}${ticket.isMarketplace ? ' ticket-card--marketplace' : ''}${ticket.isStaleAsk ? ' ticket-card--ask-stale' : ''}`}
+                      >
+                        <header className="ticket-card__header">
+                          <div className="ticket-card__kind-pills">
+                            <span className={`badge ${intakeBadge.className}`}>
+                              {intakeBadge.label}
                             </span>
-                          ) : null}
-                          {ticket.isMarketplace ? <span className="badge badge--marketplace">UBER/DD</span> : null}
-                          {ticket.isStaleAsk ? <span className="badge badge--stale-ask">12h+ Unanswered</span> : null}
+                            {showSourceBadge ? (
+                              <span className="badge badge--source">{sourcePillLabel(ticket.wireService)}</span>
+                            ) : null}
+                          </div>
+                          <div className="ticket-card__pills">
+                            {ticket.relatedOrderNumber ? (
+                              <span className="badge badge--linked">Order {ticket.relatedOrderNumber}</span>
+                            ) : null}
+                            {ticket.relatedOrderStatus ? <span className="badge badge--stage">{ticket.relatedOrderStatus}</span> : null}
+                            {askDebugEnabled && ticket.kind === 'ask' && !ticket.relatedOrderNumber && ticket.askDebugSummary ? (
+                              <span
+                                className="badge badge--debug"
+                                title={[
+                                  ticket.askDebugSummary,
+                                  ticket.askMessageKeys.length ? `Keys: ${ticket.askMessageKeys.join(', ')}` : 'Keys: none',
+                                  ...ticket.askDebugDetails,
+                                ].join('\n')}
+                              >
+                                ASK DEBUG
+                              </span>
+                            ) : null}
+                            {ticket.isMarketplace ? <span className="badge badge--marketplace">UBER/DD</span> : null}
+                            {ticket.isStaleAsk ? <span className="badge badge--stale-ask">12h+ Unanswered</span> : null}
+                          </div>
+                        </header>
+                        <div className="ticket-card__main-row">
+                          <div className="ticket-card__name">
+                            {(ticket.recipientName || ticket.summary || 'Incoming Ticket')}
+                            {ticket.displayRef ? ` - ${ticket.displayRef}` : ''}
+                          </div>
+                          <div className="ticket-card__delivery-inline">
+                            Delivery: {formatDateOnly(ticket.deliveryDate) || 'No delivery date'}
+                          </div>
                         </div>
-                      </header>
-                      <div className="ticket-card__main-row">
-                        <div className="ticket-card__name">
-                          {(ticket.recipientName || ticket.summary || 'Incoming Ticket')}
-                          {ticket.displayRef ? ` - ${ticket.displayRef}` : ''}
-                        </div>
-                        <div className="ticket-card__delivery-inline">
-                          Delivery: {formatDateOnly(ticket.deliveryDate) || 'No delivery date'}
-                        </div>
-                      </div>
-                    </article>
-                  ))
+                      </article>
+                    );
+                  })
                 )}
               </div>
             </section>

@@ -384,6 +384,27 @@ body {
   color: #fff;
 }
 
+.badge--msg-ans {
+  background: #17628f;
+  color: #fff;
+}
+
+.badge--msg-con {
+  background: #157a66;
+  color: #fff;
+}
+
+.badge--msg-cancel {
+  background: #a11f34;
+  color: #fff;
+}
+
+.badge--msg-other {
+  background: #e6ebf1;
+  color: #1f2f45;
+  border: 1px solid #b7c4d4;
+}
+
 .badge--source {
   background: #e8eef9;
   color: #1f3454;
@@ -565,6 +586,11 @@ body {
   border-color: #d9b66b;
   background: #fff8e5;
   box-shadow: 0 0 0 2px rgba(217, 182, 107, 0.22);
+}
+
+.ticket-card--uncreated:not(.ticket-card--marketplace):not(.ticket-card--ask-stale) {
+  border-color: #b9202c;
+  box-shadow: 0 0 0 2px rgba(185, 32, 44, 0.2);
 }
 
 .ticket-card--flash {

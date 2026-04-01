@@ -52,6 +52,10 @@ cd .\weather-xoap-shim\scripts
 .\install-weather-xoap-shim.ps1
 ```
 
+The install script now auto-checks/enables IIS + ASP.NET prerequisites unless you pass `-SkipIisPrereqs`.
+If Windows requires a reboot to finish enabling those features, the install completes in a "pending restart" state and tells you to reboot, then run the smoke test script.
+Smoke checks are best-effort during install (the shim still installs even if upstream weather APIs are temporarily unreachable).
+
 If your workstation blocks `.ps1` execution, use either method below:
 
 ```powershell
@@ -115,6 +119,22 @@ Default path detection order:
 The script creates a timestamped backup before writing.
 
 Then the weather control's internal XOAP calls to `xoap.weather.com` will be served by this local shim.
+
+## Windows Installer + Release Workflow
+
+This repo now includes a Windows `.exe` installer flow for the shim:
+
+- Workflow: `.github/workflows/weather-xoap-shim-release.yml`
+- Installer output: `weather-xoap-shim/dist/FTD.WeatherXoapShim.Setup.<version>.exe`
+
+Supported installer switches:
+
+- `/SITENAME=FTD.XoapWeatherShim`
+- `/HOSTNAME=xoap.weather.com`
+- `/INSTALLROOT=C:\FTDTools\XoapWeatherShim`
+- `/SKIPHOSTSENTRY=false`
+- `/SKIPIISPREREQS=false` (default keeps install easy on new computers)
+- `/REMOVEINSTALLROOT=false` (used on uninstall)
 
 ## Data Source
 

@@ -3,7 +3,8 @@ param(
     [string]$SiteName = 'FTD.XoapWeatherShim',
     [string]$HostName = 'xoap.weather.com',
     [string]$InstallRoot = 'C:\FTDTools\XoapWeatherShim',
-    [switch]$SkipHostsEntry
+    [switch]$SkipHostsEntry,
+    [switch]$SkipIisPrereqs
 )
 
 $ErrorActionPreference = 'Stop'
@@ -61,8 +62,91 @@ function Update-HostsEntry {
     }
 }
 
+function Ensure-IisPrerequisites {
+    $restartNeeded = $false
+    $serverFeatureCommand = Get-Command Install-WindowsFeature -ErrorAction SilentlyContinue
+
+    if ($serverFeatureCommand) {
+        $requiredServerFeatures = @(
+            'Web-Server',
+            'Web-App-Dev',
+            'Web-Asp-Net45',
+            'Web-Net-Ext45',
+            'Web-ISAPI-Ext',
+            'Web-ISAPI-Filter',
+            'Web-Mgmt-Console'
+        )
+
+        $featureState = Get-WindowsFeature -Name $requiredServerFeatures -ErrorAction SilentlyContinue
+        $missingServerFeatures = @($featureState | Where-Object { $_ -and -not $_.Installed } | Select-Object -ExpandProperty Name)
+        if ($missingServerFeatures.Count -gt 0) {
+            Write-Host "Installing IIS prerequisites (server features): $($missingServerFeatures -join ', ') ..."
+            $result = Install-WindowsFeature -Name $missingServerFeatures -IncludeManagementTools -ErrorAction Stop
+            if ($result.RestartNeeded -eq 'Yes') {
+                $restartNeeded = $true
+            }
+        }
+    } else {
+        $requiredOptionalFeatures = @(
+            'IIS-WebServerRole',
+            'IIS-WebServer',
+            'IIS-CommonHttpFeatures',
+            'IIS-DefaultDocument',
+            'IIS-StaticContent',
+            'IIS-ApplicationDevelopment',
+            'IIS-ASPNET45',
+            'IIS-NetFxExtensibility45',
+            'IIS-ISAPIExtensions',
+            'IIS-ISAPIFilter',
+            'IIS-ManagementConsole'
+        )
+
+        foreach ($feature in $requiredOptionalFeatures) {
+            $state = Get-WindowsOptionalFeature -Online -FeatureName $feature -ErrorAction SilentlyContinue
+            if ($null -eq $state) {
+                continue
+            }
+            if ($state.State -eq 'Enabled') {
+                continue
+            }
+
+            Write-Host "Enabling Windows optional feature $feature ..."
+            $result = Enable-WindowsOptionalFeature -Online -FeatureName $feature -All -NoRestart -ErrorAction Stop
+            if ($result.RestartNeeded) {
+                $restartNeeded = $true
+            }
+        }
+    }
+
+    if ($restartNeeded) {
+        Write-Warning 'One or more IIS/.NET features requested a restart.'
+    }
+
+    return $restartNeeded
+}
+
 Assert-Admin
-Import-Module WebAdministration -ErrorAction Stop
+
+$restartNeeded = $false
+if (-not $SkipIisPrereqs) {
+    Write-Host 'Ensuring IIS/.NET prerequisites are installed ...'
+    $restartNeeded = Ensure-IisPrerequisites
+}
+
+try {
+    Import-Module WebAdministration -ErrorAction Stop
+}
+catch {
+    if ($restartNeeded) {
+        Write-Warning 'WebAdministration is not available yet because Windows still needs a reboot to finish IIS/.NET enablement.'
+        Write-Warning 'Reboot this machine, then rerun install-weather-xoap-shim.ps1 (or smoke-test-weather-xoap-shim.ps1).'
+        Write-Host ''
+        Write-Host 'Install complete (pending restart).'
+        return
+    }
+
+    throw
+}
 
 $repoSitePath = (Resolve-Path (Join-Path $PSScriptRoot '..\site')).Path
 $destinationSitePath = Join-Path $InstallRoot 'site'
@@ -115,15 +199,25 @@ if (-not $SkipHostsEntry) {
     Update-HostsEntry -HostsPath $hostsPath -HostName $HostName
 }
 
-Write-Host 'Running smoke checks ...'
-$searchUrl = 'http://127.0.0.1/search/search?where=60515'
-$weatherUrl = 'http://127.0.0.1/weather/local/60515?cc=*&dayf=5&prod=xoap&par=test&key=test'
+if ($restartNeeded) {
+    Write-Warning 'A reboot is required before smoke checks are reliable. Reboot, then run smoke-test-weather-xoap-shim.ps1.'
+} else {
+    Write-Host 'Running smoke checks ...'
+    $searchUrl = 'http://127.0.0.1/search/search?where=60515'
+    $weatherUrl = 'http://127.0.0.1/weather/local/60515?cc=*&dayf=5&prod=xoap&par=test&key=test'
 
-$searchResponse = Invoke-WebRequest -Uri $searchUrl -Headers @{ Host = $HostName } -UseBasicParsing -TimeoutSec 20
-$weatherResponse = Invoke-WebRequest -Uri $weatherUrl -Headers @{ Host = $HostName } -UseBasicParsing -TimeoutSec 20
+    try {
+        $searchResponse = Invoke-WebRequest -Uri $searchUrl -Headers @{ Host = $HostName } -UseBasicParsing -TimeoutSec 20
+        $weatherResponse = Invoke-WebRequest -Uri $weatherUrl -Headers @{ Host = $HostName } -UseBasicParsing -TimeoutSec 20
 
-if ($searchResponse.StatusCode -ne 200 -or $weatherResponse.StatusCode -ne 200) {
-    throw 'Smoke check failed: expected HTTP 200 from both shim endpoints.'
+        if ($searchResponse.StatusCode -ne 200 -or $weatherResponse.StatusCode -ne 200) {
+            throw 'Expected HTTP 200 from both shim endpoints.'
+        }
+    }
+    catch {
+        Write-Warning "Smoke checks failed but IIS install completed: $($_.Exception.Message)"
+        Write-Warning 'Verify internet connectivity and run smoke-test-weather-xoap-shim.ps1 to recheck the shim.'
+    }
 }
 
 Write-Host ''

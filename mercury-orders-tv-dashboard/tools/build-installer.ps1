@@ -1,0 +1,117 @@
+param(
+  [Parameter(Mandatory = $true)] [string]$Version,
+  [Parameter(Mandatory = $true)] [string]$NodeRuntimeDir,
+  [Parameter(Mandatory = $true)] [string]$NssmExePath,
+  [string]$Publisher = "FTD",
+  [string]$PublisherUrl = "https://github.com/example/ftd-mercury-tools"
+)
+
+Set-StrictMode -Version 2
+$ErrorActionPreference = "Stop"
+
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectRoot = Split-Path -Parent $scriptRoot
+$installerProjectPath = Join-Path $projectRoot "installer\FTD.MercuryDashboard.iss"
+$stageRoot = Join-Path $projectRoot "artifacts\installer\stage"
+$distRoot = Join-Path $projectRoot "dist"
+
+if (-not (Test-Path $installerProjectPath)) {
+  throw "Installer project not found: $installerProjectPath"
+}
+
+$NodeRuntimeDir = [System.IO.Path]::GetFullPath($NodeRuntimeDir)
+$NssmExePath = [System.IO.Path]::GetFullPath($NssmExePath)
+if (-not (Test-Path (Join-Path $NodeRuntimeDir "node.exe"))) {
+  throw "Node runtime directory must contain node.exe. Got: $NodeRuntimeDir"
+}
+if (-not (Test-Path $NssmExePath)) {
+  throw "nssm executable not found: $NssmExePath"
+}
+
+$kioskDist = Join-Path $projectRoot "kiosk-app\dist"
+$bridgeServer = Join-Path $projectRoot "workflow-bridge\server.mjs"
+$webHostServer = Join-Path $projectRoot "service-host\dashboard-web-server.mjs"
+$serviceInstallScript = Join-Path $projectRoot "service\install-mercury-dashboard-services.ps1"
+$serviceUninstallScript = Join-Path $projectRoot "service\uninstall-mercury-dashboard-services.ps1"
+$referenceDir = Join-Path $projectRoot "reference"
+
+if (-not (Test-Path (Join-Path $kioskDist "index.html"))) {
+  throw "kiosk-app dist output is missing. Build kiosk-app first: npm run build"
+}
+if (-not (Test-Path $bridgeServer)) {
+  throw "Bridge server file missing: $bridgeServer"
+}
+if (-not (Test-Path $webHostServer)) {
+  throw "Dashboard web host file missing: $webHostServer"
+}
+if (-not (Test-Path $serviceInstallScript)) {
+  throw "Service install script missing: $serviceInstallScript"
+}
+if (-not (Test-Path $serviceUninstallScript)) {
+  throw "Service uninstall script missing: $serviceUninstallScript"
+}
+if (-not (Test-Path $referenceDir)) {
+  throw "Reference directory missing: $referenceDir"
+}
+
+if (Test-Path $stageRoot) {
+  Remove-Item -Recurse -Force $stageRoot
+}
+New-Item -ItemType Directory -Path $stageRoot | Out-Null
+
+$stageRuntime = Join-Path $stageRoot "runtime"
+$stageBin = Join-Path $stageRoot "bin"
+$stageKioskDist = Join-Path $stageRoot "kiosk-app\dist"
+$stageBridge = Join-Path $stageRoot "workflow-bridge"
+$stageReference = Join-Path $stageRoot "reference"
+$stageServiceHost = Join-Path $stageRoot "service-host"
+$stageService = Join-Path $stageRoot "service"
+
+New-Item -ItemType Directory -Path $stageRuntime, $stageBin, $stageKioskDist, $stageBridge, $stageReference, $stageServiceHost, $stageService | Out-Null
+
+Copy-Item -Path (Join-Path $NodeRuntimeDir "*") -Destination $stageRuntime -Recurse
+Copy-Item -Path $NssmExePath -Destination (Join-Path $stageBin "nssm.exe") -Force
+Copy-Item -Path (Join-Path $kioskDist "*") -Destination $stageKioskDist -Recurse
+Copy-Item -Path $bridgeServer -Destination (Join-Path $stageBridge "server.mjs") -Force
+Copy-Item -Path (Join-Path $projectRoot "workflow-bridge\package.json") -Destination (Join-Path $stageBridge "package.json") -Force
+Copy-Item -Path (Join-Path $projectRoot "workflow-bridge\package-lock.json") -Destination (Join-Path $stageBridge "package-lock.json") -Force
+Copy-Item -Path (Join-Path $referenceDir "*") -Destination $stageReference -Recurse
+Copy-Item -Path $webHostServer -Destination (Join-Path $stageServiceHost "dashboard-web-server.mjs") -Force
+Copy-Item -Path $serviceInstallScript -Destination (Join-Path $stageService "install-mercury-dashboard-services.ps1") -Force
+Copy-Item -Path $serviceUninstallScript -Destination (Join-Path $stageService "uninstall-mercury-dashboard-services.ps1") -Force
+
+if (-not (Test-Path $distRoot)) {
+  New-Item -ItemType Directory -Path $distRoot | Out-Null
+}
+
+$iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
+if (-not $iscc) {
+  throw "iscc.exe (Inno Setup compiler) was not found on PATH."
+}
+
+$defineVersion = "/DMyAppVersion=$Version"
+$definePublisher = '/DMyAppPublisher="' + $Publisher + '"'
+$defineUrl = '/DMyAppURL="' + $PublisherUrl + '"'
+$defineStageDir = '/DStageDir="' + $stageRoot + '"'
+
+$compileArgs = @(
+  $defineVersion,
+  $definePublisher,
+  $defineUrl,
+  $defineStageDir,
+  $installerProjectPath
+)
+
+Write-Host "Compiling Mercury dashboard installer with Inno Setup..."
+& $iscc.Source @compileArgs
+if ($LASTEXITCODE -ne 0) {
+  throw "Inno Setup compile failed with exit code $LASTEXITCODE"
+}
+
+$installerPath = Join-Path $distRoot "FTD.MercuryDashboard.Setup.$Version.exe"
+if (-not (Test-Path $installerPath)) {
+  throw "Expected installer output not found: $installerPath"
+}
+
+Write-Host "Installer built: $installerPath"
+Write-Output $installerPath

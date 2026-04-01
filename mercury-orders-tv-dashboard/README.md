@@ -1,4 +1,4 @@
-# Pi Kiosk Dashboard Starter (Live Mercury)
+# Mercury Orders TV Dashboard
 
 This folder contains a live Mercury dashboard setup for kiosk operations (design + delivery tracking).
 
@@ -48,3 +48,23 @@ $env:MERCURY_BASE_URL='http://localhost/WsMercuryWebAPI'
 
 - The bridge is live-only and intended for real Mercury data.
 - Avoid committing raw payloads that contain sensitive customer information.
+
+## Windows Installer + Service
+
+The repository includes a release workflow that builds a Windows installer and configures auto-start services:
+
+- Workflow: `.github/workflows/mercury-dashboard-release.yml`
+- Installer output: `mercury-orders-tv-dashboard/dist/FTD.MercuryDashboard.Setup.<version>.exe`
+- Services created by installer:
+  - `FTD Mercury Workflow Bridge` (default port `17344`)
+  - `FTD Mercury Dashboard Web` (default port `5173`)
+
+Optional installer switches:
+
+- `/MERCURYBASE=http://127.0.0.1/WsMercuryWebAPI`
+- `/SOAPNAMESPACE=http://localhost/webservices/`
+- `/BRIDGEPORT=17344`
+- `/WEBPORT=5173`
+- `/BRIDGEHOST=0.0.0.0`
+- `/WEBHOST=0.0.0.0`
+- `/LOCALNETWORKONLY=true`

@@ -144,6 +144,50 @@ This folder now includes installer packaging for private winget distribution:
 - `tools\new-winget-manifests.ps1` (manifest generator)
 - `.github\workflows\opos-bridge-release.yml` (build + release artifacts)
 
+### Unified Service + Agent Installer
+
+A separate installer now packages the `.NET` service runtime plus optional user-session task hosts:
+
+- `installer\FTD.OposBridge.Unified.iss`
+- `installer\scripts\install-opos-bridge-unified.ps1`
+- `installer\scripts\uninstall-opos-bridge-unified.ps1`
+- `tools\build-unified-installer.ps1`
+- `.github\workflows\opos-bridge-unified-release.yml`
+
+Build locally:
+
+```powershell
+cd .\opos-browser-bridge
+.\tools\build-unified-installer.ps1 -Version "1.0.0" -Publisher "FTD" -PublisherUrl "https://github.com/<org>/ftd-mercury-tools"
+```
+
+Installer output:
+- `opos-browser-bridge\dist\FTD.OposBridge.Unified.Setup.1.0.0.exe`
+
+Silent install example (service + agent relay task enabled by default):
+
+```powershell
+FTD.OposBridge.Unified.Setup.1.0.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOGICALNAME=ZEBRA_SCANNER /PORT=17331 /USEAGENTRELAYHOST=true /NOTRAYCOMPANION=false
+```
+
+Useful unified installer switches:
+
+- `/SERVICENAME=FTD.OposBridge.Service`
+- `/TASKNAME=FTD OPOS Bridge EXE`
+- `/TRAYTASKNAME=FTD OPOS Bridge Tray`
+- `/INSTALLROOT=C:\FTDTools\OposBridgeService`
+- `/LOGICALNAME=ZEBRA_SCANNER`
+- `/PORT=17331`
+- `/SCANNERMODE=opos`
+- `/LOGLEVEL=warning`
+- `/SERVICEACCOUNT=localservice`
+- `/SERVICEUSER=DOMAIN\User` (required only when `/SERVICEACCOUNT=custom`)
+- `/USEAGENTRELAYHOST=true`
+- `/NOTRAYCOMPANION=false`
+- `/ENABLETASKFALLBACK=false`
+- `/KEEPLEGACYTASK=false`
+- `/REMOVEINSTALLROOT=false` (used during uninstall)
+
 ### Local Build
 
 ```powershell
