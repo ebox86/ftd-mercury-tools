@@ -36,7 +36,7 @@ OutputBaseFilename=FTD.MercuryDashboard.Setup.{#MyAppVersion}
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
-PrivilegesRequiredOverridesAllowed=none
+PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayName={#MyAppName}
 SetupLogging=yes
 
@@ -130,6 +130,17 @@ end;
 
 function InitializeSetup(): Boolean;
 begin
+  if not IsAdminInstallMode then
+  begin
+    MsgBox(
+      'This installer must run in Administrator mode to register Windows services. ' +
+      'Please restart setup and allow elevation.',
+      mbCriticalError,
+      MB_OK);
+    Result := False;
+    Exit;
+  end;
+
   CmdMercuryBase := ReadSwitchValue('MERCURYBASE', 'http://127.0.0.1/WsMercuryWebAPI');
   CmdSoapNamespace := ReadSwitchValue('SOAPNAMESPACE', 'http://localhost/webservices/');
   CmdBridgePort := ReadSwitchValue('BRIDGEPORT', '17344');
