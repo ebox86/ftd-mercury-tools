@@ -1,6 +1,8 @@
 # Generated installer/package build outputs
 /mercury-orders-tv-dashboard/artifacts/
 /mercury-orders-tv-dashboard/dist/
+/mercury-orders-tv-dashboard/service-host/FTD.Mercury.Dashboard.ServiceHost/bin/
+/mercury-orders-tv-dashboard/service-host/FTD.Mercury.Dashboard.ServiceHost/obj/
 /opos-browser-bridge/artifacts/
 /opos-browser-bridge/dist/
 /weather-xoap-shim/artifacts/
