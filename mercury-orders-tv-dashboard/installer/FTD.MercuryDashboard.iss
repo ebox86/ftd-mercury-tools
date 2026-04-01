@@ -123,14 +123,9 @@ begin
   Result := '';
 end;
 
-function EscapeCmdValue(const Value: string): string;
-begin
-  Result := StringChangeEx(Value, '"', '\"', True);
-end;
-
 function QuoteCmdValue(const Value: string): string;
 begin
-  Result := '"' + EscapeCmdValue(Value) + '"';
+  Result := '"' + Value + '"';
 end;
 
 function InitializeSetup(): Boolean;
