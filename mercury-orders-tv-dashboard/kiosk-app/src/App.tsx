@@ -211,6 +211,23 @@ function activeDeliveryDateKeys(baseDate: Date, includeNextDay: boolean): Set<st
   return keys;
 }
 
+function isWithinDateKeys(deliveryDateRaw: string, allowedDateKeys: Set<string>): boolean {
+  const deliveryDateKey = toDateKey(deliveryDateRaw);
+  if (!deliveryDateKey) return false;
+  return allowedDateKeys.has(deliveryDateKey);
+}
+
+function countOrdersForDateKey(cards: BoardCard[], dateKey: string): number {
+  if (!dateKey) return 0;
+  let count = 0;
+  for (const card of cards) {
+    if (toDateKey(card.deliveryDate) === dateKey) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 function emptyGroups(): GroupedCards {
   return {
     incoming: [],
@@ -1798,7 +1815,7 @@ interface OrderEnrichment {
 export default function App() {
   const appRef = useRef<HTMLDivElement | null>(null);
   const [, setGroups] = useState<GroupedCards>(emptyGroups());
-  const [activeOrders, setActiveOrders] = useState<BoardCard[]>([]);
+  const [allActiveOrders, setAllActiveOrders] = useState<BoardCard[]>([]);
   const [pendingTickets, setPendingTickets] = useState<IntakeTicketCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshingActiveOrders, setIsRefreshingActiveOrders] = useState(false);
@@ -1829,18 +1846,44 @@ export default function App() {
     date.setDate(date.getDate() + dateOffsetDays);
     return date;
   }, [dateOffsetDays]);
-  const rangeWindows = useMemo(
-    () => activeRangeDayWindows(selectedDate, includeNextDay),
-    [selectedDate, includeNextDay],
-  );
-  const ticketSearchRangeWindows = useMemo(
-    // Always query today + next day for canonical delivery-date reconciliation.
+  const sourceRangeWindows = useMemo(
+    // Always query today + next day for canonical delivery-date reconciliation
+    // and instant on/off filtering in the UI.
     () => activeRangeDayWindows(selectedDate, true),
+    [selectedDate],
+  );
+  const sourceDeliveryDateKeys = useMemo(
+    () => activeDeliveryDateKeys(selectedDate, true),
     [selectedDate],
   );
   const allowedDeliveryDateKeys = useMemo(
     () => activeDeliveryDateKeys(selectedDate, includeNextDay),
     [selectedDate, includeNextDay],
+  );
+  const displayEligibleOrders = useMemo(
+    () => (showDelivered ? allActiveOrders : allActiveOrders.filter(card => card.stage !== 'delivered_or_exception')),
+    [allActiveOrders, showDelivered],
+  );
+  const activeOrders = useMemo(() => {
+    return displayEligibleOrders.filter(card => isWithinDateKeys(card.deliveryDate, allowedDeliveryDateKeys));
+  }, [displayEligibleOrders, allowedDeliveryDateKeys]);
+  const selectedDateKey = useMemo(() => dateKeyFromDate(selectedDate), [selectedDate]);
+  const nextDateKey = useMemo(() => {
+    const next = new Date(selectedDate);
+    next.setDate(next.getDate() + 1);
+    return dateKeyFromDate(next);
+  }, [selectedDate]);
+  const visibleTodayCount = useMemo(
+    () => countOrdersForDateKey(activeOrders, selectedDateKey),
+    [activeOrders, selectedDateKey],
+  );
+  const visibleNextDayCount = useMemo(
+    () => countOrdersForDateKey(activeOrders, nextDateKey),
+    [activeOrders, nextDateKey],
+  );
+  const hiddenNextDayCount = useMemo(
+    () => includeNextDay ? 0 : countOrdersForDateKey(displayEligibleOrders, nextDateKey),
+    [displayEligibleOrders, includeNextDay, nextDateKey],
   );
 
   const pollBoard = useCallback(async () => {
@@ -1946,7 +1989,7 @@ export default function App() {
           tables: { OrderItems: [], MessageItems: [] },
         })),
         Promise.all(
-          ticketSearchRangeWindows.map(window => (
+          sourceRangeWindows.map(window => (
             fetchRowsWithRetry<TicketSearchRow>(
               () => fetchTicketSearch({
                 fromDate: window.deliveryDate,
@@ -1961,7 +2004,7 @@ export default function App() {
           )),
         ),
         Promise.all(
-          rangeWindows.flatMap(window => [
+          sourceRangeWindows.flatMap(window => [
             fetchRowsWithRetry<DeliveryOrderByZoneRow>(
               () => fetchOrdersByZone({ ...window, designedOrders: false, priorityIDList: '' }),
               2,
@@ -1973,7 +2016,7 @@ export default function App() {
           ]),
         ),
         Promise.all(
-          rangeWindows.map(window => (
+          sourceRangeWindows.map(window => (
             fetchRowsWithRetry<DeliveryOrderByRouteRow>(
               () => fetchOrdersByRoutes(window),
               2,
@@ -1985,9 +2028,9 @@ export default function App() {
       ]);
       const eventOrders = events?.tables?.OrderItems || [];
       const ticketSearchRows = ticketSearchFeeds.flatMap(rows => rows || []);
-      const sortedAllowedDateKeys = Array.from(allowedDeliveryDateKeys).sort();
-      const maxAllowedDeliveryDateKey = sortedAllowedDateKeys.length
-        ? sortedAllowedDateKeys[sortedAllowedDateKeys.length - 1]
+      const sortedSourceDateKeys = Array.from(sourceDeliveryDateKeys).sort();
+      const maxSourceDeliveryDateKey = sortedSourceDateKeys.length
+        ? sortedSourceDateKeys[sortedSourceDateKeys.length - 1]
         : '';
       const ticketSearchByTicketId = new Map<string, TicketSearchRow>();
       for (const row of ticketSearchRows) {
@@ -2022,8 +2065,8 @@ export default function App() {
       const futureTicketSearchIds = new Set<string>();
       for (const row of ticketSearchRows) {
         const deliveryDateKey = toDateKey(String(row.DELIVERY_DATE || ''));
-        if (!deliveryDateKey || !maxAllowedDeliveryDateKey) continue;
-        if (deliveryDateKey <= maxAllowedDeliveryDateKey) continue;
+        if (!deliveryDateKey || !maxSourceDeliveryDateKey) continue;
+        if (deliveryDateKey <= maxSourceDeliveryDateKey) continue;
         const ticketId = String(row.ID || '').trim();
         const orderRef = ticketSearchOrderRef(row);
         if (ticketId) futureTicketSearchIds.add(normalizeIdLike(ticketId));
@@ -2140,11 +2183,7 @@ export default function App() {
       const messageRowsFromFeed = [...(messageFeedIn?.rows || []), ...(messageFeedOut?.rows || [])].map(toMessageItem);
       const messageRowsFromEvents = events?.tables?.MessageItems || [];
       const externalStageByLookupKey = new Map<string, { stage: StatusStage; reason: string }>();
-      const isWithinDisplayRange = (deliveryDateRaw: string): boolean => {
-        const deliveryDateKey = toDateKey(deliveryDateRaw);
-        if (!deliveryDateKey) return false;
-        return allowedDeliveryDateKeys.has(deliveryDateKey);
-      };
+      const isWithinSourceRange = (deliveryDateRaw: string): boolean => isWithinDateKeys(deliveryDateRaw, sourceDeliveryDateKeys);
       const zoneStageByTicketId = new Map<string, { stage: StatusStage; reason: string }>();
       const zoneDeliveryDateByTicketId = new Map<string, string>();
       const zoneDesignStatusByTicketId = new Map<string, string>();
@@ -2359,7 +2398,7 @@ export default function App() {
           isMarketplace,
         };
         statusLabelByTicketId.set(String(order.ID || '').trim(), friendlyStatusLabel(normalizedStageInfo.stage, normalizedStageInfo.reason));
-        if (isWithinDisplayRange(card.deliveryDate)) {
+        if (isWithinSourceRange(card.deliveryDate)) {
           nextGroups[normalizedStageInfo.stage].push(card);
         }
       }
@@ -2389,7 +2428,7 @@ export default function App() {
           String(row.DELIVERY_DATE || ''),
           String(zoneDeliveryDateByTicketId.get(ticketId) || ''),
         );
-        if (!isWithinDisplayRange(resolvedZoneDeliveryDate)) continue;
+        if (!isWithinSourceRange(resolvedZoneDeliveryDate)) continue;
         let stage = stageFromExternalStatus(String(row.STATUS || ''), String(row.DESIGNED_IND || ''));
         let stageReason = row.ZONE_NAME ? `Zone ${String(row.ZONE_NAME)}` : `Zone feed ${String(row.STATUS || 'ACTIVE')}`;
         const stageHint = zoneStageByTicketId.get(ticketId);
@@ -2432,7 +2471,7 @@ export default function App() {
           canonicalTicketSearchDelivery(ticketId, userReference, ''),
           String(row.DELIVERY_DATE || ''),
         );
-        if (!isWithinDisplayRange(resolvedRouteDeliveryDate)) continue;
+        if (!isWithinSourceRange(resolvedRouteDeliveryDate)) continue;
         const stage = normalizeStageForOrderCard(stageFromExternalStatus(String(row.STATUS || ''), ''));
         const candidate: BoardCard = {
           ticketId,
@@ -2467,7 +2506,7 @@ export default function App() {
         if (!ticketId) continue;
         if (pickupOrCodTicketIds.has(ticketId)) continue;
         const deliveryDate = String(row.DELIVERY_DATE || '').trim();
-        if (!isWithinDisplayRange(deliveryDate)) continue;
+        if (!isWithinSourceRange(deliveryDate)) continue;
 
         const designStatus = String(row.DESIGN_STATUS || '').trim();
         const deliveryStatus = effectiveDeliveryStatusFromTicketSearchRow(row);
@@ -2978,7 +3017,14 @@ export default function App() {
       const reconciledActiveOrders = Array.from(activeByTicket.values())
         .map(card => ({
           ...card,
-          deliveryDate: canonicalTicketSearchDelivery(card.ticketId, card.userReference, card.deliveryDate),
+          // Prefer authoritative ticket-status delivery dates first, then keep
+          // the card's current date, and only then fall back to ticket-search
+          // canonicalization.
+          deliveryDate: firstNonEmptyText(
+            zoneDeliveryDateByTicketId.get(card.ticketId) || '',
+            card.deliveryDate,
+            canonicalTicketSearchDelivery(card.ticketId, card.userReference, ''),
+          ),
         }))
         .filter(card => {
           const ticketKey = normalizeIdLike(card.ticketId);
@@ -2987,13 +3033,8 @@ export default function App() {
           if (futureTicketSearchRefs.has(refKey)) return false;
           return true;
         })
-        .filter(card => isWithinDisplayRange(card.deliveryDate))
         .sort(activeOrderSort);
-      setActiveOrders(
-        showDelivered
-          ? reconciledActiveOrders
-          : reconciledActiveOrders.filter(card => card.stage !== 'delivered_or_exception'),
-      );
+      setAllActiveOrders(reconciledActiveOrders);
       setPendingTickets(pending);
       setLastUpdated(new Date().toLocaleTimeString());
     } catch (err) {
@@ -3009,7 +3050,7 @@ export default function App() {
       }
       setLoading(false);
     }
-  }, [allowedDeliveryDateKeys, rangeWindows, showDelivered, ticketSearchRangeWindows]);
+  }, [sourceDeliveryDateKeys, sourceRangeWindows]);
 
   const runPoll = useCallback(async () => {
     if (pollInFlightRef.current) {
@@ -3317,10 +3358,16 @@ export default function App() {
 
             <section className="lane">
               <header className="lane__header">
-                <h2 className="lane__title-inline">
-                  <span>{showDelivered ? 'Orders (Including Delivered)' : 'Active Orders (Not Completed)'}</span>
-                  {isRefreshingActiveOrders ? <span className="lane__spinner" aria-hidden="true" /> : null}
-                </h2>
+                <div className="lane__title-block">
+                  <h2 className="lane__title-inline">
+                    <span>{showDelivered ? 'Orders (Including Delivered)' : 'Active Orders (Not Completed)'}</span>
+                    {isRefreshingActiveOrders ? <span className="lane__spinner" aria-hidden="true" /> : null}
+                  </h2>
+                  <div className="lane__submeta">
+                    <span>Today: {visibleTodayCount}</span>
+                    <span>{includeNextDay ? `Next day: ${visibleNextDayCount}` : `Next day hidden: ${hiddenNextDayCount}`}</span>
+                  </div>
+                </div>
                 <span className="lane__count">{activeOrders.length}</span>
               </header>
               <div className="lane__cards lane__cards--two-col" ref={activeListRef}>

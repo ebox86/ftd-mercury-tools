@@ -303,10 +303,26 @@ body {
   font-weight: 700;
 }
 
+.lane__title-block {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
 .lane__title-inline {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+.lane__submeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: #4b5a70;
+  font-weight: 700;
 }
 
 .lane__spinner {
