@@ -87,10 +87,13 @@ interface AskCandidateAttempt {
   reason: string;
 }
 
+type AudioAlertKind = 'marketplace' | 'today';
+
 const POLL_MS = 5000;
 const FLASH_MS = 120000;
 const ASK_STALE_MS = 12 * 60 * 60 * 1000;
 const DASHBOARD_MODE_STORAGE_KEY = 'kiosk_dashboard_mode';
+const AUDIO_ALERTS_STORAGE_KEY = 'kiosk_audio_alerts';
 const MARKETPLACE_REGEX = /\b(uber\s*eats|door\s*dash|doordash)\b/i;
 const RECIPIENT_STOP_WORDS = new Set([
   'a',
@@ -394,6 +397,69 @@ function initialDashboardMode(): boolean {
   } catch {
     return true;
   }
+}
+
+function initialAudioAlertsEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const saved = window.localStorage.getItem(AUDIO_ALERTS_STORAGE_KEY);
+    if (saved === null) return false;
+    return parseToggle(saved);
+  } catch {
+    return false;
+  }
+}
+
+function currentLocalDateKey(): string {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return dateKeyFromDate(now);
+}
+
+function classifyAudioAlertKind(isMarketplace: boolean, deliveryDateRaw: string, todayDateKey: string): AudioAlertKind | null {
+  if (isMarketplace) return 'marketplace';
+  const deliveryDateKey = toDateKey(deliveryDateRaw);
+  if (deliveryDateKey && deliveryDateKey === todayDateKey) return 'today';
+  return null;
+}
+
+function buildAudioAlertKindMap(pending: IntakeTicketCard[], active: BoardCard[], todayDateKey: string): Map<string, AudioAlertKind> {
+  const next = new Map<string, AudioAlertKind>();
+
+  for (const ticket of pending) {
+    const kind = classifyAudioAlertKind(ticket.isMarketplace, ticket.deliveryDate, todayDateKey);
+    if (!kind) continue;
+    const key = normalizeIdLike(ticket.id);
+    if (!key) continue;
+    next.set(`pending:${key}`, kind);
+  }
+
+  for (const order of active) {
+    const kind = classifyAudioAlertKind(order.isMarketplace, order.deliveryDate, todayDateKey);
+    if (!kind) continue;
+    const key = normalizeIdLike(order.ticketId || order.userReference);
+    if (!key) continue;
+    next.set(`active:${key}`, kind);
+  }
+
+  return next;
+}
+
+function countNewAudioAlertsByKind(
+  previous: Set<string>,
+  next: Map<string, AudioAlertKind>,
+): { marketplaceCount: number; todayCount: number } {
+  let marketplaceCount = 0;
+  let todayCount = 0;
+  for (const [key, kind] of next.entries()) {
+    if (previous.has(key)) continue;
+    if (kind === 'marketplace') {
+      marketplaceCount += 1;
+      continue;
+    }
+    todayCount += 1;
+  }
+  return { marketplaceCount, todayCount };
 }
 
 function tokenizeRecipient(raw: string): string[] {
@@ -1825,6 +1891,7 @@ export default function App() {
   const [dateOffsetDays, setDateOffsetDays] = useState(0);
   const [includeNextDay, setIncludeNextDay] = useState(true);
   const [showDelivered, setShowDelivered] = useState(false);
+  const [isAudioAlertsEnabled, setIsAudioAlertsEnabled] = useState<boolean>(() => initialAudioAlertsEnabled());
   const [isDashboardMode, setIsDashboardMode] = useState<boolean>(() => initialDashboardMode());
   const seenTicketIdsRef = useRef<Set<string>>(new Set());
   const flashUntilRef = useRef<Map<string, number>>(new Map());
@@ -1835,7 +1902,76 @@ export default function App() {
   const activePaneSpinnerInFlightRef = useRef(0);
   const pollInFlightRef = useRef(false);
   const pollQueuedRef = useRef(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioAlertsEnabledRef = useRef(isAudioAlertsEnabled);
+  const audioAlertSnapshotReadyRef = useRef(false);
+  const alertedItemKeysRef = useRef<Set<string>>(new Set());
+  const alertPlaybackQueueRef = useRef<Promise<void>>(Promise.resolve());
   const askDebugEnabled = useMemo(() => isAskDebugEnabledFromBrowser(), []);
+  const playAlertSound = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+
+    const windowWithWebkit = window as Window & { webkitAudioContext?: typeof AudioContext };
+    const AudioContextCtor = globalThis.AudioContext || windowWithWebkit.webkitAudioContext;
+    if (!AudioContextCtor) return;
+
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContextCtor();
+    }
+
+    const audioContext = audioContextRef.current;
+    if (!audioContext) return;
+    if (audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch {
+        return;
+      }
+    }
+    if (audioContext.state !== 'running') return;
+
+    const now = audioContext.currentTime;
+    const gainNode = audioContext.createGain();
+    gainNode.connect(audioContext.destination);
+    gainNode.gain.setValueAtTime(0.0001, now);
+    gainNode.gain.exponentialRampToValueAtTime(0.14, now + 0.02);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.46);
+
+    const firstTone = audioContext.createOscillator();
+    firstTone.type = 'triangle';
+    firstTone.frequency.setValueAtTime(880, now);
+    firstTone.connect(gainNode);
+    firstTone.start(now);
+    firstTone.stop(now + 0.12);
+
+    const secondTone = audioContext.createOscillator();
+    secondTone.type = 'triangle';
+    secondTone.frequency.setValueAtTime(1174.66, now + 0.13);
+    secondTone.connect(gainNode);
+    secondTone.start(now + 0.13);
+    secondTone.stop(now + 0.42);
+
+    window.setTimeout(() => {
+      gainNode.disconnect();
+    }, 700);
+  }, []);
+  const queueAlertDings = useCallback((count: number) => {
+    const dingCount = Math.max(0, Math.min(12, Math.floor(Number(count) || 0)));
+    if (dingCount <= 0) return;
+
+    alertPlaybackQueueRef.current = alertPlaybackQueueRef.current
+      .catch(() => {
+        // Keep queue alive after a playback failure.
+      })
+      .then(async () => {
+        for (let i = 0; i < dingCount; i += 1) {
+          await playAlertSound();
+          if (i < dingCount - 1) {
+            await sleep(430);
+          }
+        }
+      });
+  }, [playAlertSound]);
   const requestActiveOrdersRefreshSpinner = useCallback(() => {
     activePaneSpinnerRequestedRef.current = true;
     setIsRefreshingActiveOrders(true);
@@ -3034,6 +3170,19 @@ export default function App() {
           return true;
         })
         .sort(activeOrderSort);
+      const nextAudioAlertKinds = buildAudioAlertKindMap(pending, reconciledActiveOrders, currentLocalDateKey());
+      const nextAudioAlertKeys = new Set(nextAudioAlertKinds.keys());
+      if (!audioAlertSnapshotReadyRef.current) {
+        alertedItemKeysRef.current = nextAudioAlertKeys;
+        audioAlertSnapshotReadyRef.current = true;
+      } else {
+        const newAlertCounts = countNewAudioAlertsByKind(alertedItemKeysRef.current, nextAudioAlertKinds);
+        const dingCount = (newAlertCounts.marketplaceCount * 3) + newAlertCounts.todayCount;
+        alertedItemKeysRef.current = nextAudioAlertKeys;
+        if (dingCount > 0 && audioAlertsEnabledRef.current) {
+          queueAlertDings(dingCount);
+        }
+      }
       setAllActiveOrders(reconciledActiveOrders);
       setPendingTickets(pending);
       setLastUpdated(new Date().toLocaleTimeString());
@@ -3050,7 +3199,7 @@ export default function App() {
       }
       setLoading(false);
     }
-  }, [sourceDeliveryDateKeys, sourceRangeWindows]);
+  }, [queueAlertDings, sourceDeliveryDateKeys, sourceRangeWindows]);
 
   const runPoll = useCallback(async () => {
     if (pollInFlightRef.current) {
@@ -3076,6 +3225,19 @@ export default function App() {
     }, POLL_MS);
     return () => window.clearInterval(timer);
   }, [runPoll]);
+
+  useEffect(() => {
+    audioAlertsEnabledRef.current = isAudioAlertsEnabled;
+  }, [isAudioAlertsEnabled]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(AUDIO_ALERTS_STORAGE_KEY, isAudioAlertsEnabled ? '1' : '0');
+    } catch {
+      // localStorage unavailable (private mode, policy, etc)
+    }
+  }, [isAudioAlertsEnabled]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -3152,6 +3314,17 @@ export default function App() {
       window.cancelAnimationFrame(rafId);
     };
   }, [isAutoScrollEnabled]);
+
+  useEffect(() => {
+    return () => {
+      const audioContext = audioContextRef.current;
+      if (!audioContext) return;
+      void audioContext.close().catch(() => {
+        // ignore close errors on teardown
+      });
+      audioContextRef.current = null;
+    };
+  }, []);
 
   const totalOrderCount = useMemo(
     () => activeOrders.length + pendingTickets.length,
@@ -3257,6 +3430,20 @@ export default function App() {
               }}
             />
             <span>Show delivered</span>
+          </label>
+          <label className="app__control-check">
+            <input
+              type="checkbox"
+              checked={isAudioAlertsEnabled}
+              onChange={(event) => {
+                const nextEnabled = event.target.checked;
+                setIsAudioAlertsEnabled(nextEnabled);
+                if (nextEnabled) {
+                  void playAlertSound();
+                }
+              }}
+            />
+            <span>Audio alerts</span>
           </label>
           <button
             type="button"
