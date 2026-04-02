@@ -1,4 +1,4 @@
-name: OPOS Bridge Unified Release
+name: Scanner Browser Bridge Release
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         type: string
   push:
     tags:
-      - "opos-bridge-unified-v*"
+      - "scanner-browser-bridge-v*"
 
 permissions:
   contents: write
@@ -36,7 +36,7 @@ jobs:
             $version = "${{ inputs.version }}"
           } else {
             $refName = "${{ github.ref_name }}"
-            $prefix = "opos-bridge-unified-v"
+            $prefix = "scanner-browser-bridge-v"
             if (-not $refName.StartsWith($prefix)) {
               throw "Tag must use prefix '$prefix'. Got: $refName"
             }
@@ -47,54 +47,25 @@ jobs:
             throw "Invalid version format: $version"
           }
 
-          $tag = "opos-bridge-unified-v$version"
+          $tag = "scanner-browser-bridge-v$version"
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
           Write-Host "Version=$version"
           Write-Host "Tag=$tag"
 
-      - name: Setup .NET 8 SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Validate PowerShell scripts
-        run: |
-          $files = @(
-            "opos-browser-bridge/tools/build-unified-installer.ps1",
-            "opos-browser-bridge/installer/scripts/install-opos-bridge-unified.ps1",
-            "opos-browser-bridge/installer/scripts/uninstall-opos-bridge-unified.ps1",
-            "opos-browser-bridge/service/install-opos-bridge-service.ps1",
-            "opos-browser-bridge/service/install-opos-bridge-task.ps1",
-            "opos-browser-bridge/service/migrate-script-bridge-to-service.ps1"
-          )
-          foreach ($file in $files) {
-            $raw = Get-Content -Raw -Path $file
-            [void][scriptblock]::Create($raw)
-            Write-Host "Parsed OK: $file"
-          }
-
-      - name: Verify installer and project files exist
-        run: |
-          if (-not (Test-Path "opos-browser-bridge/installer/FTD.OposBridge.Unified.iss")) { throw "Missing unified installer project." }
-          if (-not (Test-Path "opos-browser-bridge/service/FTD.OposBridge.Service/FTD.OposBridge.Service.csproj")) { throw "Missing service csproj." }
-
       - name: Install Inno Setup compiler
         run: choco install innosetup --no-progress -y
 
-      - name: Build unified installer
+      - name: Build installer
         run: |
           $publisherUrl = "https://github.com/${{ github.repository }}"
-          .\opos-browser-bridge\tools\build-unified-installer.ps1 `
-            -Version "${{ steps.meta.outputs.version }}" `
-            -Publisher "FTD" `
-            -PublisherUrl $publisherUrl
+          .\scanner-browser-bridge\tools\build-installer.ps1 -Version "${{ steps.meta.outputs.version }}" -Publisher "FTD" -PublisherUrl $publisherUrl
 
       - name: Hash installer
         id: hash
         run: |
           $version = "${{ steps.meta.outputs.version }}"
-          $installer = Join-Path $PWD "opos-browser-bridge\dist\FTD.OposBridge.Unified.Setup.$version.exe"
+          $installer = Join-Path $PWD "scanner-browser-bridge\dist\FTD.OposBridge.Setup.$version.exe"
           if (-not (Test-Path $installer)) {
             throw "Installer not found: $installer"
           }
@@ -107,20 +78,42 @@ jobs:
           "hash=$hash" >> $env:GITHUB_OUTPUT
           "hash_file=$hashFile" >> $env:GITHUB_OUTPUT
 
+      - name: Generate winget manifests
+        id: manifests
+        run: |
+          $version = "${{ steps.meta.outputs.version }}"
+          $tag = "${{ steps.meta.outputs.tag }}"
+          $installerFile = "FTD.OposBridge.Setup.$version.exe"
+          $installerUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/$installerFile"
+          $outputRoot = Join-Path $PWD "scanner-browser-bridge\artifacts\winget-manifests"
+
+          $manifestDir = .\scanner-browser-bridge\tools\new-winget-manifests.ps1 `
+            -PackageVersion $version `
+            -InstallerUrl $installerUrl `
+            -InstallerSha256 "${{ steps.hash.outputs.hash }}" `
+            -OutputRoot $outputRoot
+
+          $zipPath = Join-Path $PWD "scanner-browser-bridge\artifacts\winget-manifests.$version.zip"
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          Compress-Archive -Path (Join-Path $outputRoot "*") -DestinationPath $zipPath
+
+          "manifest_root=$outputRoot" >> $env:GITHUB_OUTPUT
+          "manifest_dir=$manifestDir" >> $env:GITHUB_OUTPUT
+          "manifest_zip=$zipPath" >> $env:GITHUB_OUTPUT
+
       - name: Create or update GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: OPOS Bridge Unified ${{ steps.meta.outputs.version }}
+          name: Scanner Browser Bridge ${{ steps.meta.outputs.version }}
           make_latest: false
           files: |
             ${{ steps.hash.outputs.installer }}
             ${{ steps.hash.outputs.hash_file }}
+            ${{ steps.manifests.outputs.manifest_zip }}
 
-      - name: Upload installer artifact
+      - name: Upload winget manifests artifact
         uses: actions/upload-artifact@v4
         with:
-          name: opos-bridge-unified-installer-${{ steps.meta.outputs.version }}
-          path: |
-            ${{ steps.hash.outputs.installer }}
-            ${{ steps.hash.outputs.hash_file }}
+          name: winget-manifests-${{ steps.meta.outputs.version }}
+          path: ${{ steps.manifests.outputs.manifest_root }}

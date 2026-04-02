@@ -1,4 +1,4 @@
-name: OPOS Bridge Release
+name: Weather Widget Shim Release
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         type: string
   push:
     tags:
-      - "opos-bridge-v*"
+      - "weather-widget-shim-v*"
 
 permissions:
   contents: write
@@ -36,7 +36,7 @@ jobs:
             $version = "${{ inputs.version }}"
           } else {
             $refName = "${{ github.ref_name }}"
-            $prefix = "opos-bridge-v"
+            $prefix = "weather-widget-shim-v"
             if (-not $refName.StartsWith($prefix)) {
               throw "Tag must use prefix '$prefix'. Got: $refName"
             }
@@ -47,25 +47,47 @@ jobs:
             throw "Invalid version format: $version"
           }
 
-          $tag = "opos-bridge-v$version"
+          $tag = "weather-widget-shim-v$version"
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
           Write-Host "Version=$version"
           Write-Host "Tag=$tag"
 
+      - name: Validate PowerShell install scripts
+        run: |
+          $files = @(
+            "weather-widget-shim/scripts/install-weather-xoap-shim.ps1",
+            "weather-widget-shim/scripts/uninstall-weather-xoap-shim.ps1",
+            "weather-widget-shim/scripts/smoke-test-weather-xoap-shim.ps1",
+            "weather-widget-shim/tools/build-installer.ps1"
+          )
+          foreach ($file in $files) {
+            $raw = Get-Content -Raw -Path $file
+            [void][scriptblock]::Create($raw)
+            Write-Host "Parsed OK: $file"
+          }
+
+      - name: Verify shim site files exist
+        run: |
+          if (-not (Test-Path "weather-widget-shim/site/web.config")) { throw "Missing weather-widget-shim/site/web.config" }
+          if (-not (Test-Path "weather-widget-shim/site/App_Code/WeatherShimHandler.cs")) { throw "Missing WeatherShimHandler.cs" }
+
       - name: Install Inno Setup compiler
         run: choco install innosetup --no-progress -y
 
-      - name: Build installer
+      - name: Build Weather Widget shim installer
         run: |
           $publisherUrl = "https://github.com/${{ github.repository }}"
-          .\opos-browser-bridge\tools\build-installer.ps1 -Version "${{ steps.meta.outputs.version }}" -Publisher "FTD" -PublisherUrl $publisherUrl
+          .\weather-widget-shim\tools\build-installer.ps1 `
+            -Version "${{ steps.meta.outputs.version }}" `
+            -Publisher "FTD" `
+            -PublisherUrl $publisherUrl
 
       - name: Hash installer
         id: hash
         run: |
           $version = "${{ steps.meta.outputs.version }}"
-          $installer = Join-Path $PWD "opos-browser-bridge\dist\FTD.OposBridge.Setup.$version.exe"
+          $installer = Join-Path $PWD "weather-widget-shim\dist\FTD.WeatherXoapShim.Setup.$version.exe"
           if (-not (Test-Path $installer)) {
             throw "Installer not found: $installer"
           }
@@ -78,42 +100,43 @@ jobs:
           "hash=$hash" >> $env:GITHUB_OUTPUT
           "hash_file=$hashFile" >> $env:GITHUB_OUTPUT
 
-      - name: Generate winget manifests
-        id: manifests
+      - name: Prepare release notes
+        id: notes
         run: |
           $version = "${{ steps.meta.outputs.version }}"
-          $tag = "${{ steps.meta.outputs.tag }}"
-          $installerFile = "FTD.OposBridge.Setup.$version.exe"
-          $installerUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/$installerFile"
-          $outputRoot = Join-Path $PWD "opos-browser-bridge\artifacts\winget-manifests"
+          $installerFile = "FTD.WeatherXoapShim.Setup.$version.exe"
+          $hash = "${{ steps.hash.outputs.hash }}"
+          $notesPath = Join-Path $env:RUNNER_TEMP "weather-widget-shim-release-notes.md"
 
-          $manifestDir = .\opos-browser-bridge\tools\new-winget-manifests.ps1 `
-            -PackageVersion $version `
-            -InstallerUrl $installerUrl `
-            -InstallerSha256 "${{ steps.hash.outputs.hash }}" `
-            -OutputRoot $outputRoot
+          @"
+          Weather Widget Shim installer release.
 
-          $zipPath = Join-Path $PWD "opos-browser-bridge\artifacts\winget-manifests.$version.zip"
-          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
-          Compress-Archive -Path (Join-Path $outputRoot "*") -DestinationPath $zipPath
+          Included assets:
+          - $installerFile
+          - $installerFile.sha256.txt
 
-          "manifest_root=$outputRoot" >> $env:GITHUB_OUTPUT
-          "manifest_dir=$manifestDir" >> $env:GITHUB_OUTPUT
-          "manifest_zip=$zipPath" >> $env:GITHUB_OUTPUT
+          SHA256:
+          - $hash
+          "@ | Set-Content -Path $notesPath
+
+          "body_path=$notesPath" >> $env:GITHUB_OUTPUT
 
       - name: Create or update GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: OPOS Bridge ${{ steps.meta.outputs.version }}
+          name: Weather Widget Shim ${{ steps.meta.outputs.version }}
+          body_path: ${{ steps.notes.outputs.body_path }}
           make_latest: false
+          generate_release_notes: false
           files: |
             ${{ steps.hash.outputs.installer }}
             ${{ steps.hash.outputs.hash_file }}
-            ${{ steps.manifests.outputs.manifest_zip }}
 
-      - name: Upload winget manifests artifact
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: winget-manifests-${{ steps.meta.outputs.version }}
-          path: ${{ steps.manifests.outputs.manifest_root }}
+          name: weather-widget-shim-installer-${{ steps.meta.outputs.version }}
+          path: |
+            ${{ steps.hash.outputs.installer }}
+            ${{ steps.hash.outputs.hash_file }}

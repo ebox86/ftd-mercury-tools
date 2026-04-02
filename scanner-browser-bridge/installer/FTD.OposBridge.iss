@@ -10,6 +10,10 @@
   #define MyAppURL "https://github.com/example/ftd-mercury-tools"
 #endif
 
+#ifndef SetupIconPath
+  #define SetupIconPath "assets\opos-bridge.ico"
+#endif
+
 #define MyAppName "FTD OPOS Bridge"
 #define MyAppId "{{B3B056A6-93E0-4CDA-B97D-54FA36E2864E}}"
 
@@ -35,6 +39,7 @@ PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayName={#MyAppName}
 SetupLogging=yes
+SetupIconFile={#SetupIconPath}
 
 [Files]
 Source: "..\opos-scanner-bridge.ps1"; DestDir: "{app}"; Flags: ignoreversion

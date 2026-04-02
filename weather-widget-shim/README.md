@@ -1,4 +1,4 @@
-﻿# Weather XOAP Compatibility Shim
+# Weather Widget Shim (XOAP Compatibility)
 
 
 | Overview | Preview |
@@ -48,7 +48,7 @@ Response format is Weather.com-style XML with key nodes expected by the dashboar
 ## Install (Admin PowerShell)
 
 ```powershell
-cd .\weather-xoap-shim\scripts
+cd .\weather-widget-shim\scripts
 .\install-weather-xoap-shim.ps1
 ```
 
@@ -82,7 +82,7 @@ Default install behavior:
 ## Uninstall
 
 ```powershell
-cd .\weather-xoap-shim\scripts
+cd .\weather-widget-shim\scripts
 .\uninstall-weather-xoap-shim.ps1 -RemoveInstallRoot
 ```
 
@@ -101,7 +101,7 @@ For the dashboard to use local gadget code, confirm `DashboardWeatherGadgetURL` 
 Client rollout helper (example for server host `192.168.1.50`):
 
 ```powershell
-cd .\weather-xoap-shim\scripts
+cd .\weather-widget-shim\scripts
 .\set-mercury-weather-gadget-url.ps1 -HostName 192.168.1.50
 ```
 
@@ -124,8 +124,8 @@ Then the weather control's internal XOAP calls to `xoap.weather.com` will be ser
 
 This repo now includes a Windows `.exe` installer flow for the shim:
 
-- Workflow: `.github/workflows/weather-xoap-shim-release.yml`
-- Installer output: `weather-xoap-shim/dist/FTD.WeatherXoapShim.Setup.<version>.exe`
+- Workflow: `.github/workflows/weather-widget-shim-release.yml`
+- Installer output: `weather-widget-shim/dist/FTD.WeatherXoapShim.Setup.<version>.exe`
 
 Supported installer switches:
 
@@ -142,3 +142,4 @@ Supported installer switches:
 - Forecast API: `https://api.open-meteo.com/`
 
 No API key is required for current usage.
+

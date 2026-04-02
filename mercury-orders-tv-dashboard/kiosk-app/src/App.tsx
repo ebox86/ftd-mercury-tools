@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import {
   fetchEventsNow,
   fetchLifecycleByServiceMsg,
@@ -88,13 +88,41 @@ interface AskCandidateAttempt {
 }
 
 type AudioAlertKind = 'marketplace' | 'today';
+type AlertSoundPreset = 'alarm_pulse' | 'classic_ding' | 'bright_beep' | 'custom_upload';
+interface DashboardUserConfig {
+  pollMs: number;
+  flashMs: number;
+  askStaleHours: number;
+  marketplaceDings: number;
+  todayDings: number;
+  dingGapMs: number;
+  soundPreset: AlertSoundPreset;
+  customSoundDataUrl: string;
+  customLogoDataUrl: string;
+}
 
-const POLL_MS = 5000;
-const FLASH_MS = 120000;
-const ASK_STALE_MS = 12 * 60 * 60 * 1000;
+const DEFAULT_POLL_MS = 5000;
+const DEFAULT_FLASH_MS = 120000;
+const DEFAULT_ASK_STALE_HOURS = 12;
+const DEFAULT_MARKETPLACE_DINGS = 3;
+const DEFAULT_TODAY_DINGS = 1;
+const DEFAULT_DING_GAP_MS = 620;
 const DASHBOARD_MODE_STORAGE_KEY = 'kiosk_dashboard_mode';
 const AUDIO_ALERTS_STORAGE_KEY = 'kiosk_audio_alerts';
+const DASHBOARD_CONFIG_STORAGE_KEY = 'kiosk_dashboard_user_config_v1';
+const UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 const MARKETPLACE_REGEX = /\b(uber\s*eats|door\s*dash|doordash)\b/i;
+const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
+  pollMs: DEFAULT_POLL_MS,
+  flashMs: DEFAULT_FLASH_MS,
+  askStaleHours: DEFAULT_ASK_STALE_HOURS,
+  marketplaceDings: DEFAULT_MARKETPLACE_DINGS,
+  todayDings: DEFAULT_TODAY_DINGS,
+  dingGapMs: DEFAULT_DING_GAP_MS,
+  soundPreset: 'alarm_pulse',
+  customSoundDataUrl: '',
+  customLogoDataUrl: '',
+};
 const RECIPIENT_STOP_WORDS = new Set([
   'a',
   'an',
@@ -408,6 +436,62 @@ function initialAudioAlertsEnabled(): boolean {
   } catch {
     return false;
   }
+}
+
+function clampInteger(value: unknown, minimum: number, maximum: number, fallback: number): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  const rounded = Math.floor(numeric);
+  if (rounded < minimum) return minimum;
+  if (rounded > maximum) return maximum;
+  return rounded;
+}
+
+function normalizeSoundPreset(value: unknown): AlertSoundPreset {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'classic_ding') return 'classic_ding';
+  if (raw === 'bright_beep') return 'bright_beep';
+  if (raw === 'custom_upload') return 'custom_upload';
+  return 'alarm_pulse';
+}
+
+function sanitizeDashboardConfig(raw: Partial<DashboardUserConfig> | null | undefined): DashboardUserConfig {
+  return {
+    pollMs: clampInteger(raw?.pollMs, 1000, 60000, DEFAULT_DASHBOARD_CONFIG.pollMs),
+    flashMs: clampInteger(raw?.flashMs, 10000, 600000, DEFAULT_DASHBOARD_CONFIG.flashMs),
+    askStaleHours: clampInteger(raw?.askStaleHours, 1, 72, DEFAULT_DASHBOARD_CONFIG.askStaleHours),
+    marketplaceDings: clampInteger(raw?.marketplaceDings, 1, 9, DEFAULT_DASHBOARD_CONFIG.marketplaceDings),
+    todayDings: clampInteger(raw?.todayDings, 1, 9, DEFAULT_DASHBOARD_CONFIG.todayDings),
+    dingGapMs: clampInteger(raw?.dingGapMs, 250, 2500, DEFAULT_DASHBOARD_CONFIG.dingGapMs),
+    soundPreset: normalizeSoundPreset(raw?.soundPreset),
+    customSoundDataUrl: String(raw?.customSoundDataUrl || '').trim(),
+    customLogoDataUrl: String(raw?.customLogoDataUrl || '').trim(),
+  };
+}
+
+function initialDashboardConfig(): DashboardUserConfig {
+  if (typeof window === 'undefined') return DEFAULT_DASHBOARD_CONFIG;
+  try {
+    const saved = window.localStorage.getItem(DASHBOARD_CONFIG_STORAGE_KEY);
+    if (!saved) return DEFAULT_DASHBOARD_CONFIG;
+    const parsed = JSON.parse(saved) as Partial<DashboardUserConfig>;
+    return sanitizeDashboardConfig(parsed);
+  } catch {
+    return DEFAULT_DASHBOARD_CONFIG;
+  }
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => {
+      reject(new Error('Unable to read file.'));
+    };
+    reader.onload = () => {
+      resolve(String(reader.result || ''));
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function currentLocalDateKey(): string {
@@ -1311,6 +1395,10 @@ function buildPendingIntakeTickets(
   seenTicketIds: Set<string>,
   flashUntilById: Map<string, number>,
   allowStaleAskBadge = true,
+  options?: {
+    flashMs?: number;
+    askStaleMs?: number;
+  },
 ): IntakeTicketCard[] {
   interface LinkedOrderInfo {
     ticketId: string;
@@ -1410,6 +1498,13 @@ function buildPendingIntakeTickets(
   }
 
   const now = Date.now();
+  const flashMs = clampInteger(options?.flashMs, 10000, 600000, DEFAULT_FLASH_MS);
+  const askStaleMs = clampInteger(
+    options?.askStaleMs,
+    60 * 60 * 1000,
+    72 * 60 * 60 * 1000,
+    DEFAULT_ASK_STALE_HOURS * 60 * 60 * 1000,
+  );
   const firstObservation = seenTicketIds.size === 0;
   const pending: IntakeTicketCard[] = [];
   const outboundMessages = allMessages
@@ -1764,7 +1859,7 @@ function buildPendingIntakeTickets(
 
     if (!seenTicketIds.has(id)) {
       if (!firstObservation) {
-        flashUntilById.set(id, now + FLASH_MS);
+        flashUntilById.set(id, now + flashMs);
       }
       seenTicketIds.add(id);
     }
@@ -1809,7 +1904,7 @@ function buildPendingIntakeTickets(
     }
 
     const coarseAskDateEpoch = deliveryDateSortEpoch(msgDateRaw || deliveryDateRaw);
-    const staleByPreciseTime = effectiveAskHasTimePrecision && effectiveAskEpoch > 0 && (now - effectiveAskEpoch >= ASK_STALE_MS);
+    const staleByPreciseTime = effectiveAskHasTimePrecision && effectiveAskEpoch > 0 && (now - effectiveAskEpoch >= askStaleMs);
     const staleByCoarseDate = !effectiveAskHasTimePrecision && coarseAskDateEpoch > 0 && (now - coarseAskDateEpoch >= (2 * 24 * 60 * 60 * 1000));
     const isStaleAsk = allowStaleAskBadge && ask && !askAnswered && (staleByPreciseTime || staleByCoarseDate);
 
@@ -1893,10 +1988,16 @@ export default function App() {
   const [showDelivered, setShowDelivered] = useState(false);
   const [isAudioAlertsEnabled, setIsAudioAlertsEnabled] = useState<boolean>(() => initialAudioAlertsEnabled());
   const [isDashboardMode, setIsDashboardMode] = useState<boolean>(() => initialDashboardMode());
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [config, setConfig] = useState<DashboardUserConfig>(() => initialDashboardConfig());
+  const [configDraft, setConfigDraft] = useState<DashboardUserConfig | null>(null);
+  const [configMessage, setConfigMessage] = useState('');
   const seenTicketIdsRef = useRef<Set<string>>(new Set());
   const flashUntilRef = useRef<Map<string, number>>(new Map());
   const pendingListRef = useRef<HTMLDivElement | null>(null);
   const activeListRef = useRef<HTMLDivElement | null>(null);
+  const soundUploadRef = useRef<HTMLInputElement | null>(null);
+  const logoUploadRef = useRef<HTMLInputElement | null>(null);
   const unresolvedAskLogRef = useRef<Map<string, string>>(new Map());
   const activePaneSpinnerRequestedRef = useRef(true);
   const activePaneSpinnerInFlightRef = useRef(0);
@@ -1908,8 +2009,37 @@ export default function App() {
   const alertedItemKeysRef = useRef<Set<string>>(new Set());
   const alertPlaybackQueueRef = useRef<Promise<void>>(Promise.resolve());
   const askDebugEnabled = useMemo(() => isAskDebugEnabledFromBrowser(), []);
-  const playAlertSound = useCallback(async () => {
+  const editingConfig = useMemo(
+    () => sanitizeDashboardConfig(configDraft || config),
+    [config, configDraft],
+  );
+  const configForLogoPreview = useMemo(
+    () => (isConfigOpen ? editingConfig : config),
+    [config, editingConfig, isConfigOpen],
+  );
+  const customLogoSrc = useMemo(
+    () => (configForLogoPreview.customLogoDataUrl ? configForLogoPreview.customLogoDataUrl : '/olivers.png'),
+    [configForLogoPreview.customLogoDataUrl],
+  );
+  const askStaleMs = useMemo(
+    () => clampInteger(config.askStaleHours * 60 * 60 * 1000, 60 * 60 * 1000, 72 * 60 * 60 * 1000, DEFAULT_ASK_STALE_HOURS * 60 * 60 * 1000),
+    [config.askStaleHours],
+  );
+  const playAlertSound = useCallback(async (configOverride?: DashboardUserConfig) => {
     if (typeof window === 'undefined') return;
+    const soundConfig = sanitizeDashboardConfig(configOverride || config);
+
+    if (soundConfig.soundPreset === 'custom_upload' && soundConfig.customSoundDataUrl) {
+      try {
+        const audio = new Audio(soundConfig.customSoundDataUrl);
+        audio.preload = 'auto';
+        audio.volume = 1;
+        await audio.play();
+        return;
+      } catch {
+        // Fall back to synth profile below when browser blocks custom media playback.
+      }
+    }
 
     const windowWithWebkit = window as Window & { webkitAudioContext?: typeof AudioContext };
     const AudioContextCtor = globalThis.AudioContext || windowWithWebkit.webkitAudioContext;
@@ -1931,33 +2061,117 @@ export default function App() {
     if (audioContext.state !== 'running') return;
 
     const now = audioContext.currentTime;
-    const gainNode = audioContext.createGain();
-    gainNode.connect(audioContext.destination);
-    gainNode.gain.setValueAtTime(0.0001, now);
-    gainNode.gain.exponentialRampToValueAtTime(0.14, now + 0.02);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.46);
+    const preset = soundConfig.soundPreset === 'custom_upload' ? 'alarm_pulse' : soundConfig.soundPreset;
 
-    const firstTone = audioContext.createOscillator();
-    firstTone.type = 'triangle';
-    firstTone.frequency.setValueAtTime(880, now);
-    firstTone.connect(gainNode);
-    firstTone.start(now);
-    firstTone.stop(now + 0.12);
+    if (preset === 'classic_ding') {
+      const masterGain = audioContext.createGain();
+      masterGain.connect(audioContext.destination);
+      masterGain.gain.setValueAtTime(0.0001, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.34, now + 0.012);
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.72);
 
-    const secondTone = audioContext.createOscillator();
-    secondTone.type = 'triangle';
-    secondTone.frequency.setValueAtTime(1174.66, now + 0.13);
-    secondTone.connect(gainNode);
-    secondTone.start(now + 0.13);
-    secondTone.stop(now + 0.42);
+      const toneA = audioContext.createOscillator();
+      toneA.type = 'triangle';
+      toneA.frequency.setValueAtTime(988, now);
+      toneA.connect(masterGain);
+      toneA.start(now);
+      toneA.stop(now + 0.20);
+
+      const toneB = audioContext.createOscillator();
+      toneB.type = 'triangle';
+      toneB.frequency.setValueAtTime(1318.5, now + 0.14);
+      toneB.connect(masterGain);
+      toneB.start(now + 0.14);
+      toneB.stop(now + 0.56);
+
+      window.setTimeout(() => {
+        masterGain.disconnect();
+      }, 1000);
+      return;
+    }
+
+    if (preset === 'bright_beep') {
+      const masterGain = audioContext.createGain();
+      masterGain.connect(audioContext.destination);
+      masterGain.gain.setValueAtTime(0.0001, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.82, now + 0.006);
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.56);
+
+      const scheduleBeep = (startAt: number, stopAt: number, frequency: number): void => {
+        const beepGain = audioContext.createGain();
+        beepGain.connect(masterGain);
+        beepGain.gain.setValueAtTime(0.0001, startAt);
+        beepGain.gain.exponentialRampToValueAtTime(0.95, startAt + 0.004);
+        beepGain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
+
+        const beep = audioContext.createOscillator();
+        beep.type = 'square';
+        beep.frequency.setValueAtTime(frequency, startAt);
+        beep.connect(beepGain);
+        beep.start(startAt);
+        beep.stop(stopAt);
+      };
+
+      scheduleBeep(now, now + 0.12, 1760);
+      scheduleBeep(now + 0.15, now + 0.29, 1568);
+      scheduleBeep(now + 0.32, now + 0.46, 1760);
+
+      window.setTimeout(() => {
+        masterGain.disconnect();
+      }, 900);
+      return;
+    }
+
+    const masterGain = audioContext.createGain();
+    const compressor = audioContext.createDynamicsCompressor();
+    compressor.threshold.setValueAtTime(-26, now);
+    compressor.knee.setValueAtTime(20, now);
+    compressor.ratio.setValueAtTime(12, now);
+    compressor.attack.setValueAtTime(0.003, now);
+    compressor.release.setValueAtTime(0.22, now);
+
+    masterGain.connect(compressor);
+    compressor.connect(audioContext.destination);
+    masterGain.gain.setValueAtTime(0.0001, now);
+    masterGain.gain.exponentialRampToValueAtTime(0.75, now + 0.012);
+    masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.82);
+
+    const schedulePulse = (startAt: number, stopAt: number, freqA: number, freqB: number): void => {
+      const pulseGain = audioContext.createGain();
+      pulseGain.connect(masterGain);
+      pulseGain.gain.setValueAtTime(0.0001, startAt);
+      pulseGain.gain.exponentialRampToValueAtTime(0.95, startAt + 0.006);
+      pulseGain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
+
+      const toneA = audioContext.createOscillator();
+      toneA.type = 'square';
+      toneA.frequency.setValueAtTime(freqA, startAt);
+      toneA.connect(pulseGain);
+      toneA.start(startAt);
+      toneA.stop(stopAt);
+
+      const toneB = audioContext.createOscillator();
+      toneB.type = 'square';
+      toneB.frequency.setValueAtTime(freqB, startAt);
+      toneB.connect(pulseGain);
+      toneB.start(startAt);
+      toneB.stop(stopAt);
+    };
+
+    schedulePulse(now, now + 0.15, 980, 1470);
+    schedulePulse(now + 0.20, now + 0.37, 830, 1245);
+    schedulePulse(now + 0.43, now + 0.60, 980, 1470);
 
     window.setTimeout(() => {
-      gainNode.disconnect();
-    }, 700);
-  }, []);
-  const queueAlertDings = useCallback((count: number) => {
+      masterGain.disconnect();
+      compressor.disconnect();
+    }, 1200);
+  }, [config]);
+  const queueAlertDings = useCallback((count: number, options?: { configOverride?: DashboardUserConfig }) => {
     const dingCount = Math.max(0, Math.min(12, Math.floor(Number(count) || 0)));
     if (dingCount <= 0) return;
+    const audioConfig = sanitizeDashboardConfig(options?.configOverride || config);
+    const dingGapMs = clampInteger(audioConfig.dingGapMs, 250, 2500, DEFAULT_DING_GAP_MS);
 
     alertPlaybackQueueRef.current = alertPlaybackQueueRef.current
       .catch(() => {
@@ -1965,13 +2179,118 @@ export default function App() {
       })
       .then(async () => {
         for (let i = 0; i < dingCount; i += 1) {
-          await playAlertSound();
+          await playAlertSound(audioConfig);
           if (i < dingCount - 1) {
-            await sleep(430);
+            await sleep(dingGapMs);
           }
         }
       });
-  }, [playAlertSound]);
+  }, [config, playAlertSound]);
+  const openConfigPage = useCallback(() => {
+    setConfigDraft(sanitizeDashboardConfig(config));
+    setConfigMessage('');
+    setIsConfigOpen(true);
+  }, [config]);
+  const cancelConfigChanges = useCallback(() => {
+    setConfigDraft(null);
+    setConfigMessage('');
+    setIsConfigOpen(false);
+    if (soundUploadRef.current) soundUploadRef.current.value = '';
+    if (logoUploadRef.current) logoUploadRef.current.value = '';
+  }, []);
+  const saveConfigChanges = useCallback(() => {
+    const nextConfig = sanitizeDashboardConfig(configDraft || config);
+    setConfig(nextConfig);
+    setConfigDraft(null);
+    setConfigMessage('');
+    setIsConfigOpen(false);
+    if (soundUploadRef.current) soundUploadRef.current.value = '';
+    if (logoUploadRef.current) logoUploadRef.current.value = '';
+  }, [config, configDraft]);
+  const updateConfigNumber = useCallback((key: keyof DashboardUserConfig, valueRaw: string) => {
+    const value = Number(valueRaw);
+    setConfigDraft(previous => {
+      const base = sanitizeDashboardConfig(previous || config);
+      return sanitizeDashboardConfig({ ...base, [key]: Number.isFinite(value) ? value : base[key] });
+    });
+  }, [config]);
+  const resetConfigDefaults = useCallback(() => {
+    setConfigDraft(DEFAULT_DASHBOARD_CONFIG);
+    setConfigMessage('Config reset to defaults.');
+    if (soundUploadRef.current) soundUploadRef.current.value = '';
+    if (logoUploadRef.current) logoUploadRef.current.value = '';
+  }, []);
+  const handleCustomSoundUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!String(file.type || '').toLowerCase().startsWith('audio/')) {
+      setConfigMessage('Please upload an audio file (wav, mp3, ogg, etc).');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > UPLOAD_MAX_BYTES) {
+      setConfigMessage('Audio file is too large. Keep it under 4 MB.');
+      event.target.value = '';
+      return;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const nextConfig = sanitizeDashboardConfig({
+        ...(configDraft || config),
+        soundPreset: 'custom_upload',
+        customSoundDataUrl: dataUrl,
+      });
+      setConfigDraft(nextConfig);
+      setConfigMessage(`Custom sound loaded: ${file.name}`);
+      queueAlertDings(1, { configOverride: nextConfig });
+    } catch {
+      setConfigMessage('Failed to load custom sound file.');
+    }
+  }, [config, configDraft, queueAlertDings]);
+  const clearCustomSound = useCallback(() => {
+    setConfigDraft(previous => {
+      const base = sanitizeDashboardConfig(previous || config);
+      return sanitizeDashboardConfig({
+      ...base,
+      customSoundDataUrl: '',
+      soundPreset: base.soundPreset === 'custom_upload' ? 'alarm_pulse' : base.soundPreset,
+    });
+    });
+    setConfigMessage('Custom sound cleared.');
+    if (soundUploadRef.current) soundUploadRef.current.value = '';
+  }, [config]);
+  const handleLogoUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!String(file.type || '').toLowerCase().startsWith('image/')) {
+      setConfigMessage('Please upload an image file for your shop logo.');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > UPLOAD_MAX_BYTES) {
+      setConfigMessage('Logo image is too large. Keep it under 4 MB.');
+      event.target.value = '';
+      return;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setConfigDraft(previous => sanitizeDashboardConfig({
+        ...(previous || config),
+        customLogoDataUrl: dataUrl,
+      }));
+      setConfigMessage(`Logo updated: ${file.name}`);
+    } catch {
+      setConfigMessage('Failed to load logo image.');
+    }
+  }, [config]);
+  const clearCustomLogo = useCallback(() => {
+    setConfigDraft(previous => sanitizeDashboardConfig({
+      ...(previous || config),
+      customLogoDataUrl: '',
+    }));
+    setConfigMessage('Logo reset to default.');
+    if (logoUploadRef.current) logoUploadRef.current.value = '';
+  }, [config]);
   const requestActiveOrdersRefreshSpinner = useCallback(() => {
     activePaneSpinnerRequestedRef.current = true;
     setIsRefreshingActiveOrders(true);
@@ -3121,6 +3440,10 @@ export default function App() {
         seenTicketIdsRef.current,
         flashUntilRef.current,
         hasMessageThreadCoverage,
+        {
+          flashMs: config.flashMs,
+          askStaleMs,
+        },
       );
 
       const unresolvedAsks = pending.filter(ticket => ticket.kind === 'ask' && !ticket.relatedOrderNumber && ticket.askDebugSummary);
@@ -3177,7 +3500,9 @@ export default function App() {
         audioAlertSnapshotReadyRef.current = true;
       } else {
         const newAlertCounts = countNewAudioAlertsByKind(alertedItemKeysRef.current, nextAudioAlertKinds);
-        const dingCount = (newAlertCounts.marketplaceCount * 3) + newAlertCounts.todayCount;
+        const marketplaceDings = clampInteger(config.marketplaceDings, 1, 9, DEFAULT_MARKETPLACE_DINGS);
+        const todayDings = clampInteger(config.todayDings, 1, 9, DEFAULT_TODAY_DINGS);
+        const dingCount = (newAlertCounts.marketplaceCount * marketplaceDings) + (newAlertCounts.todayCount * todayDings);
         alertedItemKeysRef.current = nextAudioAlertKeys;
         if (dingCount > 0 && audioAlertsEnabledRef.current) {
           queueAlertDings(dingCount);
@@ -3199,7 +3524,7 @@ export default function App() {
       }
       setLoading(false);
     }
-  }, [queueAlertDings, sourceDeliveryDateKeys, sourceRangeWindows]);
+  }, [askStaleMs, config.flashMs, config.marketplaceDings, config.todayDings, queueAlertDings, sourceDeliveryDateKeys, sourceRangeWindows]);
 
   const runPoll = useCallback(async () => {
     if (pollInFlightRef.current) {
@@ -3219,12 +3544,13 @@ export default function App() {
   }, [pollBoard]);
 
   useEffect(() => {
+    const pollMs = clampInteger(config.pollMs, 1000, 60000, DEFAULT_POLL_MS);
     void runPoll();
     const timer = window.setInterval(() => {
       void runPoll();
-    }, POLL_MS);
+    }, pollMs);
     return () => window.clearInterval(timer);
-  }, [runPoll]);
+  }, [config.pollMs, runPoll]);
 
   useEffect(() => {
     audioAlertsEnabledRef.current = isAudioAlertsEnabled;
@@ -3238,6 +3564,23 @@ export default function App() {
       // localStorage unavailable (private mode, policy, etc)
     }
   }, [isAudioAlertsEnabled]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(DASHBOARD_CONFIG_STORAGE_KEY, JSON.stringify(sanitizeDashboardConfig(config)));
+    } catch {
+      // localStorage unavailable (private mode, policy, etc)
+    }
+  }, [config]);
+
+  useEffect(() => {
+    if (!configMessage) return;
+    const timer = window.setTimeout(() => {
+      setConfigMessage('');
+    }, 3500);
+    return () => window.clearTimeout(timer);
+  }, [configMessage]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -3379,85 +3722,272 @@ export default function App() {
     <div className={`app${isDashboardMode ? ' app--dashboard' : ''}`} ref={appRef}>
       <header className="app__header">
         <div className="app__title">
-          <img className="app__logo" src="/olivers.png" alt="Oliver Flowers logo" />
+          <div className="app__logo-wrap">
+            <img className="app__logo" src={customLogoSrc} alt="Shop logo" />
+          </div>
           <div className="app__title-text">
             <h1>Oliver Flowers Order Flow Board</h1>
-            <div className="app__today-wrap">
-              <button
-                type="button"
-                className="app__date-nav"
-                onClick={() => {
-                  requestActiveOrdersRefreshSpinner();
-                  setDateOffsetDays(previous => previous - 1);
-                }}
-                aria-label="Previous day"
-              >
-                &#8592;
-              </button>
-              <div className="app__today">{todayLabel}</div>
-              <button
-                type="button"
-                className="app__date-nav"
-                onClick={() => {
-                  requestActiveOrdersRefreshSpinner();
-                  setDateOffsetDays(previous => previous + 1);
-                }}
-                aria-label="Next day"
-              >
-                &#8594;
-              </button>
-            </div>
+            {isConfigOpen ? (
+              <div className="app__today-wrap app__today-wrap--config">
+                <div className="app__today app__today--config">Configuration Mode</div>
+              </div>
+            ) : (
+              <div className="app__today-wrap">
+                <button
+                  type="button"
+                  className="app__date-nav"
+                  onClick={() => {
+                    requestActiveOrdersRefreshSpinner();
+                    setDateOffsetDays(previous => previous - 1);
+                  }}
+                  aria-label="Previous day"
+                >
+                  &#8592;
+                </button>
+                <div className="app__today">{todayLabel}</div>
+                <button
+                  type="button"
+                  className="app__date-nav"
+                  onClick={() => {
+                    requestActiveOrdersRefreshSpinner();
+                    setDateOffsetDays(previous => previous + 1);
+                  }}
+                  aria-label="Next day"
+                >
+                  &#8594;
+                </button>
+              </div>
+            )}
           </div>
         </div>
         <div className="app__controls">
-          <label className="app__control-check">
-            <input
-              type="checkbox"
-              checked={includeNextDay}
-              onChange={(event) => {
-                setIncludeNextDay(event.target.checked);
-              }}
-            />
-            <span>Include next day</span>
-          </label>
-          <label className="app__control-check">
-            <input
-              type="checkbox"
-              checked={showDelivered}
-              onChange={(event) => {
-                requestActiveOrdersRefreshSpinner();
-                setShowDelivered(event.target.checked);
-              }}
-            />
-            <span>Show delivered</span>
-          </label>
-          <label className="app__control-check">
-            <input
-              type="checkbox"
-              checked={isAudioAlertsEnabled}
-              onChange={(event) => {
-                const nextEnabled = event.target.checked;
-                setIsAudioAlertsEnabled(nextEnabled);
-                if (nextEnabled) {
-                  void playAlertSound();
-                }
-              }}
-            />
-            <span>Audio alerts</span>
-          </label>
-          <button
-            type="button"
-            className={`app__control-btn${isAutoScrollEnabled ? '' : ' app__control-btn--off'}`}
-            onClick={() => setIsAutoScrollEnabled(previous => !previous)}
-          >
-            Auto-scroll: {isAutoScrollEnabled ? 'On' : 'Off'}
-          </button>
-          <button type="button" className="app__control-btn app__control-btn--primary" onClick={() => void toggleDashboardMode()}>
-            {isDashboardMode ? 'Exit Dashboard' : 'Dashboard Mode'}
-          </button>
+          {isConfigOpen ? (
+            <>
+              <button type="button" className="app__control-btn" onClick={cancelConfigChanges}>
+                Cancel
+              </button>
+              <button type="button" className="app__control-btn app__control-btn--primary" onClick={saveConfigChanges}>
+                Save Config
+              </button>
+            </>
+          ) : (
+            <>
+              <label className="app__control-check">
+                <input
+                  type="checkbox"
+                  checked={includeNextDay}
+                  onChange={(event) => {
+                    setIncludeNextDay(event.target.checked);
+                  }}
+                />
+                <span>Include next day</span>
+              </label>
+              <label className="app__control-check">
+                <input
+                  type="checkbox"
+                  checked={showDelivered}
+                  onChange={(event) => {
+                    requestActiveOrdersRefreshSpinner();
+                    setShowDelivered(event.target.checked);
+                  }}
+                />
+                <span>Show delivered</span>
+              </label>
+              <label className="app__control-check">
+                <input
+                  type="checkbox"
+                  checked={isAudioAlertsEnabled}
+                  onChange={(event) => {
+                    const nextEnabled = event.target.checked;
+                    setIsAudioAlertsEnabled(nextEnabled);
+                    if (nextEnabled) {
+                      void playAlertSound();
+                    }
+                  }}
+                />
+                <span>Audio alerts</span>
+              </label>
+              <button
+                type="button"
+                className={`app__control-btn${isAutoScrollEnabled ? '' : ' app__control-btn--off'}`}
+                onClick={() => setIsAutoScrollEnabled(previous => !previous)}
+              >
+                Auto-scroll: {isAutoScrollEnabled ? 'On' : 'Off'}
+              </button>
+              <button type="button" className="app__control-btn app__control-btn--primary" onClick={() => void toggleDashboardMode()}>
+                {isDashboardMode ? 'Exit Dashboard' : 'Dashboard Mode'}
+              </button>
+            </>
+          )}
         </div>
       </header>
 
+      {isConfigOpen ? (
+        <section className="app__config-page">
+          <div className="app__config-header">
+            <div>
+              <div className="app__config-title">Dashboard Configuration</div>
+              <div className="app__config-subtitle">Tune audio alerts, timing, and branding for this station.</div>
+            </div>
+            <div className="app__config-actions app__config-actions--header">
+              <button type="button" className="app__control-btn" onClick={cancelConfigChanges}>
+                Cancel
+              </button>
+              <button type="button" className="app__control-btn app__control-btn--primary" onClick={saveConfigChanges}>
+                Save Config
+              </button>
+            </div>
+          </div>
+          {configMessage ? <div className="app__config-message">{configMessage}</div> : null}
+
+          <section className="app__config-section">
+            <h2 className="app__config-section-title">Audio Alert Settings</h2>
+            <div className="app__config-grid">
+              <label className="app__config-row">
+                <span>Marketplace dings</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={9}
+                  value={editingConfig.marketplaceDings}
+                  onChange={(event) => updateConfigNumber('marketplaceDings', event.target.value)}
+                />
+              </label>
+              <label className="app__config-row">
+                <span>Today-order dings</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={9}
+                  value={editingConfig.todayDings}
+                  onChange={(event) => updateConfigNumber('todayDings', event.target.value)}
+                />
+              </label>
+              <label className="app__config-row">
+                <span>Ding gap (ms)</span>
+                <input
+                  type="number"
+                  min={250}
+                  max={2500}
+                  value={editingConfig.dingGapMs}
+                  onChange={(event) => updateConfigNumber('dingGapMs', event.target.value)}
+                />
+              </label>
+              <label className="app__config-row app__config-row--full">
+                <span>Alarm sound preset</span>
+                <select
+                  value={editingConfig.soundPreset}
+                  onChange={(event) => {
+                    const nextPreset = normalizeSoundPreset(event.target.value);
+                    setConfigDraft(previous => sanitizeDashboardConfig({
+                      ...(previous || config),
+                      soundPreset: nextPreset,
+                    }));
+                  }}
+                >
+                  <option value="alarm_pulse">Alarm Pulse (default)</option>
+                  <option value="classic_ding">Classic Ding</option>
+                  <option value="bright_beep">Bright Beep</option>
+                  <option value="custom_upload">Custom Uploaded Sound</option>
+                </select>
+              </label>
+              <div className="app__config-row app__config-row--full">
+                <span>Custom alarm file</span>
+                <div className="app__config-inline-actions">
+                  <input
+                    ref={soundUploadRef}
+                    type="file"
+                    accept="audio/*"
+                    onChange={(event) => {
+                      void handleCustomSoundUpload(event);
+                    }}
+                  />
+                  <button type="button" className="app__control-btn" onClick={clearCustomSound}>
+                    Clear sound
+                  </button>
+                  <button
+                    type="button"
+                    className="app__control-btn"
+                    onClick={() => queueAlertDings(1, { configOverride: editingConfig })}
+                  >
+                    Test sound
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="app__config-section">
+            <h2 className="app__config-section-title">Feed and Timing</h2>
+            <div className="app__config-grid">
+              <label className="app__config-row">
+                <span>Poll interval (ms)</span>
+                <input
+                  type="number"
+                  min={1000}
+                  max={60000}
+                  value={editingConfig.pollMs}
+                  onChange={(event) => updateConfigNumber('pollMs', event.target.value)}
+                />
+              </label>
+              <label className="app__config-row">
+                <span>Flash duration (ms)</span>
+                <input
+                  type="number"
+                  min={10000}
+                  max={600000}
+                  value={editingConfig.flashMs}
+                  onChange={(event) => updateConfigNumber('flashMs', event.target.value)}
+                />
+              </label>
+              <label className="app__config-row">
+                <span>ASK stale threshold (hours)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={72}
+                  value={editingConfig.askStaleHours}
+                  onChange={(event) => updateConfigNumber('askStaleHours', event.target.value)}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="app__config-section">
+            <h2 className="app__config-section-title">Branding</h2>
+            <div className="app__config-grid">
+              <div className="app__config-row app__config-row--full">
+                <span>Shop logo image</span>
+                <div className="app__config-inline-actions">
+                  <input
+                    ref={logoUploadRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => {
+                      void handleLogoUpload(event);
+                    }}
+                  />
+                  <button type="button" className="app__control-btn" onClick={clearCustomLogo}>
+                    Reset logo
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div className="app__config-actions">
+            <button type="button" className="app__control-btn" onClick={resetConfigDefaults}>
+              Reset defaults
+            </button>
+            <button type="button" className="app__control-btn app__control-btn--primary" onClick={saveConfigChanges}>
+              Save Config
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {!isConfigOpen ? (
+        <>
       {error ? <div className="app__error">Feed error: {error}</div> : null}
       {loading ? <div className="app__loading">Loading board...</div> : null}
 
@@ -3468,6 +3998,14 @@ export default function App() {
               Page 1/1: Alerts + Active Orders
             </div>
             <div className="app__rotation-chip app__rotation-chip--subtle">API: {WORKFLOW_BASE_URL}</div>
+            <button
+              type="button"
+              className="app__control-btn"
+              onClick={openConfigPage}
+              title="Open dashboard configuration"
+            >
+              <span aria-hidden="true">&#9881;</span> Config
+            </button>
           </div>
           <div className="app__rotation-meta app__meta">
             <span>Total Orders: {totalOrderCount}</span>
@@ -3590,6 +4128,8 @@ export default function App() {
             </section>
           </div>
       </main>
+        </>
+      ) : null}
     </div>
   );
 }

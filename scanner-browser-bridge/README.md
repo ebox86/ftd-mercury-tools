@@ -142,7 +142,7 @@ This folder now includes installer packaging for private winget distribution:
 - `uninstall-opos-bridge-task.ps1` (cleanup called during uninstall)
 - `tools\build-installer.ps1` (local/CI build helper)
 - `tools\new-winget-manifests.ps1` (manifest generator)
-- `.github\workflows\opos-bridge-release.yml` (build + release artifacts)
+- `.github\workflows\scanner-browser-bridge-release.yml` (build + release artifacts)
 
 ### Unified Service + Agent Installer
 
@@ -152,17 +152,17 @@ A separate installer now packages the `.NET` service runtime plus optional user-
 - `installer\scripts\install-opos-bridge-unified.ps1`
 - `installer\scripts\uninstall-opos-bridge-unified.ps1`
 - `tools\build-unified-installer.ps1`
-- `.github\workflows\opos-bridge-unified-release.yml`
+- `.github\workflows\scanner-browser-bridge-unified-release.yml`
 
 Build locally:
 
 ```powershell
-cd .\opos-browser-bridge
+cd .\scanner-browser-bridge
 .\tools\build-unified-installer.ps1 -Version "1.0.0" -Publisher "FTD" -PublisherUrl "https://github.com/<org>/ftd-mercury-tools"
 ```
 
 Installer output:
-- `opos-browser-bridge\dist\FTD.OposBridge.Unified.Setup.1.0.0.exe`
+- `scanner-browser-bridge\dist\FTD.OposBridge.Unified.Setup.1.0.0.exe`
 
 Silent install example (service + agent relay task enabled by default):
 
@@ -191,12 +191,12 @@ Useful unified installer switches:
 ### Local Build
 
 ```powershell
-cd .\opos-browser-bridge
+cd .\scanner-browser-bridge
 .\tools\build-installer.ps1 -Version "1.0.0" -Publisher "FTD" -PublisherUrl "https://github.com/<org>/ftd-mercury-tools"
 ```
 
 Installer output:
-- `opos-browser-bridge\dist\FTD.OposBridge.Setup.1.0.0.exe`
+- `scanner-browser-bridge\dist\FTD.OposBridge.Setup.1.0.0.exe`
 
 ### Silent Install / Uninstall
 
@@ -215,10 +215,10 @@ winget uninstall --id FTD.OposBridge -s ftd-mercury-tools -e
 ### GitHub Workflow
 
 Workflow file:
-- `.github\workflows\opos-bridge-release.yml`
+- `.github\workflows\scanner-browser-bridge-release.yml`
 
 What it does:
-1. Builds versioned installer on tag `opos-bridge-v*` (or manual dispatch)
+1. Builds versioned installer on tag `scanner-browser-bridge-v*` (or manual dispatch)
 2. Computes SHA256
 3. Generates winget manifests
 4. Creates/updates a GitHub release with installer and manifest zip
@@ -229,7 +229,7 @@ No extra secrets or repo variables are required for this workflow.
 
 A .NET service prototype now exists under:
 
-- `opos-browser-bridge\service\FTD.OposBridge.Service\`
+- `scanner-browser-bridge\service\FTD.OposBridge.Service\`
 
 It includes:
 
@@ -240,6 +240,7 @@ It includes:
 
 See:
 
-- `opos-browser-bridge\service\README.md`
-- `opos-browser-bridge\service\install-opos-bridge-service.ps1`
-- `.github\workflows\opos-bridge-service.yml`
+- `scanner-browser-bridge\service\README.md`
+- `scanner-browser-bridge\service\install-opos-bridge-service.ps1`
+- `.github\workflows\scanner-browser-bridge-service.yml`
+

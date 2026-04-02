@@ -14,6 +14,10 @@
   #define StageDir "..\artifacts\installer-unified\stage"
 #endif
 
+#ifndef SetupIconPath
+  #define SetupIconPath "assets\opos-bridge.ico"
+#endif
+
 #define MyAppName "FTD OPOS Bridge (Service + Agent)"
 #define MyAppId "{{6D2CC7D2-D3E8-4FB6-A51C-BC4B3CC5A6F2}}"
 
@@ -39,6 +43,7 @@ PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayName={#MyAppName}
 SetupLogging=yes
+SetupIconFile={#SetupIconPath}
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion

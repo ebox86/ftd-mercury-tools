@@ -14,6 +14,10 @@
   #define StageDir "..\artifacts\installer\stage"
 #endif
 
+#ifndef SetupIconPath
+  #define SetupIconPath "assets\weather-widget-shim.ico"
+#endif
+
 #define MyAppName "FTD Weather XOAP Shim"
 #define MyAppId "{{12A4A152-BEA2-4E9D-8D89-D7F3D6B58D4A}}"
 
@@ -39,6 +43,7 @@ PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayName={#MyAppName}
 SetupLogging=yes
+SetupIconFile={#SetupIconPath}
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion

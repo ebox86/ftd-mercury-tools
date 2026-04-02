@@ -9,51 +9,76 @@
   </tr>
 </table>
 
-Utilities and userscripts for improving workflows in FTD's Mercury client and MercuryHQ webApp.
+Utilities, services, and userscripts for improving workflows in FTD Mercury and MercuryHQ.
 
-## Available Plugins
+## Latest Updates
 
-1. **MercuryHQ - Single Request Barcode**
-   - Path: `mercury-hq-delivery-barcode-lookup/mercury-hq-single-request-barcode.js`
+1. **Root cleanup + SOAP reference organization**
+   - XML/WSDL reference files are now grouped under:
+     - `mercury-orders-tv-dashboard/reference/soap/`
+2. **Renamed service folders**
+   - `weather-widget-shim/` (formerly weather shim naming variants)
+   - `scanner-browser-bridge/` (renamed from OPOS-focused folder naming)
+3. **Dashboard audio alerts + config UX**
+   - Toggleable audio alerts on the TV dashboard
+   - Default alert cadence:
+     - DoorDash/UberEats events: `3` dings
+     - New order for today: `1` ding
+   - Config page supports:
+     - Save/Cancel workflow
+     - Grouped **Audio Alert Settings** (ding counts + gap + sound selection/upload)
+     - Debug/test sound trigger
+     - Shop logo upload with a wider/taller logo display area
+4. **Installer branding**
+   - Installer icons are now included for:
+     - `weather-widget-shim/installer/assets/weather-widget-shim.ico`
+     - `mercury-orders-tv-dashboard/installer/assets/mercury-dashboard.ico`
+     - `scanner-browser-bridge/installer/assets/opos-bridge.ico`
+
+## Components
+
+1. **MercuryHQ Single Request Barcode (userscript)**
+   - Path: `mercury-hq-delivery-barcode-lookup/`
    - Type: Tampermonkey userscript
-   - Purpose: Adds Order ID/barcode lookup + autofill with split workflow tabs:
-     `Single Request - Manual` and `Single Request - Autocomplete`.
-
-## Available Extensions
-
-1. **Tampermonkey** (required to run userscripts)
-
-## Available Services
-
-1. **Weather XOAP Compatibility Shim**
-   - Path: `weather-xoap-shim/`
+   - README: `mercury-hq-delivery-barcode-lookup/README.md`
+2. **Scanner Browser Bridge**
+   - Path: `scanner-browser-bridge/`
+   - Type: Local OPOS-to-browser bridge service + installers
+   - README: `scanner-browser-bridge/README.md`
+3. **Weather Widget Shim (XOAP compatibility)**
+   - Path: `weather-widget-shim/`
    - Type: IIS-hosted ASP.NET compatibility layer
-   - Purpose: Emulates legacy `xoap.weather.com` XML endpoints for Mercury dashboard weather gadget on localhost.
-2. **Pi Kiosk Dashboard Starter**
+   - README: `weather-widget-shim/README.md`
+4. **Mercury Orders TV Dashboard**
    - Path: `mercury-orders-tv-dashboard/`
-   - Type: Reference + local Node workflow bridge + React kiosk app
-   - Purpose: Live Mercury workflow dashboard for ticket, design, and delivery status visibility.
+   - Type: Live workflow bridge + React kiosk dashboard + Windows installer flow
+   - README: `mercury-orders-tv-dashboard/README.md`
+
+## Quick Start (Dashboard Live Mode)
+
+```powershell
+cd .\mercury-orders-tv-dashboard
+$env:MERCURY_BASE_URL='http://localhost/WsMercuryWebAPI'
+.\start-live-mvp.ps1
+```
+
+Then open `http://127.0.0.1:5173`.
 
 ## Requirements
 
-1. **Tampermonkey** browser extension (Chrome/Edge/Firefox).
-2. Access to **MercuryHQ** and permission to use the Single Request page.
-3. Network access to your Mercury API host (for example, LAN IP/hostname configured in script `CONFIG`).
-4. Optional: USB/Bluetooth barcode scanner configured as keyboard input.
+1. **Tampermonkey** browser extension (for userscripts).
+2. Access to **MercuryHQ** and/or Mercury SOAP/API hosts.
+3. Network access to your Mercury environment.
+4. Optional: OPOS scanner hardware and device profile.
 
 ## Repository Structure
 
-- `README.md` - root project documentation
-- `mercury-hq-delivery-barcode-lookup/` - barcode lookup userscript and tool-specific docs
-- `weather-xoap-shim/` - local XOAP weather compatibility shim + install scripts
-- `mercury-orders-tv-dashboard/` - Mercury workflow API snapshots, live workflow bridge, and kiosk dashboard UI
-- `public/` - shared static assets (if needed later)
-
-## Quick Start
-
-1. Install the Tampermonkey extension in your browser.
-2. Open the tool-specific README for install/config details:
-   - `mercury-hq-delivery-barcode-lookup/README.md`
+- `README.md` - root documentation
+- `public/` - shared assets/screenshots
+- `mercury-hq-delivery-barcode-lookup/` - userscript tooling
+- `scanner-browser-bridge/` - OPOS bridge service + installers
+- `weather-widget-shim/` - weather compatibility shim + installers
+- `mercury-orders-tv-dashboard/` - TV dashboard, workflow bridge, installers, SOAP references
 
 ## Legal Disclaimer
 

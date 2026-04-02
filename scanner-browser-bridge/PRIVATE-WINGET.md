@@ -5,8 +5,8 @@ This package is designed for private/internal rollout.
 ## 1. Build + Release
 
 Trigger GitHub Actions workflow:
-- `.github/workflows/opos-bridge-release.yml`
-- Tag format: `opos-bridge-v1.0.0`
+- `.github/workflows/scanner-browser-bridge-release.yml`
+- Tag format: `scanner-browser-bridge-v1.0.0`
 - Or run manually with workflow input `version`
 
 Release artifacts include:
@@ -60,3 +60,4 @@ winget uninstall --id FTD.OposBridge -s ftd-mercury-tools -e
 
 - If your GitHub repo/releases are private, client machines usually cannot download installer assets anonymously.
 - For private rollout, prefer an internal HTTPS host or another authenticated distribution path supported by your private source setup.
+

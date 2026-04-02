@@ -1,4 +1,4 @@
-name: Weather XOAP Shim Release
+name: Scanner Browser Bridge Unified Release
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         type: string
   push:
     tags:
-      - "weather-xoap-shim-v*"
+      - "scanner-browser-bridge-unified-v*"
 
 permissions:
   contents: write
@@ -36,7 +36,7 @@ jobs:
             $version = "${{ inputs.version }}"
           } else {
             $refName = "${{ github.ref_name }}"
-            $prefix = "weather-xoap-shim-v"
+            $prefix = "scanner-browser-bridge-unified-v"
             if (-not $refName.StartsWith($prefix)) {
               throw "Tag must use prefix '$prefix'. Got: $refName"
             }
@@ -47,19 +47,26 @@ jobs:
             throw "Invalid version format: $version"
           }
 
-          $tag = "weather-xoap-shim-v$version"
+          $tag = "scanner-browser-bridge-unified-v$version"
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
           Write-Host "Version=$version"
           Write-Host "Tag=$tag"
 
-      - name: Validate PowerShell install scripts
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Validate PowerShell scripts
         run: |
           $files = @(
-            "weather-xoap-shim/scripts/install-weather-xoap-shim.ps1",
-            "weather-xoap-shim/scripts/uninstall-weather-xoap-shim.ps1",
-            "weather-xoap-shim/scripts/smoke-test-weather-xoap-shim.ps1",
-            "weather-xoap-shim/tools/build-installer.ps1"
+            "scanner-browser-bridge/tools/build-unified-installer.ps1",
+            "scanner-browser-bridge/installer/scripts/install-opos-bridge-unified.ps1",
+            "scanner-browser-bridge/installer/scripts/uninstall-opos-bridge-unified.ps1",
+            "scanner-browser-bridge/service/install-opos-bridge-service.ps1",
+            "scanner-browser-bridge/service/install-opos-bridge-task.ps1",
+            "scanner-browser-bridge/service/migrate-script-bridge-to-service.ps1"
           )
           foreach ($file in $files) {
             $raw = Get-Content -Raw -Path $file
@@ -67,18 +74,18 @@ jobs:
             Write-Host "Parsed OK: $file"
           }
 
-      - name: Verify shim site files exist
+      - name: Verify installer and project files exist
         run: |
-          if (-not (Test-Path "weather-xoap-shim/site/web.config")) { throw "Missing weather-xoap-shim/site/web.config" }
-          if (-not (Test-Path "weather-xoap-shim/site/App_Code/WeatherShimHandler.cs")) { throw "Missing WeatherShimHandler.cs" }
+          if (-not (Test-Path "scanner-browser-bridge/installer/FTD.OposBridge.Unified.iss")) { throw "Missing unified installer project." }
+          if (-not (Test-Path "scanner-browser-bridge/service/FTD.OposBridge.Service/FTD.OposBridge.Service.csproj")) { throw "Missing service csproj." }
 
       - name: Install Inno Setup compiler
         run: choco install innosetup --no-progress -y
 
-      - name: Build Weather XOAP shim installer
+      - name: Build unified installer
         run: |
           $publisherUrl = "https://github.com/${{ github.repository }}"
-          .\weather-xoap-shim\tools\build-installer.ps1 `
+          .\scanner-browser-bridge\tools\build-unified-installer.ps1 `
             -Version "${{ steps.meta.outputs.version }}" `
             -Publisher "FTD" `
             -PublisherUrl $publisherUrl
@@ -87,7 +94,7 @@ jobs:
         id: hash
         run: |
           $version = "${{ steps.meta.outputs.version }}"
-          $installer = Join-Path $PWD "weather-xoap-shim\dist\FTD.WeatherXoapShim.Setup.$version.exe"
+          $installer = Join-Path $PWD "scanner-browser-bridge\dist\FTD.OposBridge.Unified.Setup.$version.exe"
           if (-not (Test-Path $installer)) {
             throw "Installer not found: $installer"
           }
@@ -100,35 +107,12 @@ jobs:
           "hash=$hash" >> $env:GITHUB_OUTPUT
           "hash_file=$hashFile" >> $env:GITHUB_OUTPUT
 
-      - name: Prepare release notes
-        id: notes
-        run: |
-          $version = "${{ steps.meta.outputs.version }}"
-          $installerFile = "FTD.WeatherXoapShim.Setup.$version.exe"
-          $hash = "${{ steps.hash.outputs.hash }}"
-          $notesPath = Join-Path $env:RUNNER_TEMP "weather-xoap-shim-release-notes.md"
-
-          @"
-          Weather XOAP Shim installer release.
-
-          Included assets:
-          - $installerFile
-          - $installerFile.sha256.txt
-
-          SHA256:
-          - $hash
-          "@ | Set-Content -Path $notesPath
-
-          "body_path=$notesPath" >> $env:GITHUB_OUTPUT
-
       - name: Create or update GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: Weather XOAP Shim ${{ steps.meta.outputs.version }}
-          body_path: ${{ steps.notes.outputs.body_path }}
+          name: Scanner Browser Bridge Unified ${{ steps.meta.outputs.version }}
           make_latest: false
-          generate_release_notes: false
           files: |
             ${{ steps.hash.outputs.installer }}
             ${{ steps.hash.outputs.hash_file }}
@@ -136,7 +120,7 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: weather-xoap-shim-installer-${{ steps.meta.outputs.version }}
+          name: scanner-browser-bridge-unified-installer-${{ steps.meta.outputs.version }}
           path: |
             ${{ steps.hash.outputs.installer }}
             ${{ steps.hash.outputs.hash_file }}

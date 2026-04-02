@@ -14,6 +14,10 @@
   #define StageDir "..\artifacts\installer\stage"
 #endif
 
+#ifndef SetupIconPath
+  #define SetupIconPath "assets\mercury-dashboard.ico"
+#endif
+
 #define MyAppName "FTD Mercury Orders Dashboard"
 #define MyAppId "{{2CFD7D74-C9C0-4660-A8BD-70AEF2E2505E}}"
 
@@ -39,6 +43,7 @@ PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayName={#MyAppName}
 SetupLogging=yes
+SetupIconFile={#SetupIconPath}
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion

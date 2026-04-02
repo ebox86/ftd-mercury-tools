@@ -15,12 +15,13 @@ foreach ($nodeDir in $nodeCandidates) {
   }
 }
 
-$npmCmd = (Get-Command npm.cmd -ErrorAction SilentlyContinue)?.Source
+$npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
+$npmCmd = if ($npmCommand) { $npmCommand.Source } else { $null }
 if (-not $npmCmd) {
   throw "Node.js/npm.cmd not found. Install Node.js and reopen terminal."
 }
 $bridgePort = 17344
-if ($env:BRIDGE_PORT -and [int]::TryParse(String($env:BRIDGE_PORT), [ref]$bridgePort) -eq $false) {
+if ($env:BRIDGE_PORT -and [int]::TryParse(([string]$env:BRIDGE_PORT), [ref]$bridgePort) -eq $false) {
   $bridgePort = 17344
 }
 

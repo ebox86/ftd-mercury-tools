@@ -15,15 +15,16 @@ foreach ($nodeDir in $nodeCandidates) {
   }
 }
 
-$npmCmd = (Get-Command npm.cmd -ErrorAction SilentlyContinue)?.Source
+$npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
+$npmCmd = if ($npmCommand) { $npmCommand.Source } else { $null }
 if (-not $npmCmd) {
   throw "Node.js/npm.cmd not found. Install Node.js and reopen terminal."
 }
 
-$directApiBase = String($env:WORKFLOW_API_BASE_URL).Trim()
-$soapBase = String($env:MERCURY_BASE_URL).Trim()
+$directApiBase = ([string]$env:WORKFLOW_API_BASE_URL).Trim()
+$soapBase = ([string]$env:MERCURY_BASE_URL).Trim()
 $bridgePort = 17344
-if ($env:BRIDGE_PORT -and [int]::TryParse(String($env:BRIDGE_PORT), [ref]$bridgePort) -eq $false) {
+if ($env:BRIDGE_PORT -and [int]::TryParse(([string]$env:BRIDGE_PORT), [ref]$bridgePort) -eq $false) {
   $bridgePort = 17344
 }
 $mode = ''
