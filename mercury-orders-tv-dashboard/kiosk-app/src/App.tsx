@@ -284,6 +284,61 @@ function firstNonEmptyText(...values: Array<string | number | null | undefined>)
   return '';
 }
 
+function firstNonEmptyRowValue(row: unknown, keys: string[]): string {
+  const record = row as Record<string, unknown> | null | undefined;
+  if (!record) return '';
+  for (const key of keys) {
+    const text = String(record[key] ?? '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function normalizedStreetLine(row: unknown): string {
+  return firstNonEmptyRowValue(row, [
+    'RECIPIENT_ADDRESS',
+    'RECIPIENT_ADDRESS_1',
+    'RECIPIENT_ADDRESS1',
+    'RECIPIENT_ADDR1',
+    'RECIP_ADDR1',
+    'ADDRESS',
+    'ADDR1',
+    'ADDR_LINE1',
+    'STREET',
+    'STREET_ADDRESS',
+  ]);
+}
+
+function normalizedCity(row: unknown): string {
+  return firstNonEmptyRowValue(row, [
+    'RECIPIENT_CITY',
+    'RECIPIENT_CITY_NAME',
+    'CITY_NAME',
+    'CITY',
+  ]);
+}
+
+function normalizedStateAbbrev(row: unknown): string {
+  return firstNonEmptyRowValue(row, [
+    'RECIPIENT_STATE_ABBREV',
+    'RECIPIENT_STATE_PROV_NAME',
+    'STATE_PROVINCE_NAME',
+    'STATE_ABBREV',
+    'STATE_NAME',
+    'RECIPIENT_STATE',
+    'STATE',
+  ]);
+}
+
+function normalizedPostalCode(row: unknown): string {
+  return firstNonEmptyRowValue(row, [
+    'RECIPIENT_ZIP',
+    'RECIPIENT_POSTAL_CODE',
+    'POSTAL_CODE',
+    'ZIP',
+  ]);
+}
+
 function toEpoch(raw: string): number {
   const t = Date.parse(String(raw || ''));
   return Number.isNaN(t) ? 0 : t;
@@ -1477,7 +1532,13 @@ function mergeActiveOrderCard(target: Map<string, BoardCard>, nextCard: BoardCar
   const nextHasBetterStatus = statusQuality(nextCard) > statusQuality(existing);
 
   if (nextRank > currentRank || nextHasMoreDetail || nextHasLaterDelivery || nextHasKnownDelivery || nextHasBetterStatus) {
-    target.set(nextCard.ticketId, nextCard);
+    target.set(nextCard.ticketId, {
+      ...nextCard,
+      // Preserve known recipient/address data when a higher-rank feed omits it.
+      recipientName: firstNonEmptyText(nextCard.recipientName, existing.recipientName),
+      addressLine: firstNonEmptyText(nextCard.addressLine, existing.addressLine),
+      cityStateZip: firstNonEmptyText(nextCard.cityStateZip, existing.cityStateZip),
+    });
   }
 }
 
@@ -2679,11 +2740,11 @@ export default function App() {
             TICKET_POSITION: String(row.TICKET_POSITION || '1').trim(),
             ORDER_TYPE: String(row.ORDER_TYPE || 'Delivery').trim() || 'Delivery',
             RECIPIENT_NAME: String(row.RECIPIENT_NAME || '').trim(),
-            RECIPIENT_ADDRESS: String(row.RECIPIENT_ADDRESS || '').trim(),
-            RECIPIENT_CITY: String(row.RECIPIENT_CITY || '').trim(),
+            RECIPIENT_ADDRESS: normalizedStreetLine(row),
+            RECIPIENT_CITY: normalizedCity(row),
             RECIPIENT_STATE: '',
-            RECIPIENT_STATE_ABBREV: String(row.RECIPIENT_STATE_ABBREV || '').trim(),
-            RECIPIENT_ZIP: String(row.RECIPIENT_ZIP || '').trim(),
+            RECIPIENT_STATE_ABBREV: normalizedStateAbbrev(row),
+            RECIPIENT_ZIP: normalizedPostalCode(row),
             DELIVERY_DATE: String(row.DELIVERY_DATE || '').trim(),
           });
           continue;
@@ -2694,10 +2755,10 @@ export default function App() {
         existing.TICKET_POSITION = existing.TICKET_POSITION || String(row.TICKET_POSITION || '1').trim();
         existing.ORDER_TYPE = existing.ORDER_TYPE || String(row.ORDER_TYPE || '').trim();
         existing.RECIPIENT_NAME = existing.RECIPIENT_NAME || String(row.RECIPIENT_NAME || '').trim();
-        existing.RECIPIENT_ADDRESS = existing.RECIPIENT_ADDRESS || String(row.RECIPIENT_ADDRESS || '').trim();
-        existing.RECIPIENT_CITY = existing.RECIPIENT_CITY || String(row.RECIPIENT_CITY || '').trim();
-        existing.RECIPIENT_STATE_ABBREV = existing.RECIPIENT_STATE_ABBREV || String(row.RECIPIENT_STATE_ABBREV || '').trim();
-        existing.RECIPIENT_ZIP = existing.RECIPIENT_ZIP || String(row.RECIPIENT_ZIP || '').trim();
+        existing.RECIPIENT_ADDRESS = existing.RECIPIENT_ADDRESS || normalizedStreetLine(row);
+        existing.RECIPIENT_CITY = existing.RECIPIENT_CITY || normalizedCity(row);
+        existing.RECIPIENT_STATE_ABBREV = existing.RECIPIENT_STATE_ABBREV || normalizedStateAbbrev(row);
+        existing.RECIPIENT_ZIP = existing.RECIPIENT_ZIP || normalizedPostalCode(row);
         existing.DELIVERY_DATE = canonicalTicketSearchDelivery(ticketId, userReference, existing.DELIVERY_DATE || String(row.DELIVERY_DATE || '').trim());
         existing.SUMMARY_TEXT = existing.SUMMARY_TEXT || String(row.RECIPIENT_NAME || '').trim();
       }
@@ -2945,8 +3006,12 @@ export default function App() {
           ticketId: order.ID,
           userReference: String(order.USER_REFERENCE || ''),
           recipientName: String(order.RECIPIENT_NAME || order.SUMMARY_TEXT || ''),
-          addressLine: String(order.RECIPIENT_ADDRESS || ''),
-          cityStateZip: formatCityStateZip(order.RECIPIENT_CITY, order.RECIPIENT_STATE_ABBREV, order.RECIPIENT_ZIP),
+          addressLine: normalizedStreetLine(order),
+          cityStateZip: formatCityStateZip(
+            normalizedCity(order),
+            normalizedStateAbbrev(order),
+            normalizedPostalCode(order),
+          ),
           deliveryDate: String(order.DELIVERY_DATE || ''),
           orderType: String(order.ORDER_TYPE || ''),
           stage: normalizedStageInfo.stage,
@@ -3004,11 +3069,11 @@ export default function App() {
           ticketId,
           userReference,
           recipientName: String(row.RECIPIENT_NAME || '').trim(),
-          addressLine: String(row.RECIPIENT_ADDRESS || '').trim(),
+          addressLine: normalizedStreetLine(row),
           cityStateZip: formatCityStateZip(
-            String(row.RECIPIENT_CITY || ''),
-            String(row.RECIPIENT_STATE_ABBREV || ''),
-            '',
+            normalizedCity(row),
+            normalizedStateAbbrev(row),
+            normalizedPostalCode(row),
           ),
           deliveryDate: resolvedZoneDeliveryDate,
           orderType: 'Delivery',
@@ -3040,11 +3105,11 @@ export default function App() {
           ticketId,
           userReference,
           recipientName: String(row.RECIPIENT_NAME || '').trim(),
-          addressLine: String(row.RECIPIENT_ADDRESS || '').trim(),
+          addressLine: normalizedStreetLine(row),
           cityStateZip: formatCityStateZip(
-            String(row.RECIPIENT_CITY || ''),
-            String(row.RECIPIENT_STATE_ABBREV || ''),
-            '',
+            normalizedCity(row),
+            normalizedStateAbbrev(row),
+            normalizedPostalCode(row),
           ),
           deliveryDate: resolvedRouteDeliveryDate,
           orderType: 'Route',
@@ -3102,11 +3167,11 @@ export default function App() {
           ticketId,
           userReference,
           recipientName: String(row.RECIPIENT_NAME || '').trim(),
-          addressLine: String(row.RECIPIENT_ADDRESS || '').trim(),
+          addressLine: normalizedStreetLine(row),
           cityStateZip: formatCityStateZip(
-            String(row.RECIPIENT_CITY || ''),
-            String(row.RECIPIENT_STATE_ABBREV || ''),
-            String(row.RECIPIENT_ZIP || ''),
+            normalizedCity(row),
+            normalizedStateAbbrev(row),
+            normalizedPostalCode(row),
           ),
           deliveryDate,
           orderType: String(row.ORDER_TYPE || 'Delivery').trim() || 'Delivery',

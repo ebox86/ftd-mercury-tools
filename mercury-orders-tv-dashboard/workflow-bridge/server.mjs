@@ -878,10 +878,29 @@ function normalizeTicketSearchRow(rawRow = {}) {
     SALE_STATUS_ID: firstRowValue(row, ['SALE_STATUS_ID', 'SALESTATUSID', 'ORDER_STATUS_ID', 'ORDERSTATUSID', 'ORDER_STATUS']),
     ORDER_TYPE: firstRowValue(row, ['ORDER_TYPE', 'SALE_TYPE', 'SALETYPE', 'TYPE', 'DELIVERY_TYPE', 'SALE_TYP_ID']),
     RECIPIENT_NAME: firstRowValue(row, ['RECIPIENT_NAME', 'RECIP_NAME', 'RECIPIENTREF', 'RECIPIENT_REF', 'RECIPIENT', 'SUMMARY_TEXT', 'NAME']),
-    RECIPIENT_ADDRESS: firstRowValue(row, ['RECIPIENT_ADDRESS', 'ADDRESS', 'ADDR1', 'ADDR_LINE1']),
-    RECIPIENT_CITY: firstRowValue(row, ['RECIPIENT_CITY', 'CITY', 'CITY_NAME']),
-    RECIPIENT_STATE_ABBREV: firstRowValue(row, ['RECIPIENT_STATE_ABBREV', 'STATE_ABBREV', 'STATE', 'RECIPIENT_STATE']),
-    RECIPIENT_ZIP: firstRowValue(row, ['RECIPIENT_ZIP', 'ZIP', 'POSTAL_CODE']),
+    RECIPIENT_ADDRESS: firstRowValue(row, [
+      'RECIPIENT_ADDRESS',
+      'RECIPIENT_ADDRESS_1',
+      'RECIPIENT_ADDRESS1',
+      'RECIPIENT_ADDR1',
+      'RECIP_ADDR1',
+      'ADDRESS',
+      'ADDR1',
+      'ADDR_LINE1',
+      'STREET',
+      'STREET_ADDRESS',
+    ]),
+    RECIPIENT_CITY: firstRowValue(row, ['RECIPIENT_CITY', 'RECIPIENT_CITY_NAME', 'CITY', 'CITY_NAME']),
+    RECIPIENT_STATE_ABBREV: firstRowValue(row, [
+      'RECIPIENT_STATE_ABBREV',
+      'RECIPIENT_STATE_PROV_NAME',
+      'STATE_PROVINCE_NAME',
+      'STATE_ABBREV',
+      'STATE',
+      'STATE_NAME',
+      'RECIPIENT_STATE',
+    ]),
+    RECIPIENT_ZIP: firstRowValue(row, ['RECIPIENT_ZIP', 'RECIPIENT_POSTAL_CODE', 'ZIP', 'POSTAL_CODE']),
     DELIVERY_DATE: firstRowValue(row, ['DELIVERY_DATE', 'DELIV_DATE', 'DELIVERYDATETIME', 'DELIVERY_DATETIME']),
     SALE_DATE: firstRowValue(row, ['SALE_DATE', 'SALEDATE']),
     CUSTOMER_NAME: firstRowValue(row, ['CUSTOMER_NAME', 'CUST_NAME', 'CUSTOMER']),
@@ -1268,13 +1287,26 @@ function normalizeLiveZoneOrderRow(rawRow, fallbackDeliveryDate = '') {
     STATUS: status,
     LATITUDE: String(row.LATITUDE || '').trim(),
     LONGITUDE: String(row.LONGITUDE || '').trim(),
-    RECIPIENT_ADDRESS: String(row.RECIPIENT_ADDRESS || row.ADDRESS || '').trim(),
-    RECIPIENT_CITY: String(row.RECIPIENT_CITY_NAME || row.CITY_NAME || '').trim(),
+    RECIPIENT_ADDRESS: firstRowValue(row, [
+      'RECIPIENT_ADDRESS',
+      'RECIPIENT_ADDRESS_1',
+      'RECIPIENT_ADDRESS1',
+      'RECIPIENT_ADDR1',
+      'RECIP_ADDR1',
+      'ADDRESS',
+      'ADDR1',
+      'ADDR_LINE1',
+      'STREET',
+      'STREET_ADDRESS',
+    ]),
+    RECIPIENT_CITY: firstRowValue(row, ['RECIPIENT_CITY', 'RECIPIENT_CITY_NAME', 'CITY', 'CITY_NAME']),
     RECIPIENT_STATE_ABBREV: String(
       row.RECIPIENT_STATE_ABBREV
       || row.RECIPIENT_STATE_PROV_NAME
       || row.STATE_PROVINCE_NAME
       || row.STATE_NAME
+      || row.STATE_ABBREV
+      || row.STATE
       || ''
     ).trim(),
     USER_REFERENCE: normalizedUserReference
