@@ -1934,7 +1934,8 @@ function buildPendingIntakeTickets(
       || isCancel
       || messageType.key === 'ans'
       || messageType.key === 'con'
-      || (messageType.key === 'other' && messageType.label !== 'ORD');
+      || (messageType.key === 'other' && messageType.label !== 'ORD')
+      || messageType.key === 'unknown';
     if (resolvedLinkedOrder && !shouldKeepLinkedCard) {
       continue;
     }
