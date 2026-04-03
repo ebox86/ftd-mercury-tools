@@ -29,7 +29,7 @@ import {
 } from './lib/types';
 
 type GroupedCards = Record<StatusStage, BoardCard[]>;
-type IntakeKind = 'uncreated' | 'ask';
+type IntakeKind = 'uncreated' | 'ask' | 'cancel' | 'message';
 type IntakeMessageTypeKey = 'ask' | 'ans' | 'con' | 'cancel' | 'other' | 'unknown';
 
 interface IntakeTicketCard {
@@ -713,19 +713,86 @@ function extractNumericTokens(...parts: string[]): string[] {
   return Array.from(new Set(matches));
 }
 
-function isAskMessage(message: MessageItem): boolean {
-  const raw = [
+function messageExtraField(message: MessageItem, ...keys: string[]): string {
+  const extra = message as unknown as Record<string, unknown>;
+  for (const key of keys) {
+    const value = extra[key];
+    if (value === undefined || value === null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function messageTypeText(message: MessageItem): string {
+  return firstNonEmptyText(
     String(message.MSG_TYPE || ''),
+    messageExtraField(
+      message,
+      'MSG_TYP',
+      'MESSAGE_TYPE',
+      'MESSAGETYPE',
+      'TYPE',
+      'SYSTEM_MSG_TYP_ABBR',
+      'SYSTEM_MSG_TYP_DESCRIPTION',
+    ),
+  ).trim();
+}
+
+function messageDirectionText(message: MessageItem): string {
+  return firstNonEmptyText(
+    String(message.MSG_DIRECTION || ''),
+    messageExtraField(message, 'DIRECTION', 'IN_OUT', 'INOUT', 'MESSAGE_DIRECTION', 'MSG_DIR'),
+  ).trim();
+}
+
+function messageDirection(message: MessageItem): 'in' | 'out' | 'unknown' {
+  const explicit = parseMessageDirection(messageDirectionText(message));
+  if (explicit !== 'unknown') return explicit;
+  return parseMessageDirection(messageTypeText(message));
+}
+
+function classifySystemMessageType(typeRaw: string): { key: IntakeMessageTypeKey; label: string } | null {
+  const canonical = String(typeRaw || '').toUpperCase().replace(/\s+/g, ' ').trim();
+  if (!canonical) return null;
+  const firstToken = canonical.split(' ')[0]?.trim() || '';
+  if (!firstToken) return null;
+
+  const typeByToken: Record<string, { key: IntakeMessageTypeKey; label: string }> = {
+    ASK: { key: 'ask', label: 'ASK' },
+    ANS: { key: 'ans', label: 'ANS' },
+    CON: { key: 'con', label: 'CON' },
+    CAN: { key: 'cancel', label: 'CANCEL' },
+    ORD: { key: 'other', label: 'ORD' },
+    REJ: { key: 'other', label: 'REJ' },
+    DEN: { key: 'other', label: 'DEN' },
+    FOR: { key: 'other', label: 'FOR' },
+    GEN: { key: 'other', label: 'GEN' },
+    RES: { key: 'other', label: 'RES' },
+    SUS: { key: 'other', label: 'SUS' },
+  };
+
+  return typeByToken[firstToken] || null;
+}
+
+function isAskMessage(message: MessageItem): boolean {
+  const typeRaw = messageTypeText(message);
+  const raw = [
+    typeRaw,
     String(message.SUMMARY_TEXT || ''),
     String(message.MSG_NOTES || ''),
   ].join(' ');
-  const isAskKeyword = /\bask\b/i.test(raw);
-  const isCancelRequest = /\b(cancel(?:lation)?\s*(?:request|req|rqt)?|cxl\s*(?:request|req)?|stop\s+delivery|do\s*not\s+deliver|dont\s+deliver|void\s+order|cancel\s+order)\b/i.test(raw);
-  return isAskKeyword || isCancelRequest;
+  const typeToken = normalizeText(typeRaw);
+  return /\bask\b/i.test(raw)
+    || typeToken === 'ask'
+    || typeToken === 'qry'
+    || typeToken.includes('question');
 }
 
 function classifyIncomingMessageType(message: MessageItem): { key: IntakeMessageTypeKey; label: string } {
-  const typeRaw = firstNonEmptyText(String(message.MSG_TYPE || '')).trim();
+  const typeRaw = messageTypeText(message);
+  const canonicalFromSystemType = classifySystemMessageType(typeRaw);
+  if (canonicalFromSystemType) return canonicalFromSystemType;
   const raw = [
     typeRaw,
     String(message.SUMMARY_TEXT || ''),
@@ -1309,6 +1376,23 @@ function toMessageItem(row: MercuryMessageListRow): MessageItem {
   const userReference = firstNonEmptyText(row.USER_REFERENCE, extra.USER_REF, extra.USERREFERENCE);
   const saleId = firstNonEmptyText(row.SALE_ID, extra.SALEID);
   const orderId = firstNonEmptyText(row.ORDER_ID, row.ORDER_NUM, row.ORDER_NUMBER, saleId, userReference);
+  const msgType = firstNonEmptyText(
+    row.MSG_TYPE,
+    extra.MSG_TYP,
+    extra.MESSAGE_TYPE,
+    extra.MESSAGETYPE,
+    extra.TYPE,
+    extra.SYSTEM_MSG_TYP_ABBR,
+    extra.SYSTEM_MSG_TYP_DESCRIPTION,
+  );
+  const msgDirection = firstNonEmptyText(
+    row.MSG_DIRECTION,
+    extra.DIRECTION,
+    extra.IN_OUT,
+    extra.INOUT,
+    extra.MESSAGE_DIRECTION,
+    extra.MSG_DIR,
+  );
   const msgDate = firstNonEmptyText(
     row.MSG_DATE,
     extra.MSG_DATETIME,
@@ -1327,17 +1411,17 @@ function toMessageItem(row: MercuryMessageListRow): MessageItem {
   );
 
   return {
-    ID: String(row.MSG_ID || ''),
+    ID: String(firstNonEmptyText(row.MSG_ID, extra.ID, extra.INTERNAL_MSG_ID) || ''),
     TICKET_NUM: String(ticketNum || ''),
     ORDER_ID: String(orderId || ''),
     USER_REFERENCE: String(userReference || ''),
     SALE_ID: String(saleId || ''),
     WIRE_SERVICE: String(row.WIRE_SERVICE || ''),
     CATEGORY: String(row.CATEGORY || ''),
-    MSG_TYPE: String(row.MSG_TYPE || ''),
+    MSG_TYPE: String(msgType || ''),
     SUMMARY_TEXT: String(row.SUMMARY_TEXT || ''),
     MSG_NOTES: String(row.MSG_NOTES || ''),
-    MSG_DIRECTION: String(row.MSG_DIRECTION || ''),
+    MSG_DIRECTION: String(msgDirection || ''),
     RECIPIENT_NAME: String(row.RECIPIENT_NAME || ''),
     MSG_DATE: String(msgDate || ''),
     DELIVERY_DATE: String(deliveryDate || ''),
@@ -1508,7 +1592,7 @@ function buildPendingIntakeTickets(
   const firstObservation = seenTicketIds.size === 0;
   const pending: IntakeTicketCard[] = [];
   const outboundMessages = allMessages
-    .filter(message => parseMessageDirection(message.MSG_DIRECTION) === 'out')
+    .filter(message => messageDirection(message) === 'out')
     .map(message => ({
       epoch: toEpoch(String(message.MSG_DATE || '')),
       recipientNorm: normalizeText(String(message.RECIPIENT_NAME || message.SUMMARY_TEXT || '')),
@@ -1519,7 +1603,7 @@ function buildPendingIntakeTickets(
   const latestAskHasTimeByThreadKey = new Map<string, boolean>();
   for (const message of allMessages) {
     if (!isAskMessage(message)) continue;
-    if (parseMessageDirection(message.MSG_DIRECTION) === 'out') continue;
+    if (messageDirection(message) === 'out') continue;
     const summary = String(message.SUMMARY_TEXT || '').trim();
     const recipient = String(message.RECIPIENT_NAME || summary || 'Unknown Recipient').trim();
     const msgDateRaw = String(message.MSG_DATE || '').trim();
@@ -1758,14 +1842,18 @@ function buildPendingIntakeTickets(
     const recipient = String(message.RECIPIENT_NAME || summary || 'Unknown Recipient').trim();
     const msgDateRaw = String(message.MSG_DATE || '').trim();
     const deliveryDateRaw = String(message.DELIVERY_DATE || '').trim();
-    const msgType = String(message.MSG_TYPE || '').trim();
+    const msgType = messageTypeText(message);
     const messageType = classifyIncomingMessageType(message);
-    const msgDirection = String(message.MSG_DIRECTION || '').toLowerCase();
+    const msgDirection = messageDirectionText(message).toLowerCase();
     const category = String(message.CATEGORY || '').trim();
     const notes = String(message.MSG_NOTES || '').trim();
-    const ask = isAskMessage(message);
+    const ask = messageType.key === 'ask';
+    const isCancel = messageType.key === 'cancel';
     const requiresAttention = String(message.REQUIRES_ATTENTION || '').trim() === '1';
-    const direction = parseMessageDirection(msgDirection);
+    const explicitDirection = parseMessageDirection(msgDirection);
+    const direction = explicitDirection === 'unknown'
+      ? parseMessageDirection(msgType)
+      : explicitDirection;
 
     const inboundSignal =
       direction !== 'out'
@@ -1773,6 +1861,7 @@ function buildPendingIntakeTickets(
         direction === 'in'
         || msgType.toLowerCase().includes('order')
         || ask
+        || isCancel
         || requiresAttention
         || category === '2'
         || category === '12'
@@ -1836,7 +1925,7 @@ function buildPendingIntakeTickets(
       inferredOrderId = resolvedLinkedOrder.orderNumber;
     }
 
-    if (resolvedLinkedOrder && !ask) {
+    if (resolvedLinkedOrder && !ask && !isCancel) {
       continue;
     }
 
@@ -1908,8 +1997,13 @@ function buildPendingIntakeTickets(
     const staleByCoarseDate = !effectiveAskHasTimePrecision && coarseAskDateEpoch > 0 && (now - coarseAskDateEpoch >= (2 * 24 * 60 * 60 * 1000));
     const isStaleAsk = allowStaleAskBadge && ask && !askAnswered && (staleByPreciseTime || staleByCoarseDate);
 
-    const kind: IntakeKind = ask ? 'ask' : 'uncreated';
-    const isFlashing = isMarketplace || (kind === 'uncreated' && (flashUntilById.get(id) || 0) > now) || (kind === 'ask' && requiresAttention && !isStaleAsk);
+    const isKnownNonOrderMessage = messageType.key === 'other' && messageType.label && messageType.label !== 'ORD';
+    const kind: IntakeKind = isCancel
+      ? 'cancel'
+      : (ask ? 'ask' : (isKnownNonOrderMessage ? 'message' : 'uncreated'));
+    const isFlashing = isMarketplace
+      || ((kind === 'uncreated' || kind === 'cancel') && (flashUntilById.get(id) || 0) > now)
+      || (kind === 'ask' && requiresAttention && !isStaleAsk);
     const includeAskDebug = ask && !Boolean(displayOrderId);
     const askDebugDetails = includeAskDebug
       ? (askMatch?.attempts || []).slice(0, 10).map(attempt => {
@@ -1958,7 +2052,10 @@ function buildPendingIntakeTickets(
   }
 
   pending.sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === 'uncreated' ? -1 : 1;
+    if (a.kind !== b.kind) {
+      const kindSortRank: Record<IntakeKind, number> = { cancel: 0, uncreated: 1, ask: 2, message: 3 };
+      return kindSortRank[a.kind] - kindSortRank[b.kind];
+    }
     if (a.isMarketplace !== b.isMarketplace) return a.isMarketplace ? -1 : 1;
     if (a.requiresAttention !== b.requiresAttention) return a.requiresAttention ? -1 : 1;
     return toEpoch(b.messageDate) - toEpoch(a.messageDate);
@@ -3094,7 +3191,7 @@ export default function App() {
       const messageByKey = new Map<string, MessageItem>();
       for (const message of [...messageRowsFromEvents, ...messageRowsFromFeed]) {
         const key = String(message.ID || '').trim()
-          || `${normalizeText(String(message.RECIPIENT_NAME || message.SUMMARY_TEXT || ''))}|${String(message.MSG_DATE || '')}|${String(message.MSG_TYPE || '')}`;
+          || `${normalizeText(String(message.RECIPIENT_NAME || message.SUMMARY_TEXT || ''))}|${String(message.MSG_DATE || '')}|${messageTypeText(message)}`;
         const existing = messageByKey.get(key);
         messageByKey.set(key, existing ? mergeMessageFields(existing, message) : message);
       }
