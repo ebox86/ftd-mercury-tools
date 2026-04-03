@@ -852,6 +852,29 @@ function parseMessageDirection(rawDirection: string | undefined): 'in' | 'out' |
   return 'unknown';
 }
 
+function isInboundIntakeMessage(message: MessageItem): boolean {
+  const msgType = messageTypeText(message);
+  const messageType = classifyIncomingMessageType(message);
+  const msgDirection = messageDirectionText(message).toLowerCase();
+  const category = String(message.CATEGORY || '').trim();
+  const requiresAttention = String(message.REQUIRES_ATTENTION || '').trim() === '1';
+  const explicitDirection = parseMessageDirection(msgDirection);
+  const direction = explicitDirection === 'unknown'
+    ? parseMessageDirection(msgType)
+    : explicitDirection;
+
+  return direction !== 'out'
+    && (
+      direction === 'in'
+      || msgType.toLowerCase().includes('order')
+      || messageType.key === 'ask'
+      || messageType.key === 'cancel'
+      || requiresAttention
+      || category === '2'
+      || category === '12'
+    );
+}
+
 function messageLinkKeySet(message: MessageItem): Set<string> {
   const keys = new Set<string>();
   const idLike = [
@@ -1844,30 +1867,11 @@ function buildPendingIntakeTickets(
     const deliveryDateRaw = String(message.DELIVERY_DATE || '').trim();
     const msgType = messageTypeText(message);
     const messageType = classifyIncomingMessageType(message);
-    const msgDirection = messageDirectionText(message).toLowerCase();
-    const category = String(message.CATEGORY || '').trim();
     const notes = String(message.MSG_NOTES || '').trim();
     const ask = messageType.key === 'ask';
     const isCancel = messageType.key === 'cancel';
     const requiresAttention = String(message.REQUIRES_ATTENTION || '').trim() === '1';
-    const explicitDirection = parseMessageDirection(msgDirection);
-    const direction = explicitDirection === 'unknown'
-      ? parseMessageDirection(msgType)
-      : explicitDirection;
-
-    const inboundSignal =
-      direction !== 'out'
-      && (
-        direction === 'in'
-        || msgType.toLowerCase().includes('order')
-        || ask
-        || isCancel
-        || requiresAttention
-        || category === '2'
-        || category === '12'
-      );
-
-    if (!inboundSignal) continue;
+    if (!isInboundIntakeMessage(message)) continue;
 
     const messageId = String(message.ID || '').trim();
     const syntheticId = `${normalizeText(recipient)}|${msgDateRaw || deliveryDateRaw || summary}`;
@@ -1925,7 +1929,13 @@ function buildPendingIntakeTickets(
       inferredOrderId = resolvedLinkedOrder.orderNumber;
     }
 
-    if (resolvedLinkedOrder && !ask && !isCancel) {
+    const shouldKeepLinkedCard =
+      ask
+      || isCancel
+      || messageType.key === 'ans'
+      || messageType.key === 'con'
+      || (messageType.key === 'other' && messageType.label !== 'ORD');
+    if (resolvedLinkedOrder && !shouldKeepLinkedCard) {
       continue;
     }
 
@@ -3196,8 +3206,9 @@ export default function App() {
         messageByKey.set(key, existing ? mergeMessageFields(existing, message) : message);
       }
       const hasMessageThreadCoverage = messageRowsFromFeed.length > 0;
+      const inboundIntakeMessages = Array.from(messageByKey.values()).filter(message => isInboundIntakeMessage(message));
 
-      const askMessages = Array.from(messageByKey.values()).filter(message => isAskMessage(message));
+      const askMessages = inboundIntakeMessages.filter(message => isAskMessage(message));
       const askDetailTargetsById = new Map<string, MessageItem>();
       for (const message of askMessages) {
         if (inferOrderIdFromMessage(message)) continue;
@@ -3333,8 +3344,11 @@ export default function App() {
 
             const statusRaw = String(lifecycleLatest?.STATUS_CD || ticketStatus?.DeliveryStatus || '');
             const statusDesc = String(lifecycleLatest?.STATUS_CD_DESC || lifecycleLatest?.STATUS_TEXT || ticketStatus?.DesignerStatus || '');
-            const lookupStage = normalizeStageForOrderCard(stageFromExternalStatus(statusRaw, statusDesc));
-            const stageLabel = friendlyStatusLabel(lookupStage, `${statusRaw} ${statusDesc}`.trim());
+            const statusContext = `${statusRaw} ${statusDesc}`.trim();
+            const lookupStage = normalizeStageForOrderCard(
+              stageFromExternalStatus(statusContext, designedIndicatorFromStatusText(statusDesc)),
+            );
+            const stageLabel = friendlyStatusLabel(lookupStage, statusContext);
 
             const saleId = String(details?.SALE_ID || '').trim();
             const userReference = String(details?.USER_REFERENCE || '').trim();
@@ -3481,16 +3495,16 @@ export default function App() {
         }
       }
 
-      const askLookupTicketIds = Array.from(
+      const intakeLookupTicketIds = Array.from(
         new Set(
-          askMessages
+          inboundIntakeMessages
             .flatMap(message => messageLookupTicketCandidates(message))
         ),
       ).slice(0, 260);
 
-      if (askLookupTicketIds.length > 0) {
-        const askLookupResults = await allSettledInBatches(
-          askLookupTicketIds,
+      if (intakeLookupTicketIds.length > 0) {
+        const intakeLookupResults = await allSettledInBatches(
+          intakeLookupTicketIds,
           30,
           async ticketId => {
             const [details, ticketStatus, lifecycle] = await Promise.all([
@@ -3501,8 +3515,11 @@ export default function App() {
 
             const statusRaw = String(lifecycle?.STATUS_CD || ticketStatus?.DeliveryStatus || '');
             const statusDesc = String(lifecycle?.STATUS_CD_DESC || lifecycle?.STATUS_TEXT || ticketStatus?.DesignerStatus || '');
-            const lookupStage = normalizeStageForOrderCard(stageFromExternalStatus(statusRaw, statusDesc));
-            const stageLabel = friendlyStatusLabel(lookupStage, `${statusRaw} ${statusDesc}`.trim());
+            const statusContext = `${statusRaw} ${statusDesc}`.trim();
+            const lookupStage = normalizeStageForOrderCard(
+              stageFromExternalStatus(statusContext, designedIndicatorFromStatusText(statusDesc)),
+            );
+            const stageLabel = friendlyStatusLabel(lookupStage, statusContext);
 
             const saleId = String(details?.SALE_ID || '').trim();
             const userReference = String(details?.USER_REFERENCE || '').trim();
@@ -3520,7 +3537,7 @@ export default function App() {
           },
         );
 
-        for (const lookup of askLookupResults) {
+        for (const lookup of intakeLookupResults) {
           if (lookup.status !== 'fulfilled') continue;
           const enrichedOrder = lookup.value;
           if (!enrichedOrder.ID) continue;

@@ -16,10 +16,7 @@ Utilities, services, and userscripts for improving workflows in FTD Mercury and 
 1. **Root cleanup + SOAP reference organization**
    - XML/WSDL reference files are now grouped under:
      - `mercury-orders-tv-dashboard/reference/soap/`
-2. **Renamed service folders**
-   - `weather-widget-shim/` (formerly weather shim naming variants)
-   - `scanner-browser-bridge/` (renamed from OPOS-focused folder naming)
-3. **Dashboard audio alerts + config UX**
+2. **Dashboard audio alerts + config UX**
    - Toggleable audio alerts on the TV dashboard
    - Default alert cadence:
      - DoorDash/UberEats events: `3` dings
@@ -29,11 +26,12 @@ Utilities, services, and userscripts for improving workflows in FTD Mercury and 
      - Grouped **Audio Alert Settings** (ding counts + gap + sound selection/upload)
      - Debug/test sound trigger
      - Shop logo upload with a wider/taller logo display area
-4. **Installer branding**
-   - Installer icons are now included for:
-     - `weather-widget-shim/installer/assets/weather-widget-shim.ico`
-     - `mercury-orders-tv-dashboard/installer/assets/mercury-dashboard.ico`
-     - `scanner-browser-bridge/installer/assets/opos-bridge.ico`
+3. **Release version matrix (as of 2026-04-03)**
+   - Mercury Orders TV Dashboard installer: `1.1.0` (`mercury-dashboard-v1.1.0`)
+   - Scanner Browser Bridge installer: `1.0.1` (`opos-bridge-v1.0.1`)
+   - Scanner Browser Bridge unified installer: `1.0.0` (`opos-bridge-unified-v1.0.0`)
+   - Weather Widget Shim installer: `1.0.0` (`weather-xoap-shim-v1.0.0`)
+   - MercuryHQ Single Request Barcode userscript: `0.4.33`
 
 ## Components
 
