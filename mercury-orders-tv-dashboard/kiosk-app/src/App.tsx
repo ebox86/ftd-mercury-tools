@@ -4363,7 +4363,7 @@ export default function App() {
           </div>
         </div>
         {!isConfigOpen ? (
-          <div className="app__controls">
+          <div className="app__controls app__controls--compact">
               <label className="app__control-check">
                 <input
                   type="checkbox"
@@ -4372,9 +4372,12 @@ export default function App() {
                     setIncludeNextDay(event.target.checked);
                   }}
                 />
-                <span className="app__control-label">
+                <span className="app__control-icon" aria-hidden="true">
                   <FontAwesomeIcon icon={faCalendarDay} />
-                  Include next day
+                </span>
+                <span className="app__control-label">
+                  <span className="app__control-line">Include</span>
+                  <span className="app__control-line">next day</span>
                 </span>
               </label>
               <label className="app__control-check">
@@ -4386,9 +4389,12 @@ export default function App() {
                     setShowCompleted(event.target.checked);
                   }}
                 />
-                <span className="app__control-label">
+                <span className="app__control-icon" aria-hidden="true">
                   <FontAwesomeIcon icon={faCircleCheck} />
-                  Show completed
+                </span>
+                <span className="app__control-label">
+                  <span className="app__control-line">Show</span>
+                  <span className="app__control-line">completed</span>
                 </span>
               </label>
               <label className="app__control-check">
@@ -4403,22 +4409,51 @@ export default function App() {
                     }
                   }}
                 />
-                <span className="app__control-label">
+                <span className="app__control-icon" aria-hidden="true">
                   <FontAwesomeIcon icon={faVolumeHigh} />
-                  Audio alerts
+                </span>
+                <span className="app__control-label">
+                  <span className="app__control-line">Audio</span>
+                  <span className="app__control-line">alerts</span>
+                </span>
+              </label>
+              <label className="app__control-check">
+                <input
+                  type="checkbox"
+                  checked={isAutoScrollEnabled}
+                  onChange={(event) => {
+                    setIsAutoScrollEnabled(event.target.checked);
+                  }}
+                />
+                <span className="app__control-icon" aria-hidden="true">
+                  <FontAwesomeIcon icon={faScroll} />
+                </span>
+                <span className="app__control-label">
+                  <span className="app__control-line">Auto-scroll</span>
+                  <span className="app__control-line">enabled</span>
                 </span>
               </label>
               <button
                 type="button"
-                className={`app__control-btn${isAutoScrollEnabled ? '' : ' app__control-btn--off'}`}
-                onClick={() => setIsAutoScrollEnabled(previous => !previous)}
+                className="app__control-btn app__control-btn--primary"
+                onClick={() => void toggleDashboardMode()}
               >
-                <FontAwesomeIcon icon={faScroll} />
-                Auto-scroll: {isAutoScrollEnabled ? 'On' : 'Off'}
-              </button>
-              <button type="button" className="app__control-btn app__control-btn--primary" onClick={() => void toggleDashboardMode()}>
-                <FontAwesomeIcon icon={isDashboardMode ? faXmark : faUpRightAndDownLeftFromCenter} />
-                {isDashboardMode ? 'Exit Dashboard' : 'Dashboard Mode'}
+                <span className="app__control-icon" aria-hidden="true">
+                  <FontAwesomeIcon icon={isDashboardMode ? faXmark : faUpRightAndDownLeftFromCenter} />
+                </span>
+                <span className="app__control-label">
+                  {isDashboardMode ? (
+                    <>
+                      <span className="app__control-line">Exit</span>
+                      <span className="app__control-line">Dashboard</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="app__control-line">Dashboard</span>
+                      <span className="app__control-line">Mode</span>
+                    </>
+                  )}
+                </span>
               </button>
           </div>
         ) : null}

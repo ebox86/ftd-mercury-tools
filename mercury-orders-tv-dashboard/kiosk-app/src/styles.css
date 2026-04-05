@@ -109,6 +109,11 @@ body {
   align-items: center;
 }
 
+.app__controls--compact {
+  gap: 6px;
+  align-items: stretch;
+}
+
 .app__date-nav {
   appearance: none;
   border: 1px solid #c9d2df;
@@ -189,6 +194,13 @@ body {
   gap: 6px;
 }
 
+.app__control-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .app__control-btn {
   appearance: none;
   border: 1px solid #7b8797;
@@ -225,6 +237,37 @@ body {
   cursor: not-allowed;
   opacity: 0.55;
   filter: none;
+}
+
+.app__controls--compact .app__control-check,
+.app__controls--compact .app__control-btn {
+  min-height: 40px;
+  min-width: 104px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  gap: 8px;
+}
+
+.app__controls--compact .app__control-check {
+  align-items: center;
+}
+
+.app__controls--compact .app__control-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  line-height: 1.05;
+}
+
+.app__control-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .app__meta {
