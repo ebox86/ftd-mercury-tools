@@ -210,8 +210,19 @@ if ($restartNeeded) {
         $searchResponse = Invoke-WebRequest -Uri $searchUrl -Headers @{ Host = $HostName } -UseBasicParsing -TimeoutSec 20
         $weatherResponse = Invoke-WebRequest -Uri $weatherUrl -Headers @{ Host = $HostName } -UseBasicParsing -TimeoutSec 20
 
+        $searchContent = [string]$searchResponse.Content
+        $weatherContent = [string]$weatherResponse.Content
+
         if ($searchResponse.StatusCode -ne 200 -or $weatherResponse.StatusCode -ne 200) {
             throw 'Expected HTTP 200 from both shim endpoints.'
+        }
+
+        if ($searchContent -notmatch '<search') {
+            throw 'Search endpoint did not return XOAP XML.'
+        }
+
+        if ($weatherContent -notmatch '<weather') {
+            throw 'Weather endpoint did not return XOAP XML.'
         }
     }
     catch {

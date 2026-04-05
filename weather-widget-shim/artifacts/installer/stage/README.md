@@ -131,10 +131,12 @@ Supported installer switches:
 
 - `/SITENAME=FTD.XoapWeatherShim`
 - `/HOSTNAME=xoap.weather.com`
+- `/MERCURYGADGETHOST=localhost` (used for `DashboardWeatherGadgetURL`)
 - `/INSTALLROOT=C:\FTDTools\XoapWeatherShim`
 - `/SKIPHOSTSENTRY=false`
 - `/SKIPIISPREREQS=false` (default keeps install easy on new computers)
 - `/UPDATEMERCURYURL=true` (default updates `DashboardWeatherGadgetURL` when `Mercury.xml` is found)
+- Default write target is `http://localhost/WaFTDDashboard/WeatherGadget.aspx`
 - `/MERCURYXMLPATH=C:\Program Files (x86)\Wings\Mercury.xml` (optional explicit path)
 - `/REMOVEINSTALLROOT=false` (used on uninstall)
 

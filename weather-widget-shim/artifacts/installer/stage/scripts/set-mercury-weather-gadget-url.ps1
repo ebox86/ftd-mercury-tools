@@ -1,6 +1,6 @@
 ﻿[CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [string]$HostName = '192.168.1.50',
+    [string]$HostName = 'localhost',
     [string]$MercuryXmlPath
 )
 

@@ -40,7 +40,6 @@ OutputBaseFilename=FTD.WeatherXoapShim.Setup.{#MyAppVersion}
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
-PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\app-icon.ico
 SetupLogging=yes
@@ -54,23 +53,24 @@ Source: "{#SetupIconPath}"; DestDir: "{app}"; DestName: "app-icon.ico"; Flags: i
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
   Parameters: "{code:GetInstallParameters}"; \
   StatusMsg: "Installing Weather XOAP shim in IIS..."; \
-  Flags: runhidden waituntilterminated
+  Flags: runhidden waituntilterminated runascurrentuser
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
   Parameters: "{code:GetSetMercuryWeatherUrlParameters}"; \
   StatusMsg: "Updating Mercury DashboardWeatherGadgetURL..."; \
-  Flags: runhidden waituntilterminated; \
+  Flags: runhidden waituntilterminated runascurrentuser; \
   Check: ShouldRunMercuryWeatherUrlUpdate
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
   Parameters: "{code:GetUninstallParameters}"; \
-  Flags: runhidden waituntilterminated; \
+  Flags: runhidden waituntilterminated runascurrentuser; \
   RunOnceId: "FTD.WeatherXoapShim.Uninstall"
 
 [Code]
 var
   CmdSiteName: string;
   CmdHostName: string;
+  CmdMercuryGadgetHost: string;
   CmdInstallRoot: string;
   CmdSkipHostsEntry: string;
   CmdSkipIisPrereqs: string;
@@ -139,6 +139,7 @@ function InitializeSetup(): Boolean;
 begin
   CmdSiteName := ReadSwitchValue('SITENAME', 'FTD.XoapWeatherShim');
   CmdHostName := ReadSwitchValue('HOSTNAME', 'xoap.weather.com');
+  CmdMercuryGadgetHost := ReadSwitchValue('MERCURYGADGETHOST', 'localhost');
   CmdInstallRoot := ReadSwitchValue('INSTALLROOT', 'C:\FTDTools\XoapWeatherShim');
   CmdSkipHostsEntry := NormalizeBool(ReadSwitchValue('SKIPHOSTSENTRY', 'false'));
   CmdSkipIisPrereqs := NormalizeBool(ReadSwitchValue('SKIPIISPREREQS', 'false'));
@@ -156,6 +157,13 @@ begin
   if CmdHostName = '' then
   begin
     MsgBox('HOSTNAME cannot be empty.', mbCriticalError, MB_OK);
+    Result := False;
+    Exit;
+  end;
+
+  if CmdMercuryGadgetHost = '' then
+  begin
+    MsgBox('MERCURYGADGETHOST cannot be empty.', mbCriticalError, MB_OK);
     Result := False;
     Exit;
   end;
@@ -247,7 +255,7 @@ function GetSetMercuryWeatherUrlParameters(Param: string): string;
 begin
   Result := '-NoProfile -ExecutionPolicy Bypass -File "' +
     ExpandConstant('{app}\scripts\set-mercury-weather-gadget-url.ps1') +
-    '" -HostName "' + CmdHostName + '"';
+    '" -HostName "' + CmdMercuryGadgetHost + '"';
 
   if Trim(CmdMercuryXmlPath) <> '' then
   begin
