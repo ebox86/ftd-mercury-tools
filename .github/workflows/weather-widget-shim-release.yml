@@ -80,7 +80,7 @@ jobs:
           $publisherUrl = "https://github.com/${{ github.repository }}"
           .\weather-widget-shim\tools\build-installer.ps1 `
             -Version "${{ steps.meta.outputs.version }}" `
-            -Publisher "FTD" `
+            -Publisher "ebox86.com" `
             -PublisherUrl $publisherUrl
 
       - name: Hash installer

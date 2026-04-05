@@ -122,6 +122,7 @@ export interface DeliveryOrderByZoneRow {
   RECIPIENT_ADDRESS?: string;
   RECIPIENT_CITY?: string;
   RECIPIENT_STATE_ABBREV?: string;
+  RECIPIENT_ZIP?: string;
   ZONE_ID?: string;
   ZONE_NAME?: string;
   PRIORITY_ID?: string;
@@ -149,6 +150,7 @@ export interface DeliveryOrderByRouteRow {
   RECIPIENT_ADDRESS?: string;
   RECIPIENT_CITY?: string;
   RECIPIENT_STATE_ABBREV?: string;
+  RECIPIENT_ZIP?: string;
   ROUTE_ID?: string;
   ROUTE_NAME?: string;
   DRIVER_NAME?: string;
@@ -245,6 +247,7 @@ export interface BoardCard {
   recipientName: string;
   addressLine: string;
   cityStateZip: string;
+  deliveryZip: string;
   deliveryDate: string;
   orderType: string;
   stage: StatusStage;

@@ -2,7 +2,7 @@ param(
   [Parameter(Mandatory = $true)] [string]$Version,
   [Parameter(Mandatory = $true)] [string]$NodeRuntimeDir,
   [string]$ServiceHostRuntimeIdentifier = "win-x64",
-  [string]$Publisher = "FTD",
+  [string]$Publisher = "ebox86.com",
   [string]$PublisherUrl = "https://github.com/example/ftd-mercury-tools"
 )
 

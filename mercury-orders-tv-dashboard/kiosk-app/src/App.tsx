@@ -1,4 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import {
+  faCalendarDay,
+  faCircleCheck,
+  faChevronLeft,
+  faChevronRight,
+  faFloppyDisk,
+  faGear,
+  faInbox,
+  faPlay,
+  faScroll,
+  faTruck,
+  faUpRightAndDownLeftFromCenter,
+  faVolumeHigh,
+  faXmark,
+} from '@fortawesome/free-solid-svg-icons';
 import {
   fetchEventsNow,
   fetchLifecycleByServiceMsg,
@@ -8,10 +24,10 @@ import {
   fetchOrderDetails,
   fetchOrdersByRoutes,
   fetchOrdersByZone,
+  setWorkflowBaseUrlOverride,
   fetchTicketSearch,
   fetchTicketStatus,
   fetchUndeliveredOrders,
-  WORKFLOW_BASE_URL,
 } from './lib/api';
 import { deriveStage } from './lib/stageResolver';
 import {
@@ -93,11 +109,14 @@ interface DashboardUserConfig {
   pollMs: number;
   flashMs: number;
   askStaleHours: number;
+  mercuryBaseUrl: string;
   marketplaceDings: number;
   todayDings: number;
   dingGapMs: number;
   soundPreset: AlertSoundPreset;
   customSoundDataUrl: string;
+  marketplaceSoundPreset: AlertSoundPreset;
+  marketplaceCustomSoundDataUrl: string;
   customLogoDataUrl: string;
 }
 
@@ -116,11 +135,14 @@ const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
   pollMs: DEFAULT_POLL_MS,
   flashMs: DEFAULT_FLASH_MS,
   askStaleHours: DEFAULT_ASK_STALE_HOURS,
+  mercuryBaseUrl: '',
   marketplaceDings: DEFAULT_MARKETPLACE_DINGS,
   todayDings: DEFAULT_TODAY_DINGS,
   dingGapMs: DEFAULT_DING_GAP_MS,
   soundPreset: 'alarm_pulse',
   customSoundDataUrl: '',
+  marketplaceSoundPreset: 'alarm_pulse',
+  marketplaceCustomSoundDataUrl: '',
   customLogoDataUrl: '',
 };
 const RECIPIENT_STOP_WORDS = new Set([
@@ -160,6 +182,66 @@ const STAGE_SHORT_LABELS: Record<StatusStage, string> = {
   on_truck: 'Ready for Ship',
   delivered_or_exception: 'Delivered',
 };
+const STATE_NAME_TO_ABBREV: Record<string, string> = {
+  ALABAMA: 'AL',
+  ALASKA: 'AK',
+  ARIZONA: 'AZ',
+  ARKANSAS: 'AR',
+  CALIFORNIA: 'CA',
+  COLORADO: 'CO',
+  CONNECTICUT: 'CT',
+  DELAWARE: 'DE',
+  FLORIDA: 'FL',
+  GEORGIA: 'GA',
+  HAWAII: 'HI',
+  IDAHO: 'ID',
+  ILLINOIS: 'IL',
+  INDIANA: 'IN',
+  IOWA: 'IA',
+  KANSAS: 'KS',
+  KENTUCKY: 'KY',
+  LOUISIANA: 'LA',
+  MAINE: 'ME',
+  MARYLAND: 'MD',
+  MASSACHUSETTS: 'MA',
+  MICHIGAN: 'MI',
+  MINNESOTA: 'MN',
+  MISSISSIPPI: 'MS',
+  MISSOURI: 'MO',
+  MONTANA: 'MT',
+  NEBRASKA: 'NE',
+  NEVADA: 'NV',
+  'NEW HAMPSHIRE': 'NH',
+  'NEW JERSEY': 'NJ',
+  'NEW MEXICO': 'NM',
+  'NEW YORK': 'NY',
+  'NORTH CAROLINA': 'NC',
+  'NORTH DAKOTA': 'ND',
+  OHIO: 'OH',
+  OKLAHOMA: 'OK',
+  OREGON: 'OR',
+  PENNSYLVANIA: 'PA',
+  'RHODE ISLAND': 'RI',
+  'SOUTH CAROLINA': 'SC',
+  'SOUTH DAKOTA': 'SD',
+  TENNESSEE: 'TN',
+  TEXAS: 'TX',
+  UTAH: 'UT',
+  VERMONT: 'VT',
+  VIRGINIA: 'VA',
+  WASHINGTON: 'WA',
+  'WEST VIRGINIA': 'WV',
+  WISCONSIN: 'WI',
+  WYOMING: 'WY',
+  'DISTRICT OF COLUMBIA': 'DC',
+  'PUERTO RICO': 'PR',
+  GUAM: 'GU',
+  'AMERICAN SAMOA': 'AS',
+  'NORTHERN MARIANA ISLANDS': 'MP',
+  'U S VIRGIN ISLANDS': 'VI',
+  'US VIRGIN ISLANDS': 'VI',
+  'VIRGIN ISLANDS': 'VI',
+};
 
 function friendlyStatusLabel(stage: StatusStage, reason = ''): string {
   if (String(reason || '').toLowerCase().includes('cancel')) return 'Canceled';
@@ -196,6 +278,17 @@ function normalizeStageForOrderCard(stage: StatusStage): StatusStage {
   return stage === 'incoming' ? 'queued_not_designed' : stage;
 }
 
+function isCanceledOrder(card: BoardCard): boolean {
+  const reason = String(card.stageReason || '').toLowerCase();
+  const delivery = String(card.deliveryStatus || '').toLowerCase();
+  const design = String(card.designStatus || '').toLowerCase();
+  return reason.includes('cancel') || delivery.includes('cancel') || design.includes('cancel');
+}
+
+function isCompletedOrder(card: BoardCard): boolean {
+  return card.stage === 'delivered_or_exception' || isCanceledOrder(card);
+}
+
 function formatMercuryDateTimeLocal(raw: Date): string {
   const year = raw.getFullYear();
   const month = String(raw.getMonth() + 1).padStart(2, '0');
@@ -228,6 +321,25 @@ function dateKeyFromDate(raw: Date): string {
   const month = String(raw.getMonth() + 1).padStart(2, '0');
   const day = String(raw.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function localDateFromDateKey(raw: string): Date | null {
+  const text = String(raw || '').trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const value = new Date(year, month, day);
+  value.setHours(0, 0, 0, 0);
+  return value;
+}
+
+function dayOffsetFromToday(targetDate: Date): number {
+  const now = new Date();
+  const todayUtcEpoch = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const targetUtcEpoch = Date.UTC(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  return Math.round((targetUtcEpoch - todayUtcEpoch) / (24 * 60 * 60 * 1000));
 }
 
 function activeDeliveryDateKeys(baseDate: Date, includeNextDay: boolean): Set<string> {
@@ -318,8 +430,20 @@ function normalizedCity(row: unknown): string {
   ]);
 }
 
+function abbreviateState(stateRaw: string): string {
+  const stateText = String(stateRaw || '').trim();
+  if (!stateText) return '';
+  const normalized = stateText
+    .replace(/[^a-zA-Z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+  if (/^[A-Z]{2}$/.test(normalized)) return normalized;
+  return STATE_NAME_TO_ABBREV[normalized] || normalized;
+}
+
 function normalizedStateAbbrev(row: unknown): string {
-  return firstNonEmptyRowValue(row, [
+  return abbreviateState(firstNonEmptyRowValue(row, [
     'RECIPIENT_STATE_ABBREV',
     'RECIPIENT_STATE_PROV_NAME',
     'STATE_PROVINCE_NAME',
@@ -327,16 +451,52 @@ function normalizedStateAbbrev(row: unknown): string {
     'STATE_NAME',
     'RECIPIENT_STATE',
     'STATE',
-  ]);
+  ]));
+}
+
+function extractUsZip5(raw: string): string {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  const stateZip = text.match(/\b[A-Z]{2}\s+(\d{5})(?:-\d{4})?\b/i);
+  if (stateZip) return stateZip[1];
+  const zipPlus4 = text.match(/\b(\d{5})-\d{4}\b/);
+  if (zipPlus4) return zipPlus4[1];
+  const plainFive = text.match(/\b(\d{5})\b/);
+  if (plainFive) return plainFive[1];
+  const compactNine = text.replace(/\s+/g, '').match(/\b(\d{5})\d{4}\b/);
+  if (compactNine) return compactNine[1];
+  return '';
+}
+
+function extractZipFromRowKeys(row: unknown, keys: string[]): string {
+  const record = row as Record<string, unknown> | null | undefined;
+  if (!record) return '';
+  for (const key of keys) {
+    const zip = extractUsZip5(String(record[key] ?? ''));
+    if (zip) return zip;
+  }
+  return '';
 }
 
 function normalizedPostalCode(row: unknown): string {
-  return firstNonEmptyRowValue(row, [
+  return extractZipFromRowKeys(row, [
     'RECIPIENT_ZIP',
+    'RECIPIENT_ZIP_CODE',
     'RECIPIENT_POSTAL_CODE',
+    'RECIPIENT_POSTAL',
+    'ZIP_CODE',
+    'ZIP5',
+    'ZIP_5',
+    'POST_CODE',
+    'POSTCODE',
+    'POSTAL',
     'POSTAL_CODE',
     'ZIP',
   ]);
+}
+
+function deriveCardFooterZip(card: BoardCard): string {
+  return String(card.deliveryZip || '').trim();
 }
 
 function toEpoch(raw: string): number {
@@ -391,32 +551,48 @@ function toDateKey(raw: string): string {
   return `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
 }
 
-function deliveryDateSortEpoch(raw: string): number {
+function parseToggle(value: unknown): boolean {
+  const text = String(value ?? '').trim().toLowerCase();
+  return text === '1' || text === 'true' || text === 'yes' || text === 'on';
+}
+
+function parseMercuryDate(raw: string): Date | null {
   const parts = parseCalendarDateParts(raw);
-  if (!parts) return toEpoch(raw);
-  return Date.UTC(parts.year, parts.month - 1, parts.day);
+  if (!parts) return null;
+  const date = new Date(parts.year, parts.month - 1, parts.day);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+function deliveryDateSortEpoch(raw: string): number {
+  const date = parseMercuryDate(raw);
+  if (!date) return 0;
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
 }
 
 function hasMarketplaceKeyword(...parts: string[]): boolean {
   return MARKETPLACE_REGEX.test(parts.join(' '));
 }
 
+function hasPickupKeyword(...parts: string[]): boolean {
+  return /\bpick[\s-]*up\b/i.test(parts.join(' '));
+}
+
 function isPickupOrCodOrderType(orderTypeRaw: string): boolean {
-  const orderType = String(orderTypeRaw || '').toLowerCase();
+  const orderType = String(orderTypeRaw || '');
   return (
-    orderType.includes('pickup')
-    || orderType.includes('pick up')
-    || orderType.includes('cod')
+    hasPickupKeyword(orderType)
+    || orderType.toLowerCase().includes('cod')
   );
+}
+
+function shouldUsePickupDateLabel(card: BoardCard): boolean {
+  return hasPickupKeyword(card.addressLine, card.cityStateZip, card.orderType);
 }
 
 function normalizeIdLike(value: string): string {
   return String(value || '').trim().toLowerCase();
-}
-
-function parseToggle(value: string | null | undefined): boolean {
-  const normalized = String(value || '').trim().toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 }
 
 function sleep(ms: number): Promise<void> {
@@ -474,6 +650,12 @@ function isAskDebugEnabledFromBrowser(): boolean {
 function initialDashboardMode(): boolean {
   if (typeof window === 'undefined') return true;
   try {
+    const query = new URLSearchParams(window.location.search);
+    const mode = String(query.get('mode') || '').trim().toLowerCase();
+    const dashboardParam = parseToggle(query.get('dashboard'));
+    const path = String(window.location.pathname || '').trim().toLowerCase().replace(/\/+$/, '');
+    const forceByPath = path.endsWith('/dashboard') || path.endsWith('/dashboard-mode');
+    if (dashboardParam || mode === 'dashboard' || forceByPath) return true;
     const saved = window.localStorage.getItem(DASHBOARD_MODE_STORAGE_KEY);
     if (saved === null) return true;
     return parseToggle(saved);
@@ -510,18 +692,54 @@ function normalizeSoundPreset(value: unknown): AlertSoundPreset {
   return 'alarm_pulse';
 }
 
+function normalizeMercuryBaseUrl(value: unknown): string {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
 function sanitizeDashboardConfig(raw: Partial<DashboardUserConfig> | null | undefined): DashboardUserConfig {
   return {
     pollMs: clampInteger(raw?.pollMs, 1000, 60000, DEFAULT_DASHBOARD_CONFIG.pollMs),
     flashMs: clampInteger(raw?.flashMs, 10000, 600000, DEFAULT_DASHBOARD_CONFIG.flashMs),
     askStaleHours: clampInteger(raw?.askStaleHours, 1, 72, DEFAULT_DASHBOARD_CONFIG.askStaleHours),
+    mercuryBaseUrl: normalizeMercuryBaseUrl(raw?.mercuryBaseUrl),
     marketplaceDings: clampInteger(raw?.marketplaceDings, 1, 9, DEFAULT_DASHBOARD_CONFIG.marketplaceDings),
     todayDings: clampInteger(raw?.todayDings, 1, 9, DEFAULT_DASHBOARD_CONFIG.todayDings),
     dingGapMs: clampInteger(raw?.dingGapMs, 250, 2500, DEFAULT_DASHBOARD_CONFIG.dingGapMs),
     soundPreset: normalizeSoundPreset(raw?.soundPreset),
     customSoundDataUrl: String(raw?.customSoundDataUrl || '').trim(),
+    marketplaceSoundPreset: normalizeSoundPreset(raw?.marketplaceSoundPreset),
+    marketplaceCustomSoundDataUrl: String(raw?.marketplaceCustomSoundDataUrl || '').trim(),
     customLogoDataUrl: String(raw?.customLogoDataUrl || '').trim(),
   };
+}
+
+function buildSoundConfigForAlertKind(baseRaw: DashboardUserConfig, kind: AudioAlertKind): DashboardUserConfig {
+  const base = sanitizeDashboardConfig(baseRaw);
+  if (kind === 'marketplace') {
+    return sanitizeDashboardConfig({
+      ...base,
+      soundPreset: base.marketplaceSoundPreset,
+      customSoundDataUrl: base.marketplaceCustomSoundDataUrl,
+    });
+  }
+  return base;
+}
+
+function isDashboardConfigEqual(leftRaw: DashboardUserConfig, rightRaw: DashboardUserConfig): boolean {
+  const left = sanitizeDashboardConfig(leftRaw);
+  const right = sanitizeDashboardConfig(rightRaw);
+  return left.pollMs === right.pollMs
+    && left.flashMs === right.flashMs
+    && left.askStaleHours === right.askStaleHours
+    && left.mercuryBaseUrl === right.mercuryBaseUrl
+    && left.marketplaceDings === right.marketplaceDings
+    && left.todayDings === right.todayDings
+    && left.dingGapMs === right.dingGapMs
+    && left.soundPreset === right.soundPreset
+    && left.customSoundDataUrl === right.customSoundDataUrl
+    && left.marketplaceSoundPreset === right.marketplaceSoundPreset
+    && left.marketplaceCustomSoundDataUrl === right.marketplaceCustomSoundDataUrl
+    && left.customLogoDataUrl === right.customLogoDataUrl;
 }
 
 function initialDashboardConfig(): DashboardUserConfig {
@@ -887,7 +1105,7 @@ function intakeBadgeForTicket(ticket: IntakeTicketCard): { label: string; classN
   if (ticket.messageTypeKey === 'other' && ticket.messageTypeLabel) return { label: ticket.messageTypeLabel, className: 'badge--msg-other' };
   if (ticket.messageTypeKey === 'ask') return { label: 'ASK', className: 'badge--ask' };
   if (ticket.kind === 'ask') return { label: 'ASK', className: 'badge--ask' };
-  return { label: 'UNCREATED', className: 'badge--alert' };
+  return { label: 'NEW ORDER', className: 'badge--alert' };
 }
 
 function shouldShowSourceBadge(ticket: IntakeTicketCard): boolean {
@@ -1266,6 +1484,7 @@ function effectiveDeliveryStatusFromTicketSearchRow(row: TicketSearchRow): strin
 type OrderPillTheme =
   | 'queued'
   | 'design-assigned'
+  | 'designed'
   | 'ready-for-ship'
   | 'delivered'
   | 'exception'
@@ -1290,7 +1509,7 @@ function classifyDesignStatus(designStatusRaw: string): OrderPillStatus | null {
   if (!status) return null;
   if (status.includes('NOT_ASSIGN') || status.includes('NOT_DESIGN') || status.includes('QUEUED')) return null;
   if (status.includes('ASSIGN')) return { label: 'Design Assigned', theme: 'design-assigned' };
-  if (status.includes('DESIGN') || status.includes('COMPLETE')) return { label: 'Designed', theme: 'design-assigned' };
+  if (status.includes('DESIGN') || status.includes('COMPLETE')) return { label: 'Designed', theme: 'designed' };
   const label = titleCaseStatus(status);
   if (!label) return null;
   return { label, theme: 'design-assigned' };
@@ -1345,10 +1564,9 @@ function mergeMessageFields(primary: MessageItem, secondary: MessageItem): Messa
 
 function formatCityStateZip(city: string, state: string, zip: string): string {
   const cityPart = String(city || '').trim();
-  const statePart = String(state || '').trim();
+  const statePart = abbreviateState(state);
   const zipPart = String(zip || '').trim();
   const left = [cityPart, statePart].filter(Boolean).join(', ');
-  if (left && zipPart) return `${left} ${zipPart}`;
   return left || zipPart;
 }
 
@@ -1375,6 +1593,14 @@ function formatHeaderDateShort(date: Date): string {
     month: 'numeric',
     day: 'numeric',
     year: '2-digit',
+  });
+}
+
+function formatHeaderDateFullYear(date: Date): string {
+  return date.toLocaleDateString([], {
+    month: 'numeric',
+    day: 'numeric',
+    year: 'numeric',
   });
 }
 
@@ -1519,7 +1745,15 @@ function mergeActiveOrderCard(target: Map<string, BoardCard>, nextCard: BoardCar
 
   const nextRank = ACTIVE_STAGE_RANK[nextCard.stage] || 99;
   const currentRank = ACTIVE_STAGE_RANK[existing.stage] || 99;
-  const nextHasMoreDetail = (nextCard.addressLine.length + nextCard.cityStateZip.length) > (existing.addressLine.length + existing.cityStateZip.length);
+  const nextHasMoreDetail = (
+    nextCard.addressLine.length
+    + nextCard.cityStateZip.length
+    + nextCard.deliveryZip.length
+  ) > (
+    existing.addressLine.length
+    + existing.cityStateZip.length
+    + existing.deliveryZip.length
+  );
   const nextDeliveryEpoch = deliveryDateSortEpoch(nextCard.deliveryDate);
   const currentDeliveryEpoch = deliveryDateSortEpoch(existing.deliveryDate);
   const nextHasLaterDelivery = nextDeliveryEpoch > currentDeliveryEpoch;
@@ -1538,7 +1772,27 @@ function mergeActiveOrderCard(target: Map<string, BoardCard>, nextCard: BoardCar
       recipientName: firstNonEmptyText(nextCard.recipientName, existing.recipientName),
       addressLine: firstNonEmptyText(nextCard.addressLine, existing.addressLine),
       cityStateZip: firstNonEmptyText(nextCard.cityStateZip, existing.cityStateZip),
+      deliveryZip: firstNonEmptyText(nextCard.deliveryZip, existing.deliveryZip),
     });
+    return;
+  }
+
+  // Even if the stage/source doesn't win, backfill missing address details (especially ZIP)
+  // from alternate feeds that do have them.
+  const merged = {
+    ...existing,
+    recipientName: firstNonEmptyText(existing.recipientName, nextCard.recipientName),
+    addressLine: firstNonEmptyText(existing.addressLine, nextCard.addressLine),
+    cityStateZip: firstNonEmptyText(existing.cityStateZip, nextCard.cityStateZip),
+    deliveryZip: firstNonEmptyText(existing.deliveryZip, nextCard.deliveryZip),
+  };
+  if (
+    merged.recipientName !== existing.recipientName
+    || merged.addressLine !== existing.addressLine
+    || merged.cityStateZip !== existing.cityStateZip
+    || merged.deliveryZip !== existing.deliveryZip
+  ) {
+    target.set(nextCard.ticketId, merged);
   }
 }
 
@@ -2064,10 +2318,14 @@ function buildPendingIntakeTickets(
       }
     }
 
-    const coarseAskDateEpoch = deliveryDateSortEpoch(msgDateRaw || deliveryDateRaw);
-    const staleByPreciseTime = effectiveAskHasTimePrecision && effectiveAskEpoch > 0 && (now - effectiveAskEpoch >= askStaleMs);
-    const staleByCoarseDate = !effectiveAskHasTimePrecision && coarseAskDateEpoch > 0 && (now - coarseAskDateEpoch >= (2 * 24 * 60 * 60 * 1000));
-    const isStaleAsk = allowStaleAskBadge && ask && !askAnswered && (staleByPreciseTime || staleByCoarseDate);
+    const staleReferenceRaw = msgDateRaw || deliveryDateRaw;
+    const staleEpoch = ask ? effectiveAskEpoch : toEpoch(staleReferenceRaw);
+    const staleHasTimePrecision = ask ? effectiveAskHasTimePrecision : hasExplicitTimeComponent(staleReferenceRaw);
+    const coarseAskDateEpoch = deliveryDateSortEpoch(staleReferenceRaw);
+    const staleByPreciseTime = staleHasTimePrecision && staleEpoch > 0 && (now - staleEpoch >= askStaleMs);
+    const staleByCoarseDate = !staleHasTimePrecision && coarseAskDateEpoch > 0 && (now - coarseAskDateEpoch >= (2 * 24 * 60 * 60 * 1000));
+    const staleEligibility = ask ? !askAnswered : true;
+    const isStaleAsk = allowStaleAskBadge && staleEligibility && (staleByPreciseTime || staleByCoarseDate);
 
     const isKnownNonOrderMessage = messageType.key === 'other' && messageType.label && messageType.label !== 'ORD';
     const kind: IntakeKind = isCancel
@@ -2152,9 +2410,10 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
+  const [todayAnchorKey, setTodayAnchorKey] = useState<string>(() => currentLocalDateKey());
   const [dateOffsetDays, setDateOffsetDays] = useState(0);
-  const [includeNextDay, setIncludeNextDay] = useState(true);
-  const [showDelivered, setShowDelivered] = useState(false);
+  const [includeNextDay, setIncludeNextDay] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
   const [isAudioAlertsEnabled, setIsAudioAlertsEnabled] = useState<boolean>(() => initialAudioAlertsEnabled());
   const [isDashboardMode, setIsDashboardMode] = useState<boolean>(() => initialDashboardMode());
   const [isConfigOpen, setIsConfigOpen] = useState(false);
@@ -2166,12 +2425,14 @@ export default function App() {
   const pendingListRef = useRef<HTMLDivElement | null>(null);
   const activeListRef = useRef<HTMLDivElement | null>(null);
   const soundUploadRef = useRef<HTMLInputElement | null>(null);
+  const marketplaceSoundUploadRef = useRef<HTMLInputElement | null>(null);
   const logoUploadRef = useRef<HTMLInputElement | null>(null);
   const unresolvedAskLogRef = useRef<Map<string, string>>(new Map());
   const activePaneSpinnerRequestedRef = useRef(true);
   const activePaneSpinnerInFlightRef = useRef(0);
   const pollInFlightRef = useRef(false);
   const pollQueuedRef = useRef(false);
+  const orderDetailZipByTicketRef = useRef<Map<string, string>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioAlertsEnabledRef = useRef(isAudioAlertsEnabled);
   const audioAlertSnapshotReadyRef = useRef(false);
@@ -2181,6 +2442,10 @@ export default function App() {
   const editingConfig = useMemo(
     () => sanitizeDashboardConfig(configDraft || config),
     [config, configDraft],
+  );
+  const hasConfigChanges = useMemo(
+    () => !isDashboardConfigEqual(editingConfig, config),
+    [config, editingConfig],
   );
   const configForLogoPreview = useMemo(
     () => (isConfigOpen ? editingConfig : config),
@@ -2365,15 +2630,18 @@ export default function App() {
     setConfigMessage('');
     setIsConfigOpen(false);
     if (soundUploadRef.current) soundUploadRef.current.value = '';
+    if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
     if (logoUploadRef.current) logoUploadRef.current.value = '';
   }, []);
   const saveConfigChanges = useCallback(() => {
     const nextConfig = sanitizeDashboardConfig(configDraft || config);
+    if (isDashboardConfigEqual(nextConfig, config)) return;
     setConfig(nextConfig);
     setConfigDraft(null);
     setConfigMessage('');
     setIsConfigOpen(false);
     if (soundUploadRef.current) soundUploadRef.current.value = '';
+    if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
     if (logoUploadRef.current) logoUploadRef.current.value = '';
   }, [config, configDraft]);
   const updateConfigNumber = useCallback((key: keyof DashboardUserConfig, valueRaw: string) => {
@@ -2387,6 +2655,7 @@ export default function App() {
     setConfigDraft(DEFAULT_DASHBOARD_CONFIG);
     setConfigMessage('Config reset to defaults.');
     if (soundUploadRef.current) soundUploadRef.current.value = '';
+    if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
     if (logoUploadRef.current) logoUploadRef.current.value = '';
   }, []);
   const handleCustomSoundUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
@@ -2416,17 +2685,56 @@ export default function App() {
       setConfigMessage('Failed to load custom sound file.');
     }
   }, [config, configDraft, queueAlertDings]);
+  const handleMarketplaceCustomSoundUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!String(file.type || '').toLowerCase().startsWith('audio/')) {
+      setConfigMessage('Please upload an audio file (wav, mp3, ogg, etc).');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > UPLOAD_MAX_BYTES) {
+      setConfigMessage('Audio file is too large. Keep it under 4 MB.');
+      event.target.value = '';
+      return;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const nextConfig = sanitizeDashboardConfig({
+        ...(configDraft || config),
+        marketplaceSoundPreset: 'custom_upload',
+        marketplaceCustomSoundDataUrl: dataUrl,
+      });
+      setConfigDraft(nextConfig);
+      setConfigMessage(`Delivery-service sound loaded: ${file.name}`);
+      queueAlertDings(1, { configOverride: buildSoundConfigForAlertKind(nextConfig, 'marketplace') });
+    } catch {
+      setConfigMessage('Failed to load delivery-service sound file.');
+    }
+  }, [config, configDraft, queueAlertDings]);
   const clearCustomSound = useCallback(() => {
     setConfigDraft(previous => {
       const base = sanitizeDashboardConfig(previous || config);
       return sanitizeDashboardConfig({
-      ...base,
-      customSoundDataUrl: '',
-      soundPreset: base.soundPreset === 'custom_upload' ? 'alarm_pulse' : base.soundPreset,
-    });
+        ...base,
+        customSoundDataUrl: '',
+        soundPreset: base.soundPreset === 'custom_upload' ? 'alarm_pulse' : base.soundPreset,
+      });
     });
     setConfigMessage('Custom sound cleared.');
     if (soundUploadRef.current) soundUploadRef.current.value = '';
+  }, [config]);
+  const clearMarketplaceCustomSound = useCallback(() => {
+    setConfigDraft(previous => {
+      const base = sanitizeDashboardConfig(previous || config);
+      return sanitizeDashboardConfig({
+        ...base,
+        marketplaceCustomSoundDataUrl: '',
+        marketplaceSoundPreset: base.marketplaceSoundPreset === 'custom_upload' ? 'alarm_pulse' : base.marketplaceSoundPreset,
+      });
+    });
+    setConfigMessage('Delivery-service sound cleared.');
+    if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
   }, [config]);
   const handleLogoUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -2464,12 +2772,18 @@ export default function App() {
     activePaneSpinnerRequestedRef.current = true;
     setIsRefreshingActiveOrders(true);
   }, []);
+  const setSelectedDateByKey = useCallback((dateKeyRaw: string) => {
+    const nextDate = localDateFromDateKey(dateKeyRaw);
+    if (!nextDate) return;
+    requestActiveOrdersRefreshSpinner();
+    setDateOffsetDays(dayOffsetFromToday(nextDate));
+  }, [requestActiveOrdersRefreshSpinner]);
   const selectedDate = useMemo(() => {
-    const date = new Date();
+    const date = localDateFromDateKey(todayAnchorKey) || new Date();
     date.setHours(0, 0, 0, 0);
     date.setDate(date.getDate() + dateOffsetDays);
     return date;
-  }, [dateOffsetDays]);
+  }, [dateOffsetDays, todayAnchorKey]);
   const sourceRangeWindows = useMemo(
     // Always query today + next day for canonical delivery-date reconciliation
     // and instant on/off filtering in the UI.
@@ -2485,8 +2799,8 @@ export default function App() {
     [selectedDate, includeNextDay],
   );
   const displayEligibleOrders = useMemo(
-    () => (showDelivered ? allActiveOrders : allActiveOrders.filter(card => card.stage !== 'delivered_or_exception')),
-    [allActiveOrders, showDelivered],
+    () => (showCompleted ? allActiveOrders : allActiveOrders.filter(card => !isCompletedOrder(card))),
+    [allActiveOrders, showCompleted],
   );
   const activeOrders = useMemo(() => {
     return displayEligibleOrders.filter(card => isWithinDateKeys(card.deliveryDate, allowedDeliveryDateKeys));
@@ -2509,6 +2823,23 @@ export default function App() {
     () => includeNextDay ? 0 : countOrdersForDateKey(displayEligibleOrders, nextDateKey),
     [displayEligibleOrders, includeNextDay, nextDateKey],
   );
+  const selectedDayOrderTotal = useMemo(
+    () => allActiveOrders.filter(card => toDateKey(card.deliveryDate) === selectedDateKey).length,
+    [allActiveOrders, selectedDateKey],
+  );
+  const selectedDayOrderCompleted = useMemo(
+    () => allActiveOrders.filter(card => toDateKey(card.deliveryDate) === selectedDateKey && isCompletedOrder(card)).length,
+    [allActiveOrders, selectedDateKey],
+  );
+  const selectedDayCompletionPercent = useMemo(() => {
+    if (!selectedDayOrderTotal) return 0;
+    return Math.max(0, Math.min(100, Math.round((selectedDayOrderCompleted / selectedDayOrderTotal) * 100)));
+  }, [selectedDayOrderCompleted, selectedDayOrderTotal]);
+  const selectedDayCountLabel = useMemo(
+    () => (selectedDateKey === currentLocalDateKey() ? 'Today' : formatHeaderDateShort(selectedDate)),
+    [selectedDate, selectedDateKey],
+  );
+  const nextDaySummaryCount = includeNextDay ? visibleNextDayCount : hiddenNextDayCount;
 
   const pollBoard = useCallback(async () => {
     const trackActivePaneSpinner = activePaneSpinnerRequestedRef.current;
@@ -2619,7 +2950,7 @@ export default function App() {
                 fromDate: window.deliveryDate,
                 toDate: window.deliveryThruDate,
                 // Keep source rows stable across toggle changes.
-                // The toggle should only hide/show delivered cards in the UI.
+                // The toggle should only hide/show completed cards in the UI.
                 notDelivered: false,
                 includeDelivered: true,
               }),
@@ -3007,6 +3338,7 @@ export default function App() {
           userReference: String(order.USER_REFERENCE || ''),
           recipientName: String(order.RECIPIENT_NAME || order.SUMMARY_TEXT || ''),
           addressLine: normalizedStreetLine(order),
+          deliveryZip: normalizedPostalCode(order),
           cityStateZip: formatCityStateZip(
             normalizedCity(order),
             normalizedStateAbbrev(order),
@@ -3070,6 +3402,7 @@ export default function App() {
           userReference,
           recipientName: String(row.RECIPIENT_NAME || '').trim(),
           addressLine: normalizedStreetLine(row),
+          deliveryZip: normalizedPostalCode(row),
           cityStateZip: formatCityStateZip(
             normalizedCity(row),
             normalizedStateAbbrev(row),
@@ -3106,6 +3439,7 @@ export default function App() {
           userReference,
           recipientName: String(row.RECIPIENT_NAME || '').trim(),
           addressLine: normalizedStreetLine(row),
+          deliveryZip: normalizedPostalCode(row),
           cityStateZip: formatCityStateZip(
             normalizedCity(row),
             normalizedStateAbbrev(row),
@@ -3168,6 +3502,7 @@ export default function App() {
           userReference,
           recipientName: String(row.RECIPIENT_NAME || '').trim(),
           addressLine: normalizedStreetLine(row),
+          deliveryZip: normalizedPostalCode(row),
           cityStateZip: formatCityStateZip(
             normalizedCity(row),
             normalizedStateAbbrev(row),
@@ -3183,6 +3518,49 @@ export default function App() {
         };
         statusLabelByTicketId.set(ticketId, friendlyStatusLabel(stage, stageReason));
         mergeActiveOrderCard(activeByTicket, candidate, true);
+      }
+
+      const cardsMissingZip = Array.from(activeByTicket.values())
+        .map(card => String(card.ticketId || '').trim())
+        .filter(ticketId => {
+          if (!ticketId) return false;
+          const card = activeByTicket.get(ticketId);
+          return !!card && !String(card.deliveryZip || '').trim();
+        });
+      const ticketIdsNeedingZipLookup = Array.from(new Set(
+        cardsMissingZip.filter(ticketId => !orderDetailZipByTicketRef.current.has(ticketId)),
+      ));
+
+      if (ticketIdsNeedingZipLookup.length > 0) {
+        const zipLookupResults = await allSettledInBatches(
+          ticketIdsNeedingZipLookup,
+          26,
+          async ticketId => {
+            const details = await getOrderDetailsCached(ticketId);
+            const zip = details ? normalizedPostalCode(details) : '';
+            return { ticketId, zip };
+          },
+        );
+        for (const lookup of zipLookupResults) {
+          if (lookup.status !== 'fulfilled') continue;
+          const ticketId = String(lookup.value.ticketId || '').trim();
+          if (!ticketId) continue;
+          const zip = String(lookup.value.zip || '').trim();
+          if (zip) {
+            orderDetailZipByTicketRef.current.set(ticketId, zip);
+          }
+        }
+      }
+
+      for (const ticketId of cardsMissingZip) {
+        const cachedZip = String(orderDetailZipByTicketRef.current.get(ticketId) || '').trim();
+        if (!cachedZip) continue;
+        const existing = activeByTicket.get(ticketId);
+        if (!existing || String(existing.deliveryZip || '').trim()) continue;
+        activeByTicket.set(ticketId, {
+          ...existing,
+          deliveryZip: cachedZip,
+        });
       }
 
       const referenceById = new Map<string, OrderReferenceEntry>();
@@ -3682,10 +4060,25 @@ export default function App() {
         const newAlertCounts = countNewAudioAlertsByKind(alertedItemKeysRef.current, nextAudioAlertKinds);
         const marketplaceDings = clampInteger(config.marketplaceDings, 1, 9, DEFAULT_MARKETPLACE_DINGS);
         const todayDings = clampInteger(config.todayDings, 1, 9, DEFAULT_TODAY_DINGS);
-        const dingCount = (newAlertCounts.marketplaceCount * marketplaceDings) + (newAlertCounts.todayCount * todayDings);
+        const marketplaceDingCount = newAlertCounts.marketplaceCount * marketplaceDings;
+        const todayDingCount = newAlertCounts.todayCount * todayDings;
         alertedItemKeysRef.current = nextAudioAlertKeys;
-        if (dingCount > 0 && audioAlertsEnabledRef.current) {
-          queueAlertDings(dingCount);
+        if (audioAlertsEnabledRef.current) {
+          let remainingDings = 12;
+          const marketplaceQueueCount = Math.max(0, Math.min(remainingDings, marketplaceDingCount));
+          remainingDings -= marketplaceQueueCount;
+          const todayQueueCount = Math.max(0, Math.min(remainingDings, todayDingCount));
+
+          if (marketplaceQueueCount > 0) {
+            queueAlertDings(marketplaceQueueCount, {
+              configOverride: buildSoundConfigForAlertKind(config, 'marketplace'),
+            });
+          }
+          if (todayQueueCount > 0) {
+            queueAlertDings(todayQueueCount, {
+              configOverride: buildSoundConfigForAlertKind(config, 'today'),
+            });
+          }
         }
       }
       setAllActiveOrders(reconciledActiveOrders);
@@ -3704,7 +4097,7 @@ export default function App() {
       }
       setLoading(false);
     }
-  }, [askStaleMs, config.flashMs, config.marketplaceDings, config.todayDings, queueAlertDings, sourceDeliveryDateKeys, sourceRangeWindows]);
+  }, [askStaleMs, config, queueAlertDings, sourceDeliveryDateKeys, sourceRangeWindows]);
 
   const runPoll = useCallback(async () => {
     if (pollInFlightRef.current) {
@@ -3722,6 +4115,36 @@ export default function App() {
       pollInFlightRef.current = false;
     }
   }, [pollBoard]);
+
+  useEffect(() => {
+    let timeoutId: number | null = null;
+    const syncTodayAnchor = (): void => {
+      const nextKey = currentLocalDateKey();
+      setTodayAnchorKey(previous => (previous === nextKey ? previous : nextKey));
+    };
+
+    const scheduleTopOfHourCheck = (): void => {
+      const now = new Date();
+      const nextHour = new Date(now);
+      nextHour.setMinutes(0, 0, 0);
+      nextHour.setHours(nextHour.getHours() + 1);
+      const delayMs = Math.max(1000, nextHour.getTime() - now.getTime());
+      timeoutId = window.setTimeout(() => {
+        syncTodayAnchor();
+        scheduleTopOfHourCheck();
+      }, delayMs);
+    };
+
+    syncTodayAnchor();
+    scheduleTopOfHourCheck();
+    return () => {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  useEffect(() => {
+    setWorkflowBaseUrlOverride(config.mercuryBaseUrl);
+  }, [config.mercuryBaseUrl]);
 
   useEffect(() => {
     const pollMs = clampInteger(config.pollMs, 1000, 60000, DEFAULT_POLL_MS);
@@ -3854,19 +4277,13 @@ export default function App() {
     [activeOrders.length, pendingTickets.length],
   );
 
-  const urgentMarketplaceCount = useMemo(() => {
-    const ticketCount = pendingTickets.filter(ticket => ticket.isMarketplace).length;
-    const orderCount = activeOrders.filter(card => card.isMarketplace).length;
-    return ticketCount + orderCount;
-  }, [activeOrders, pendingTickets]);
-
   const uncreatedTicketCount = useMemo(
     () => pendingTickets.filter(ticket => ticket.kind === 'uncreated').length,
     [pendingTickets],
   );
 
   const todayLabel = useMemo(() => {
-    const startLabel = formatHeaderDateShort(selectedDate);
+    const startLabel = includeNextDay ? formatHeaderDateShort(selectedDate) : formatHeaderDateFullYear(selectedDate);
     if (!includeNextDay) return startLabel;
     const nextDate = new Date(selectedDate);
     nextDate.setDate(nextDate.getDate() + 1);
@@ -3907,11 +4324,7 @@ export default function App() {
           </div>
           <div className="app__title-text">
             <h1>Oliver Flowers Order Flow Board</h1>
-            {isConfigOpen ? (
-              <div className="app__today-wrap app__today-wrap--config">
-                <div className="app__today app__today--config">Configuration Mode</div>
-              </div>
-            ) : (
+            {!isConfigOpen ? (
               <div className="app__today-wrap">
                 <button
                   type="button"
@@ -3922,9 +4335,18 @@ export default function App() {
                   }}
                   aria-label="Previous day"
                 >
-                  &#8592;
+                  <FontAwesomeIcon icon={faChevronLeft} />
                 </button>
                 <div className="app__today">{todayLabel}</div>
+                <label className="app__date-nav app__date-nav--native-picker" aria-label="Pick day">
+                  <FontAwesomeIcon icon={faCalendarDay} />
+                  <input
+                    type="date"
+                    className="app__date-nav-input"
+                    value={selectedDateKey}
+                    onChange={(event) => setSelectedDateByKey(event.target.value)}
+                  />
+                </label>
                 <button
                   type="button"
                   className="app__date-nav"
@@ -3934,24 +4356,14 @@ export default function App() {
                   }}
                   aria-label="Next day"
                 >
-                  &#8594;
+                  <FontAwesomeIcon icon={faChevronRight} />
                 </button>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
-        <div className="app__controls">
-          {isConfigOpen ? (
-            <>
-              <button type="button" className="app__control-btn" onClick={cancelConfigChanges}>
-                Cancel
-              </button>
-              <button type="button" className="app__control-btn app__control-btn--primary" onClick={saveConfigChanges}>
-                Save Config
-              </button>
-            </>
-          ) : (
-            <>
+        {!isConfigOpen ? (
+          <div className="app__controls">
               <label className="app__control-check">
                 <input
                   type="checkbox"
@@ -3960,18 +4372,24 @@ export default function App() {
                     setIncludeNextDay(event.target.checked);
                   }}
                 />
-                <span>Include next day</span>
+                <span className="app__control-label">
+                  <FontAwesomeIcon icon={faCalendarDay} />
+                  Include next day
+                </span>
               </label>
               <label className="app__control-check">
                 <input
                   type="checkbox"
-                  checked={showDelivered}
+                  checked={showCompleted}
                   onChange={(event) => {
                     requestActiveOrdersRefreshSpinner();
-                    setShowDelivered(event.target.checked);
+                    setShowCompleted(event.target.checked);
                   }}
                 />
-                <span>Show delivered</span>
+                <span className="app__control-label">
+                  <FontAwesomeIcon icon={faCircleCheck} />
+                  Show completed
+                </span>
               </label>
               <label className="app__control-check">
                 <input
@@ -3985,46 +4403,69 @@ export default function App() {
                     }
                   }}
                 />
-                <span>Audio alerts</span>
+                <span className="app__control-label">
+                  <FontAwesomeIcon icon={faVolumeHigh} />
+                  Audio alerts
+                </span>
               </label>
               <button
                 type="button"
                 className={`app__control-btn${isAutoScrollEnabled ? '' : ' app__control-btn--off'}`}
                 onClick={() => setIsAutoScrollEnabled(previous => !previous)}
               >
+                <FontAwesomeIcon icon={faScroll} />
                 Auto-scroll: {isAutoScrollEnabled ? 'On' : 'Off'}
               </button>
               <button type="button" className="app__control-btn app__control-btn--primary" onClick={() => void toggleDashboardMode()}>
+                <FontAwesomeIcon icon={isDashboardMode ? faXmark : faUpRightAndDownLeftFromCenter} />
                 {isDashboardMode ? 'Exit Dashboard' : 'Dashboard Mode'}
               </button>
-            </>
-          )}
-        </div>
+          </div>
+        ) : null}
       </header>
 
       {isConfigOpen ? (
         <section className="app__config-page">
           <div className="app__config-header">
             <div>
-              <div className="app__config-title">Dashboard Configuration</div>
-              <div className="app__config-subtitle">Tune audio alerts, timing, and branding for this station.</div>
-            </div>
-            <div className="app__config-actions app__config-actions--header">
-              <button type="button" className="app__control-btn" onClick={cancelConfigChanges}>
-                Cancel
-              </button>
-              <button type="button" className="app__control-btn app__control-btn--primary" onClick={saveConfigChanges}>
-                Save Config
-              </button>
+              <div className="app__config-title">
+                <FontAwesomeIcon icon={faGear} />
+                Dashboard Configuration
+              </div>
             </div>
           </div>
           {configMessage ? <div className="app__config-message">{configMessage}</div> : null}
 
           <section className="app__config-section">
+            <h2 className="app__config-section-title">API / Mercury</h2>
+            <div className="app__config-grid">
+              <label className="app__config-row">
+                <span>Dashboard API route</span>
+                <input type="text" value="same-origin (/api)" readOnly />
+              </label>
+              <label className="app__config-row app__config-row--full">
+                <span>Mercury base URL (optional)</span>
+                <input
+                  type="text"
+                  value={editingConfig.mercuryBaseUrl}
+                  placeholder="http://127.0.0.1:17344"
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setConfigDraft(previous => sanitizeDashboardConfig({
+                      ...(previous || config),
+                      mercuryBaseUrl: nextValue,
+                    }));
+                  }}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="app__config-section">
             <h2 className="app__config-section-title">Audio Alert Settings</h2>
             <div className="app__config-grid">
               <label className="app__config-row">
-                <span>Marketplace dings</span>
+                <span>Delivery-service alert repeats</span>
                 <input
                   type="number"
                   min={1}
@@ -4034,7 +4475,7 @@ export default function App() {
                 />
               </label>
               <label className="app__config-row">
-                <span>Today-order dings</span>
+                <span>Regular-order alert repeats</span>
                 <input
                   type="number"
                   min={1}
@@ -4044,7 +4485,7 @@ export default function App() {
                 />
               </label>
               <label className="app__config-row">
-                <span>Ding gap (ms)</span>
+                <span>Alert repeat interval (ms)</span>
                 <input
                   type="number"
                   min={250}
@@ -4054,7 +4495,7 @@ export default function App() {
                 />
               </label>
               <label className="app__config-row app__config-row--full">
-                <span>Alarm sound preset</span>
+                <span>Regular order sound preset</span>
                 <select
                   value={editingConfig.soundPreset}
                   onChange={(event) => {
@@ -4072,12 +4513,12 @@ export default function App() {
                 </select>
               </label>
               <div className="app__config-row app__config-row--full">
-                <span>Custom alarm file</span>
+                <span>Regular-order audio file</span>
                 <div className="app__config-inline-actions">
                   <input
                     ref={soundUploadRef}
                     type="file"
-                    accept="audio/*"
+                    accept=".wav,.mp3,.ogg,.m4a,audio/*"
                     onChange={(event) => {
                       void handleCustomSoundUpload(event);
                     }}
@@ -4090,9 +4531,56 @@ export default function App() {
                     className="app__control-btn"
                     onClick={() => queueAlertDings(1, { configOverride: editingConfig })}
                   >
-                    Test sound
+                    <FontAwesomeIcon icon={faPlay} />
+                    Test
                   </button>
                 </div>
+                <div className="app__config-help">Accepted formats: .wav, .mp3, .ogg, .m4a. Max 4 MB. Short clips are recommended.</div>
+              </div>
+              <label className="app__config-row app__config-row--full">
+                <span>Delivery-service sound preset</span>
+                <select
+                  value={editingConfig.marketplaceSoundPreset}
+                  onChange={(event) => {
+                    const nextPreset = normalizeSoundPreset(event.target.value);
+                    setConfigDraft(previous => sanitizeDashboardConfig({
+                      ...(previous || config),
+                      marketplaceSoundPreset: nextPreset,
+                    }));
+                  }}
+                >
+                  <option value="alarm_pulse">Alarm Pulse (default)</option>
+                  <option value="classic_ding">Classic Ding</option>
+                  <option value="bright_beep">Bright Beep</option>
+                  <option value="custom_upload">Custom Uploaded Sound</option>
+                </select>
+              </label>
+              <div className="app__config-row app__config-row--full">
+                <span>Delivery-service audio file</span>
+                <div className="app__config-inline-actions">
+                  <input
+                    ref={marketplaceSoundUploadRef}
+                    type="file"
+                    accept=".wav,.mp3,.ogg,.m4a,audio/*"
+                    onChange={(event) => {
+                      void handleMarketplaceCustomSoundUpload(event);
+                    }}
+                  />
+                  <button type="button" className="app__control-btn" onClick={clearMarketplaceCustomSound}>
+                    Clear sound
+                  </button>
+                  <button
+                    type="button"
+                    className="app__control-btn"
+                    onClick={() => queueAlertDings(1, {
+                      configOverride: buildSoundConfigForAlertKind(editingConfig, 'marketplace'),
+                    })}
+                  >
+                    <FontAwesomeIcon icon={faPlay} />
+                    Test
+                  </button>
+                </div>
+                <div className="app__config-help">Accepted formats: .wav, .mp3, .ogg, .m4a. Max 4 MB. Short clips are recommended.</div>
               </div>
             </div>
           </section>
@@ -4121,7 +4609,7 @@ export default function App() {
                 />
               </label>
               <label className="app__config-row">
-                <span>ASK stale threshold (hours)</span>
+                <span>Message stale threshold (hours)</span>
                 <input
                   type="number"
                   min={1}
@@ -4151,15 +4639,35 @@ export default function App() {
                     Reset logo
                   </button>
                 </div>
+                <div className="app__config-branding-preview">
+                  <div className="app__config-branding-preview-label">
+                    {editingConfig.customLogoDataUrl ? 'Custom logo is active' : 'Using default logo'}
+                  </div>
+                  <div className="app__config-branding-preview-frame">
+                    <img
+                      src={editingConfig.customLogoDataUrl || '/olivers.png'}
+                      alt="Configured shop logo preview"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           </section>
 
           <div className="app__config-actions">
+            <button type="button" className="app__control-btn" onClick={cancelConfigChanges}>
+              Cancel
+            </button>
             <button type="button" className="app__control-btn" onClick={resetConfigDefaults}>
               Reset defaults
             </button>
-            <button type="button" className="app__control-btn app__control-btn--primary" onClick={saveConfigChanges}>
+            <button
+              type="button"
+              className="app__control-btn app__control-btn--primary"
+              onClick={saveConfigChanges}
+              disabled={!hasConfigChanges}
+            >
+              <FontAwesomeIcon icon={faFloppyDisk} />
               Save Config
             </button>
           </div>
@@ -4177,20 +4685,18 @@ export default function App() {
             <div className="app__rotation-chip">
               Page 1/1: Alerts + Active Orders
             </div>
-            <div className="app__rotation-chip app__rotation-chip--subtle">API: {WORKFLOW_BASE_URL}</div>
             <button
               type="button"
               className="app__control-btn"
               onClick={openConfigPage}
               title="Open dashboard configuration"
             >
-              <span aria-hidden="true">&#9881;</span> Config
+              <FontAwesomeIcon icon={faGear} /> Config
             </button>
           </div>
           <div className="app__rotation-meta app__meta">
             <span>Total Orders: {totalOrderCount}</span>
-            <span>Uncreated Tickets: {uncreatedTicketCount}</span>
-            <span>Marketplace Priority: {urgentMarketplaceCount}</span>
+            <span>New Orders: {uncreatedTicketCount}</span>
             <span>Updated: {lastUpdated || '...'}</span>
           </div>
         </div>
@@ -4200,12 +4706,15 @@ export default function App() {
         <div className="board-lanes board-lanes--two">
             <section className="lane lane--critical">
               <header className="lane__header">
-                <h2>Act Now: Intake + ASK Messages</h2>
+                <h2>New Orders + Unanswered Messages</h2>
                 <span className="lane__count">{pendingTickets.length}</span>
               </header>
               <div className="lane__cards" ref={pendingListRef}>
                 {pendingTickets.length === 0 ? (
-                  <div className="lane__empty">No pending intake tickets right now.</div>
+                  <div className="lane__empty">
+                    <FontAwesomeIcon className="lane__empty-icon" icon={faInbox} />
+                    <span className="lane__empty-text">No pending intake tickets right now.</span>
+                  </div>
                 ) : (
                   pendingTickets.map(ticket => {
                     const intakeBadge = intakeBadgeForTicket(ticket);
@@ -4242,7 +4751,7 @@ export default function App() {
                               </span>
                             ) : null}
                             {ticket.isMarketplace ? <span className="badge badge--marketplace">UBER/DD</span> : null}
-                            {ticket.isStaleAsk ? <span className="badge badge--stale-ask">12h+ Unanswered</span> : null}
+                            {ticket.isStaleAsk ? <span className="badge badge--stale-ask">{Math.max(1, config.askStaleHours)}h+ Stale</span> : null}
                           </div>
                         </header>
                         <div className="ticket-card__main-row">
@@ -4261,26 +4770,31 @@ export default function App() {
               </div>
             </section>
 
-            <section className="lane">
+            <section className="lane lane--with-progress">
               <header className="lane__header">
                 <div className="lane__title-block">
                   <h2 className="lane__title-inline">
-                    <span>{showDelivered ? 'Orders (Including Delivered)' : 'Active Orders (Not Completed)'}</span>
+                    <span>{showCompleted ? 'Orders (Including Completed)' : 'Active Orders'}</span>
                     {isRefreshingActiveOrders ? <span className="lane__spinner" aria-hidden="true" /> : null}
                   </h2>
                   <div className="lane__submeta">
-                    <span>Today: {visibleTodayCount}</span>
-                    <span>{includeNextDay ? `Next day: ${visibleNextDayCount}` : `Next day hidden: ${hiddenNextDayCount}`}</span>
+                    <span>{selectedDayCountLabel}: {visibleTodayCount}</span>
+                    <span>Next day: {nextDaySummaryCount}</span>
                   </div>
                 </div>
                 <span className="lane__count">{activeOrders.length}</span>
               </header>
               <div className="lane__cards lane__cards--two-col" ref={activeListRef}>
                 {activeOrders.length === 0 ? (
-                  <div className="lane__empty">No active orders at the moment.</div>
+                  <div className="lane__empty">
+                    <FontAwesomeIcon className="lane__empty-icon" icon={faTruck} />
+                    <span className="lane__empty-text">No active orders at the moment.</span>
+                  </div>
                 ) : (
                   activeOrders.map(card => {
                     const statusPill = singleStatusPill(card);
+                    const dateLabel = shouldUsePickupDateLabel(card) ? 'Pickup' : 'Delivery';
+                    const footerZip = deriveCardFooterZip(card);
                     return (
                       <article
                         key={card.ticketId}
@@ -4298,13 +4812,30 @@ export default function App() {
                         <div className="order-card__meta">{card.addressLine || 'No street address'}</div>
                         <div className="order-card__meta">{card.cityStateZip || 'No city/state/zip'}</div>
                         <footer className="order-card__footer">
-                          <span>{formatMonthDay(card.deliveryDate) || 'No delivery date'}</span>
+                          <span className="order-card__footer-item">{dateLabel} {formatMonthDay(card.deliveryDate) || '--'}</span>
+                          {footerZip ? <span className="order-card__footer-item">ZIP {footerZip}</span> : null}
                         </footer>
                       </article>
                     );
                   })
                 )}
               </div>
+              <footer className="lane__progress">
+                <div className="lane__progress-meta">
+                  <span>Completion ({selectedDayCountLabel})</span>
+                  <span>{selectedDayOrderCompleted}/{selectedDayOrderTotal} ({selectedDayCompletionPercent}%)</span>
+                </div>
+                <div
+                  className="lane__progress-track"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={selectedDayCompletionPercent}
+                  aria-label="Selected day order completion"
+                >
+                  <div className="lane__progress-fill" style={{ width: `${selectedDayCompletionPercent}%` }} />
+                </div>
+              </footer>
             </section>
           </div>
       </main>

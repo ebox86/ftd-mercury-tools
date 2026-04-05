@@ -3,7 +3,7 @@
 #endif
 
 #ifndef MyAppPublisher
-  #define MyAppPublisher "FTD"
+  #define MyAppPublisher "ebox86.com"
 #endif
 
 #ifndef MyAppURL
@@ -42,17 +42,24 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayName={#MyAppName}
+UninstallDisplayIcon={app}\app-icon.ico
 SetupLogging=yes
 SetupIconFile={#SetupIconPath}
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SetupIconPath}"; DestDir: "{app}"; DestName: "app-icon.ico"; Flags: ignoreversion
 
 [Run]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
   Parameters: "{code:GetInstallParameters}"; \
   StatusMsg: "Installing Weather XOAP shim in IIS..."; \
   Flags: runhidden waituntilterminated
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
+  Parameters: "{code:GetSetMercuryWeatherUrlParameters}"; \
+  StatusMsg: "Updating Mercury DashboardWeatherGadgetURL..."; \
+  Flags: runhidden waituntilterminated; \
+  Check: ShouldRunMercuryWeatherUrlUpdate
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
@@ -68,6 +75,8 @@ var
   CmdSkipHostsEntry: string;
   CmdSkipIisPrereqs: string;
   CmdRemoveInstallRoot: string;
+  CmdUpdateMercuryUrl: string;
+  CmdMercuryXmlPath: string;
 
 function ReadSwitchValue(const SwitchName: string; const DefaultValue: string): string;
 var
@@ -109,6 +118,23 @@ begin
   Result := '';
 end;
 
+function ResolveMercuryXmlPathDefault(): string;
+begin
+  if FileExists('C:\Program Files (x86)\Wings\Mercury.xml') then
+  begin
+    Result := 'C:\Program Files (x86)\Wings\Mercury.xml';
+    Exit;
+  end;
+
+  if FileExists('C:\Wings\Mercury.xml') then
+  begin
+    Result := 'C:\Wings\Mercury.xml';
+    Exit;
+  end;
+
+  Result := '';
+end;
+
 function InitializeSetup(): Boolean;
 begin
   CmdSiteName := ReadSwitchValue('SITENAME', 'FTD.XoapWeatherShim');
@@ -117,6 +143,8 @@ begin
   CmdSkipHostsEntry := NormalizeBool(ReadSwitchValue('SKIPHOSTSENTRY', 'false'));
   CmdSkipIisPrereqs := NormalizeBool(ReadSwitchValue('SKIPIISPREREQS', 'false'));
   CmdRemoveInstallRoot := NormalizeBool(ReadSwitchValue('REMOVEINSTALLROOT', 'false'));
+  CmdUpdateMercuryUrl := NormalizeBool(ReadSwitchValue('UPDATEMERCURYURL', 'true'));
+  CmdMercuryXmlPath := ReadSwitchValue('MERCURYXMLPATH', '');
 
   if CmdSiteName = '' then
   begin
@@ -160,6 +188,20 @@ begin
     Exit;
   end;
 
+  if CmdUpdateMercuryUrl = '' then
+  begin
+    MsgBox('UPDATEMERCURYURL must be true/false (or 1/0, yes/no).', mbCriticalError, MB_OK);
+    Result := False;
+    Exit;
+  end;
+
+  if (CmdUpdateMercuryUrl = 'true') and (Trim(CmdMercuryXmlPath) <> '') and (not FileExists(CmdMercuryXmlPath)) then
+  begin
+    MsgBox('MERCURYXMLPATH does not exist: ' + CmdMercuryXmlPath, mbCriticalError, MB_OK);
+    Result := False;
+    Exit;
+  end;
+
   Result := True;
 end;
 
@@ -182,4 +224,33 @@ begin
     '" -HostName "' + CmdHostName +
     '" -InstallRoot "' + CmdInstallRoot +
     ' -RemoveInstallRoot:$' + CmdRemoveInstallRoot;
+end;
+
+function ShouldRunMercuryWeatherUrlUpdate(): Boolean;
+begin
+  if CmdUpdateMercuryUrl <> 'true' then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  if Trim(CmdMercuryXmlPath) <> '' then
+  begin
+    Result := FileExists(CmdMercuryXmlPath);
+    Exit;
+  end;
+
+  Result := ResolveMercuryXmlPathDefault() <> '';
+end;
+
+function GetSetMercuryWeatherUrlParameters(Param: string): string;
+begin
+  Result := '-NoProfile -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\scripts\set-mercury-weather-gadget-url.ps1') +
+    '" -HostName "' + CmdHostName + '"';
+
+  if Trim(CmdMercuryXmlPath) <> '' then
+  begin
+    Result := Result + ' -MercuryXmlPath "' + CmdMercuryXmlPath + '"';
+  end;
 end;

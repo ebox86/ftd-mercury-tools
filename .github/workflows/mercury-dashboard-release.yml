@@ -160,7 +160,7 @@ jobs:
           $publisherUrl = "https://github.com/${{ github.repository }}"
           .\mercury-orders-tv-dashboard\tools\build-installer.ps1 `
             -Version "${{ steps.meta.outputs.version }}" `
-            -Publisher "FTD" `
+            -Publisher "ebox86.com" `
             -PublisherUrl $publisherUrl `
             -NodeRuntimeDir "${{ steps.tooling.outputs.node_runtime_dir }}"
 

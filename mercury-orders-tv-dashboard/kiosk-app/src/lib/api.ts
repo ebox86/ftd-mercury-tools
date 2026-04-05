@@ -14,22 +14,36 @@ import type {
   TicketSearchDataset,
 } from './types';
 
-const RAW_BASE_URL = String((import.meta.env.VITE_WORKFLOW_BASE_URL as string | undefined) || '').trim();
-const BASE_URL = RAW_BASE_URL.replace(/\/+$/, '');
-export const WORKFLOW_BASE_URL = BASE_URL || 'same-origin (/api)';
+const RAW_ENV_BASE_URL = String((import.meta.env.VITE_WORKFLOW_BASE_URL as string | undefined) || '').trim();
+
+function normalizeBaseUrl(raw: string): string {
+  return String(raw || '').trim().replace(/\/+$/, '');
+}
+
+const ENV_BASE_URL = normalizeBaseUrl(RAW_ENV_BASE_URL);
+let runtimeBaseUrlOverride = '';
+
+function effectiveBaseUrl(): string {
+  return runtimeBaseUrlOverride || ENV_BASE_URL;
+}
+
+export function setWorkflowBaseUrlOverride(raw: string): void {
+  runtimeBaseUrlOverride = normalizeBaseUrl(raw);
+}
 
 function buildRequestUrl(path: string): string {
+  const baseUrl = effectiveBaseUrl();
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  if (!BASE_URL) return normalizedPath;
+  if (!baseUrl) return normalizedPath;
 
-  if (BASE_URL.endsWith('/api/workflow') && normalizedPath.startsWith('/api/workflow/')) {
-    return `${BASE_URL}${normalizedPath.slice('/api/workflow'.length)}`;
+  if (baseUrl.endsWith('/api/workflow') && normalizedPath.startsWith('/api/workflow/')) {
+    return `${baseUrl}${normalizedPath.slice('/api/workflow'.length)}`;
   }
-  if (BASE_URL.endsWith('/api') && normalizedPath.startsWith('/api/')) {
-    return `${BASE_URL}${normalizedPath.slice('/api'.length)}`;
+  if (baseUrl.endsWith('/api') && normalizedPath.startsWith('/api/')) {
+    return `${baseUrl}${normalizedPath.slice('/api'.length)}`;
   }
 
-  return `${BASE_URL}${normalizedPath}`;
+  return `${baseUrl}${normalizedPath}`;
 }
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {

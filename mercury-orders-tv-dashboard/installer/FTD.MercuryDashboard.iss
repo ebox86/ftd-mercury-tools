@@ -3,7 +3,7 @@
 #endif
 
 #ifndef MyAppPublisher
-  #define MyAppPublisher "FTD"
+  #define MyAppPublisher "ebox86.com"
 #endif
 
 #ifndef MyAppURL
@@ -42,11 +42,13 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayName={#MyAppName}
+UninstallDisplayIcon={app}\app-icon.ico
 SetupLogging=yes
 SetupIconFile={#SetupIconPath}
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SetupIconPath}"; DestDir: "{app}"; DestName: "app-icon.ico"; Flags: ignoreversion
 
 [Run]
 Filename: "{app}\service-runtime\FTD.Mercury.Dashboard.ServiceHost.exe"; \

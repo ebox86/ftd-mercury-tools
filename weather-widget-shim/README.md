@@ -134,6 +134,8 @@ Supported installer switches:
 - `/INSTALLROOT=C:\FTDTools\XoapWeatherShim`
 - `/SKIPHOSTSENTRY=false`
 - `/SKIPIISPREREQS=false` (default keeps install easy on new computers)
+- `/UPDATEMERCURYURL=true` (default updates `DashboardWeatherGadgetURL` when `Mercury.xml` is found)
+- `/MERCURYXMLPATH=C:\Program Files (x86)\Wings\Mercury.xml` (optional explicit path)
 - `/REMOVEINSTALLROOT=false` (used on uninstall)
 
 ## Data Source

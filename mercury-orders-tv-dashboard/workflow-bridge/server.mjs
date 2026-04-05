@@ -900,7 +900,20 @@ function normalizeTicketSearchRow(rawRow = {}) {
       'STATE_NAME',
       'RECIPIENT_STATE',
     ]),
-    RECIPIENT_ZIP: firstRowValue(row, ['RECIPIENT_ZIP', 'RECIPIENT_POSTAL_CODE', 'ZIP', 'POSTAL_CODE']),
+    RECIPIENT_ZIP: firstRowValue(row, [
+      'RECIPIENT_ZIP',
+      'RECIPIENT_ZIP_CODE',
+      'RECIPIENT_POSTAL_CODE',
+      'RECIPIENT_POSTAL',
+      'ZIP_CODE',
+      'ZIP5',
+      'ZIP_5',
+      'ZIP',
+      'POSTAL_CODE',
+      'POST_CODE',
+      'POSTAL',
+      'POSTCODE',
+    ]),
     DELIVERY_DATE: firstRowValue(row, ['DELIVERY_DATE', 'DELIV_DATE', 'DELIVERYDATETIME', 'DELIVERY_DATETIME']),
     SALE_DATE: firstRowValue(row, ['SALE_DATE', 'SALEDATE']),
     CUSTOMER_NAME: firstRowValue(row, ['CUSTOMER_NAME', 'CUST_NAME', 'CUSTOMER']),
@@ -1309,6 +1322,15 @@ function normalizeLiveZoneOrderRow(rawRow, fallbackDeliveryDate = '') {
       || row.STATE
       || ''
     ).trim(),
+    RECIPIENT_ZIP: firstRowValue(row, [
+      'RECIPIENT_ZIP',
+      'RECIPIENT_ZIP_CODE',
+      'RECIPIENT_POSTAL_CODE',
+      'ZIP_CODE',
+      'ZIP',
+      'POSTAL_CODE',
+      'POST_CODE',
+    ]),
     USER_REFERENCE: normalizedUserReference
   };
 }
@@ -1438,6 +1460,7 @@ async function getLiveOrdersByRoutes(params) {
       RECIPIENT_ADDRESS: String(row.RECIPIENT_ADDRESS || '').trim(),
       RECIPIENT_CITY: String(row.RECIPIENT_CITY || '').trim(),
       RECIPIENT_STATE_ABBREV: String(row.RECIPIENT_STATE_ABBREV || '').trim(),
+      RECIPIENT_ZIP: String(row.RECIPIENT_ZIP || '').trim(),
       ROUTE_ID: '',
       ROUTE_NAME: String(row.ROUTE_NAME || '').trim(),
       DRIVER_NAME: '',

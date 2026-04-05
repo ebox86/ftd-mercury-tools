@@ -59,7 +59,7 @@ jobs:
       - name: Build installer
         run: |
           $publisherUrl = "https://github.com/${{ github.repository }}"
-          .\scanner-browser-bridge\tools\build-installer.ps1 -Version "${{ steps.meta.outputs.version }}" -Publisher "FTD" -PublisherUrl $publisherUrl
+          .\scanner-browser-bridge\tools\build-installer.ps1 -Version "${{ steps.meta.outputs.version }}" -Publisher "ebox86.com" -PublisherUrl $publisherUrl
 
       - name: Hash installer
         id: hash

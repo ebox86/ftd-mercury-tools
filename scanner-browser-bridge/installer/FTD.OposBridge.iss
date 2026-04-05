@@ -3,7 +3,7 @@
 #endif
 
 #ifndef MyAppPublisher
-  #define MyAppPublisher "FTD"
+  #define MyAppPublisher "ebox86.com"
 #endif
 
 #ifndef MyAppURL
@@ -38,10 +38,12 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayName={#MyAppName}
+UninstallDisplayIcon={app}\app-icon.ico
 SetupLogging=yes
 SetupIconFile={#SetupIconPath}
 
 [Files]
+Source: "{#SetupIconPath}"; DestDir: "{app}"; DestName: "app-icon.ico"; Flags: ignoreversion
 Source: "..\opos-scanner-bridge.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\install-opos-bridge-task.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\uninstall-opos-bridge-task.ps1"; DestDir: "{app}"; Flags: ignoreversion
