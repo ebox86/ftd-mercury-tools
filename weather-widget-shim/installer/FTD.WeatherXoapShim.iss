@@ -53,17 +53,17 @@ Source: "{#SetupIconPath}"; DestDir: "{app}"; DestName: "app-icon.ico"; Flags: i
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
   Parameters: "{code:GetInstallParameters}"; \
   StatusMsg: "Installing Weather XOAP shim in IIS..."; \
-  Flags: runhidden waituntilterminated runascurrentuser
+  Flags: runhidden waituntilterminated
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
   Parameters: "{code:GetSetMercuryWeatherUrlParameters}"; \
   StatusMsg: "Updating Mercury DashboardWeatherGadgetURL..."; \
-  Flags: runhidden waituntilterminated runascurrentuser; \
+  Flags: runhidden waituntilterminated; \
   Check: ShouldRunMercuryWeatherUrlUpdate
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
   Parameters: "{code:GetUninstallParameters}"; \
-  Flags: runhidden waituntilterminated runascurrentuser; \
+  Flags: runhidden waituntilterminated; \
   RunOnceId: "FTD.WeatherXoapShim.Uninstall"
 
 [Code]
@@ -213,15 +213,26 @@ begin
   Result := True;
 end;
 
+function AppendSwitch(const ParamsValue: string; const SwitchName: string; const SwitchValue: string): string;
+begin
+  Result := ParamsValue;
+
+  if SwitchValue = 'true' then
+  begin
+    Result := Result + ' -' + SwitchName;
+  end;
+end;
+
 function GetInstallParameters(Param: string): string;
 begin
   Result := '-NoProfile -ExecutionPolicy Bypass -File "' +
     ExpandConstant('{app}\scripts\install-weather-xoap-shim.ps1') +
     '" -SiteName "' + CmdSiteName +
     '" -HostName "' + CmdHostName +
-    '" -InstallRoot "' + CmdInstallRoot +
-    '" -SkipHostsEntry:$' + CmdSkipHostsEntry +
-    ' -SkipIisPrereqs:$' + CmdSkipIisPrereqs;
+    '" -InstallRoot "' + CmdInstallRoot + '"';
+
+  Result := AppendSwitch(Result, 'SkipHostsEntry', CmdSkipHostsEntry);
+  Result := AppendSwitch(Result, 'SkipIisPrereqs', CmdSkipIisPrereqs);
 end;
 
 function GetUninstallParameters(Param: string): string;
@@ -230,8 +241,9 @@ begin
     ExpandConstant('{app}\scripts\uninstall-weather-xoap-shim.ps1') +
     '" -SiteName "' + CmdSiteName +
     '" -HostName "' + CmdHostName +
-    '" -InstallRoot "' + CmdInstallRoot +
-    ' -RemoveInstallRoot:$' + CmdRemoveInstallRoot;
+    '" -InstallRoot "' + CmdInstallRoot + '"';
+
+  Result := AppendSwitch(Result, 'RemoveInstallRoot', CmdRemoveInstallRoot);
 end;
 
 function ShouldRunMercuryWeatherUrlUpdate(): Boolean;
