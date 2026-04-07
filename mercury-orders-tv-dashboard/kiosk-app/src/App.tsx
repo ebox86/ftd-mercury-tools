@@ -1191,15 +1191,15 @@ function inferOrderIdFromMessage(message: MessageItem): string {
 
 function sourcePillLabel(wireServiceRaw: string): string {
   const value = String(wireServiceRaw || '').trim();
-  if (!value) return 'Source: Unknown';
+  if (!value) return 'Unknown';
   const normalized = value.toLowerCase();
 
-  if (normalized === '1' || normalized === 'ftd' || normalized.includes('transworld')) return 'Source: FTD';
+  if (normalized === '1' || normalized === 'ftd' || normalized.includes('transworld')) return 'FTD';
   if (normalized === '2' || normalized === 'dov' || normalized.includes('dove') || normalized.includes('teleflora')) {
-    return 'Source: DOV';
+    return 'DOV';
   }
 
-  return `Source: ${value.toUpperCase()}`;
+  return value.toUpperCase();
 }
 
 function extractNumericTokens(...parts: string[]): string[] {
@@ -5470,10 +5470,10 @@ export default function App() {
                               <span className="badge badge--source">{sourcePillLabel(ticket.wireService)}</span>
                             ) : null}
                             {showNewOrderTotalPill ? (
-                              <span className="badge badge--total">Total: {ticket.orderAmount || '--'}</span>
+                              <span className="badge badge--total">{ticket.orderAmount || '--'}</span>
                             ) : null}
                             {ticket.distanceMilesLabel ? (
-                              <span className="badge badge--distance">Distance: {ticket.distanceMilesLabel}</span>
+                              <span className="badge badge--distance">{ticket.distanceMilesLabel}</span>
                             ) : null}
                           </div>
                           <div className="ticket-card__pills">
