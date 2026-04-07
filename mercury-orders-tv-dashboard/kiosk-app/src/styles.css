@@ -1141,12 +1141,15 @@ body {
 .ticket-card__header {
   align-items: center;
   justify-content: flex-start;
+  padding-right: 260px;
 }
 
 .ticket-card__kind-pills {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 
 .order-card__header {
@@ -1258,6 +1261,7 @@ body {
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 4px;
+  max-width: 100%;
 }
 
 .order-card__ref {

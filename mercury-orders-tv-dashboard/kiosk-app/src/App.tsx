@@ -5509,7 +5509,6 @@ export default function App() {
                                 ASK DEBUG
                               </span>
                             ) : null}
-                            {ticket.isMarketplace ? <span className="badge badge--marketplace">UBER/DD</span> : null}
                             {ticket.isStaleAsk ? <span className="badge badge--stale-ask">{Math.max(1, config.askStaleHours)}h+ Stale</span> : null}
                           </div>
                         </header>
