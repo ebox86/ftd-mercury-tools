@@ -135,9 +135,12 @@ interface DashboardUserConfig {
   customLogoDataUrl: string;
 }
 
-const DEFAULT_POLL_MS = 5000;
+const DEFAULT_POLL_MS = 15000;
 const DEFAULT_FLASH_MS = 120000;
 const DEFAULT_ASK_STALE_HOURS = 12;
+const MERCURY_ENRICHMENT_CACHE_TTL_MS = 45000;
+const MERCURY_FEED_CACHE_TTL_MS = 20000;
+const MERCURY_FEED_STAGGER_MS = 500;
 const DEFAULT_MARKETPLACE_DINGS = 3;
 const DEFAULT_TODAY_DINGS = 1;
 const DEFAULT_DING_GAP_MS = 620;
@@ -828,6 +831,22 @@ async function allSettledInBatches<TInput, TResult>(
   return settledResults;
 }
 
+async function mapWithStagger<TInput, TResult>(
+  items: TInput[],
+  delayMs: number,
+  worker: (item: TInput, index: number) => Promise<TResult>,
+): Promise<TResult[]> {
+  const results: TResult[] = [];
+  const waitMs = Math.max(0, Math.floor(delayMs));
+  for (let index = 0; index < items.length; index += 1) {
+    results.push(await worker(items[index], index));
+    if (waitMs > 0 && index < items.length - 1) {
+      await sleep(waitMs);
+    }
+  }
+  return results;
+}
+
 function isAskDebugEnabledFromBrowser(): boolean {
   if (typeof window === 'undefined') return false;
   try {
@@ -890,7 +909,7 @@ function normalizeMercuryBaseUrl(value: unknown): string {
 
 function sanitizeDashboardConfig(raw: Partial<DashboardUserConfig> | null | undefined): DashboardUserConfig {
   return {
-    pollMs: clampInteger(raw?.pollMs, 1000, 60000, DEFAULT_DASHBOARD_CONFIG.pollMs),
+    pollMs: clampInteger(raw?.pollMs, 15000, 60000, DEFAULT_DASHBOARD_CONFIG.pollMs),
     flashMs: clampInteger(raw?.flashMs, 10000, 600000, DEFAULT_DASHBOARD_CONFIG.flashMs),
     askStaleHours: clampInteger(raw?.askStaleHours, 1, 72, DEFAULT_DASHBOARD_CONFIG.askStaleHours),
     mercuryBaseUrl: normalizeMercuryBaseUrl(raw?.mercuryBaseUrl),
@@ -2699,6 +2718,11 @@ interface OrderEnrichment {
   lifecycle: LifecycleRow | null;
 }
 
+interface TimedCacheEntry<T> {
+  value: T;
+  expiresAt: number;
+}
+
 export default function App() {
   const appRef = useRef<HTMLDivElement | null>(null);
   const [, setGroups] = useState<GroupedCards>(emptyGroups());
@@ -2734,6 +2758,10 @@ export default function App() {
   const pollInFlightRef = useRef(false);
   const pollQueuedRef = useRef(false);
   const hasCompletedInitialPollRef = useRef(false);
+  const pollFeedCacheRef = useRef<Map<string, TimedCacheEntry<unknown>>>(new Map());
+  const ticketStatusTtlCacheRef = useRef<Map<string, TimedCacheEntry<TicketStatusRow | null>>>(new Map());
+  const lifecycleTtlCacheRef = useRef<Map<string, TimedCacheEntry<LifecycleRow | null>>>(new Map());
+  const orderDetailsTtlCacheRef = useRef<Map<string, TimedCacheEntry<Awaited<ReturnType<typeof fetchOrderDetails>>>>>(new Map());
   const orderDetailZipByTicketRef = useRef<Map<string, string>>(new Map());
   const pendingDistanceByLookupKeyRef = useRef<Map<string, string>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -3182,6 +3210,19 @@ export default function App() {
       const unresolvedAskBatchSize = isInitialPoll ? 8 : 18;
       const askOrderStatusBatchSize = isInitialPoll ? 8 : 18;
       const intakeLookupBatchSize = isInitialPoll ? 10 : 30;
+      const nowForCache = Date.now();
+      for (const [key, entry] of ticketStatusTtlCacheRef.current.entries()) {
+        if (entry.expiresAt <= nowForCache) ticketStatusTtlCacheRef.current.delete(key);
+      }
+      for (const [key, entry] of lifecycleTtlCacheRef.current.entries()) {
+        if (entry.expiresAt <= nowForCache) lifecycleTtlCacheRef.current.delete(key);
+      }
+      for (const [key, entry] of orderDetailsTtlCacheRef.current.entries()) {
+        if (entry.expiresAt <= nowForCache) orderDetailsTtlCacheRef.current.delete(key);
+      }
+      for (const [key, entry] of pollFeedCacheRef.current.entries()) {
+        if (entry.expiresAt <= nowForCache) pollFeedCacheRef.current.delete(key);
+      }
       const ticketStatusCache = new Map<string, ReturnType<typeof fetchTicketStatus>>();
       const lifecycleCache = new Map<string, ReturnType<typeof fetchLifecycleLatest>>();
       const orderDetailsCache = new Map<string, ReturnType<typeof fetchOrderDetails>>();
@@ -3193,9 +3234,19 @@ export default function App() {
         const ticketId = normalizeTicketLookupId(ticketIdRaw);
         if (!ticketId) return Promise.resolve(null);
         const cacheKey = normalizeIdLike(ticketId);
+        const ttlCached = ticketStatusTtlCacheRef.current.get(cacheKey);
+        if (ttlCached && ttlCached.expiresAt > Date.now()) {
+          return Promise.resolve(ttlCached.value);
+        }
         const existing = ticketStatusCache.get(cacheKey);
         if (existing) return existing;
-        const next = fetchTicketStatus(ticketId);
+        const next = fetchTicketStatus(ticketId).then(result => {
+          ticketStatusTtlCacheRef.current.set(cacheKey, {
+            value: result,
+            expiresAt: Date.now() + MERCURY_ENRICHMENT_CACHE_TTL_MS,
+          });
+          return result;
+        });
         ticketStatusCache.set(cacheKey, next);
         return next;
       };
@@ -3204,9 +3255,19 @@ export default function App() {
         const ticketId = normalizeTicketLookupId(ticketIdRaw);
         if (!ticketId) return Promise.resolve(null);
         const cacheKey = normalizeIdLike(ticketId);
+        const ttlCached = lifecycleTtlCacheRef.current.get(cacheKey);
+        if (ttlCached && ttlCached.expiresAt > Date.now()) {
+          return Promise.resolve(ttlCached.value);
+        }
         const existing = lifecycleCache.get(cacheKey);
         if (existing) return existing;
-        const next = fetchLifecycleLatest(ticketId);
+        const next = fetchLifecycleLatest(ticketId).then(result => {
+          lifecycleTtlCacheRef.current.set(cacheKey, {
+            value: result,
+            expiresAt: Date.now() + MERCURY_ENRICHMENT_CACHE_TTL_MS,
+          });
+          return result;
+        });
         lifecycleCache.set(cacheKey, next);
         return next;
       };
@@ -3215,9 +3276,19 @@ export default function App() {
         const ticketId = normalizeTicketLookupId(ticketIdRaw);
         if (!ticketId) return Promise.resolve(null);
         const cacheKey = normalizeIdLike(ticketId);
+        const ttlCached = orderDetailsTtlCacheRef.current.get(cacheKey);
+        if (ttlCached && ttlCached.expiresAt > Date.now()) {
+          return Promise.resolve(ttlCached.value);
+        }
         const existing = orderDetailsCache.get(cacheKey);
         if (existing) return existing;
-        const next = fetchOrderDetails(ticketId);
+        const next = fetchOrderDetails(ticketId).then(result => {
+          orderDetailsTtlCacheRef.current.set(cacheKey, {
+            value: result,
+            expiresAt: Date.now() + MERCURY_ENRICHMENT_CACHE_TTL_MS,
+          });
+          return result;
+        });
         orderDetailsCache.set(cacheKey, next);
         return next;
       };
@@ -3270,50 +3341,87 @@ export default function App() {
         return next;
       };
 
-      const [events, undelivered, ticketSearchFeeds, zoneFeeds, routeFeeds, messageFeedIn, messageFeedOut] = await Promise.all([
-        fetchEventsNow(),
-        fetchUndeliveredOrders().catch(() => ({
-          dataset: 'DashboardEventDataset',
-          tables: { OrderItems: [], MessageItems: [] },
-        })),
-        Promise.all(
-          sourceRangeWindows.map(window => (
-            fetchRowsWithRetry<TicketSearchRow>(
-              () => fetchTicketSearch({
-                fromDate: window.deliveryDate,
-                toDate: window.deliveryThruDate,
-                // Keep source rows stable across toggle changes.
-                // The toggle should only hide/show completed cards in the UI.
-                notDelivered: false,
-                includeDelivered: true,
-              }),
-              2,
-            )
-          )),
+      async function getCrossPollCached<T>(
+        key: string,
+        loader: () => Promise<T>,
+        ttlMs = MERCURY_FEED_CACHE_TTL_MS,
+      ): Promise<T> {
+        const cached = pollFeedCacheRef.current.get(key) as TimedCacheEntry<T> | undefined;
+        if (cached && cached.expiresAt > Date.now()) {
+          return cached.value;
+        }
+        const value = await loader();
+        pollFeedCacheRef.current.set(key, {
+          value,
+          expiresAt: Date.now() + ttlMs,
+        });
+        return value;
+      }
+
+      const feedStaggerMs = MERCURY_FEED_STAGGER_MS;
+      const events = await getCrossPollCached('events-now', () => fetchEventsNow());
+      await sleep(feedStaggerMs);
+      const undelivered = await getCrossPollCached('undelivered-orders', () => fetchUndeliveredOrders().catch(() => ({
+        dataset: 'DashboardEventDataset',
+        tables: { OrderItems: [], MessageItems: [] },
+      })));
+      await sleep(feedStaggerMs);
+      const ticketSearchFeeds = await mapWithStagger(
+        sourceRangeWindows,
+        feedStaggerMs,
+        window => getCrossPollCached(
+          `ticket-search:${window.deliveryDate}|${window.deliveryThruDate}`,
+          () => fetchRowsWithRetry<TicketSearchRow>(
+            () => fetchTicketSearch({
+              fromDate: window.deliveryDate,
+              toDate: window.deliveryThruDate,
+              // Keep source rows stable across toggle changes.
+              // The toggle should only hide/show completed cards in the UI.
+              notDelivered: false,
+              includeDelivered: true,
+            }),
+            2,
+          ),
         ),
-        Promise.all(
-          sourceRangeWindows.flatMap(window => [
-            fetchRowsWithRetry<DeliveryOrderByZoneRow>(
-              () => fetchOrdersByZone({ ...window, designedOrders: false, priorityIDList: '' }),
-              2,
-            ),
-            fetchRowsWithRetry<DeliveryOrderByZoneRow>(
-              () => fetchOrdersByZone({ ...window, designedOrders: true, priorityIDList: '' }),
-              2,
-            ),
-          ]),
-        ),
-        Promise.all(
-          sourceRangeWindows.map(window => (
-            fetchRowsWithRetry<DeliveryOrderByRouteRow>(
-              () => fetchOrdersByRoutes(window),
-              2,
-            )
-          )),
-        ),
-        getMessageListCached({ maxRows: 300, msgDirection: 1 }).catch(() => ({ rows: [] as MercuryMessageListRow[] })),
-        getMessageListCached({ maxRows: 300, msgDirection: 2 }).catch(() => ({ rows: [] as MercuryMessageListRow[] })),
+      );
+      await sleep(feedStaggerMs);
+      const zoneRequestPlans = sourceRangeWindows.flatMap(window => [
+        { window, designedOrders: false },
+        { window, designedOrders: true },
       ]);
+      const zoneFeeds = await mapWithStagger(
+        zoneRequestPlans,
+        feedStaggerMs,
+        plan => getCrossPollCached(
+          `orders-by-zone:designed:${plan.designedOrders ? 'true' : 'false'}:${plan.window.deliveryDate}|${plan.window.deliveryThruDate}`,
+          () => fetchRowsWithRetry<DeliveryOrderByZoneRow>(
+            () => fetchOrdersByZone({ ...plan.window, designedOrders: plan.designedOrders, priorityIDList: '' }),
+            2,
+          ),
+        ),
+      );
+      await sleep(feedStaggerMs);
+      const routeFeeds = await mapWithStagger(
+        sourceRangeWindows,
+        feedStaggerMs,
+        window => getCrossPollCached(
+          `orders-by-routes:${window.deliveryDate}|${window.deliveryThruDate}`,
+          () => fetchRowsWithRetry<DeliveryOrderByRouteRow>(
+            () => fetchOrdersByRoutes(window),
+            2,
+          ),
+        ),
+      );
+      await sleep(feedStaggerMs);
+      const messageFeedIn = await getCrossPollCached(
+        'message-list:dir:1:maxRows:220',
+        () => getMessageListCached({ maxRows: 220, msgDirection: 1 }).catch(() => ({ rows: [] as MercuryMessageListRow[] })),
+      );
+      await sleep(feedStaggerMs);
+      const messageFeedOut = await getCrossPollCached(
+        'message-list:dir:2:maxRows:220',
+        () => getMessageListCached({ maxRows: 220, msgDirection: 2 }).catch(() => ({ rows: [] as MercuryMessageListRow[] })),
+      );
       const eventOrders = events?.tables?.OrderItems || [];
       const ticketSearchRows = ticketSearchFeeds.flatMap(rows => rows || []);
       const sortedSourceDateKeys = Array.from(sourceDeliveryDateKeys).sort();
@@ -4516,6 +4624,7 @@ export default function App() {
       const pendingWithDistance = pendingWithStatus.map(ticket => ({ ...ticket }));
       const pendingDistanceLookupPlans = new Map<string, { ticket: IntakeTicketCard; indexes: number[] }>();
       for (const [index, ticket] of pendingWithDistance.entries()) {
+        if (ticket.kind !== 'uncreated') continue;
         const lookupKey = pendingDistanceLookupKey(ticket);
         if (!lookupKey) continue;
         const cachedDistanceLabel = pendingDistanceByLookupKeyRef.current.get(lookupKey) || '';
@@ -4728,7 +4837,7 @@ export default function App() {
   }, [config.mercuryBaseUrl]);
 
   useEffect(() => {
-    const pollMs = clampInteger(config.pollMs, 1000, 60000, DEFAULT_POLL_MS);
+    const pollMs = clampInteger(config.pollMs, 15000, 60000, DEFAULT_POLL_MS);
     void runPoll();
     const timer = window.setInterval(() => {
       void runPoll();
@@ -5208,7 +5317,7 @@ export default function App() {
                 <span>Poll interval (ms)</span>
                 <input
                   type="number"
-                  min={1000}
+                  min={15000}
                   max={60000}
                   value={editingConfig.pollMs}
                   onChange={(event) => updateConfigNumber('pollMs', event.target.value)}
