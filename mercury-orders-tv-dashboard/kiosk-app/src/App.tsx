@@ -1308,6 +1308,7 @@ function intakeBadgeForTicket(ticket: IntakeTicketCard): { label: string; classN
   if (ticket.messageTypeKey === 'other' && ticket.messageTypeLabel) return { label: ticket.messageTypeLabel, className: 'badge--msg-other' };
   if (ticket.messageTypeKey === 'ask') return { label: 'ASK', className: 'badge--ask' };
   if (ticket.kind === 'ask') return { label: 'ASK', className: 'badge--ask' };
+  if (ticket.kind === 'message') return { label: 'MESSAGE', className: 'badge--msg-other' };
   return { label: 'NEW ORDER', className: 'badge--alert' };
 }
 
@@ -1318,7 +1319,8 @@ function shouldShowSourceBadge(ticket: IntakeTicketCard): boolean {
 
 function linkedOrderStatusBadgeClass(statusRaw: string): string {
   const semantic = deliverySemanticFromStatusText(statusRaw);
-  if (semantic === 'exception' || semantic === 'canceled') return 'badge--stage-linked-exception';
+  if (semantic === 'canceled') return 'badge--stage-linked-canceled';
+  if (semantic === 'exception') return 'badge--stage-linked-exception';
   if (semantic === 'delivered') return 'badge--stage-linked-delivered';
   if (semantic === 'queued') return 'badge--stage-linked-queued';
   return 'badge--stage';
@@ -2593,10 +2595,11 @@ function buildPendingIntakeTickets(
     const staleEligibility = ask ? !askAnswered : true;
     const isStaleAsk = allowStaleAskBadge && staleEligibility && (staleByPreciseTime || staleByCoarseDate);
 
+    const hasLinkedOrder = Boolean(resolvedLinkedOrder?.ticketId || resolvedLinkedOrder?.orderNumber);
     const isKnownNonOrderMessage = messageType.key === 'other' && messageType.label && messageType.label !== 'ORD';
     const kind: IntakeKind = isCancel
       ? 'cancel'
-      : (ask ? 'ask' : (isKnownNonOrderMessage ? 'message' : 'uncreated'));
+      : (ask ? 'ask' : ((isKnownNonOrderMessage || hasLinkedOrder) ? 'message' : 'uncreated'));
     const isFlashing = isMarketplace
       || ((kind === 'uncreated' || kind === 'cancel') && (flashUntilById.get(id) || 0) > now)
       || (kind === 'ask' && requiresAttention && !isStaleAsk);

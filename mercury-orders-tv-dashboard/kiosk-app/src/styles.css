@@ -902,6 +902,12 @@ body {
   border: 1px solid #e0c06b;
 }
 
+.badge--stage-linked-canceled {
+  background: #ffd9df;
+  color: #7c1d2d;
+  border: 1px solid #f0aab7;
+}
+
 .badge--stage-designed {
   background: #1f8f3a;
   color: #fff;
