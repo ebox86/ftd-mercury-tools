@@ -74,6 +74,14 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
   return serialized ? `?${serialized}` : '';
 }
 
+function normalizeTicketIdForApi(raw: string): string {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  const slashForm = value.match(/^(\d{5,12})\/\d{1,3}$/);
+  if (slashForm) return slashForm[1];
+  return value;
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const requestUrl = buildRequestUrl(path);
   try {
@@ -247,10 +255,10 @@ export async function fetchMessageDetail(msgID: string, params?: {
 }
 
 export async function fetchTicketStatus(ticketId: string): Promise<TicketStatusRow | null> {
-  const id = String(ticketId || '').trim();
+  const id = normalizeTicketIdForApi(ticketId);
   if (!id) return null;
 
-  const query = buildQuery({ ticketId: id, ticketID: id, TicketID: id });
+  const query = buildQuery({ ticketId: id });
   const paths = [
     `/api/workflow/ticket-status/${encodeURIComponent(id)}`,
     `/api/workflow/ticket-status${query}`,
@@ -273,9 +281,9 @@ export async function fetchTicketStatus(ticketId: string): Promise<TicketStatusR
 }
 
 export async function fetchOrderDetails(ticketId: string): Promise<OrderDetailsRow | null> {
-  const id = String(ticketId || '').trim();
+  const id = normalizeTicketIdForApi(ticketId);
   if (!id) return null;
-  const query = buildQuery({ ticketId: id, ticketID: id, TicketID: id });
+  const query = buildQuery({ ticketId: id });
   const paths = [
     `/api/workflow/order-details/${encodeURIComponent(id)}`,
     `/api/workflow/order-details${query}`,
@@ -321,9 +329,9 @@ export async function fetchDistanceEstimate(params: {
 }
 
 export async function fetchLifecycleLatest(ticketId: string): Promise<LifecycleRow | null> {
-  const id = String(ticketId || '').trim();
+  const id = normalizeTicketIdForApi(ticketId);
   if (!id) return null;
-  const query = buildQuery({ ticketId: id, ticketID: id, TicketID: id });
+  const query = buildQuery({ ticketId: id });
   const paths = [
     `/api/workflow/order-lifecycle/${encodeURIComponent(id)}`,
     `/api/workflow/order-lifecycle${query}`,
@@ -342,7 +350,7 @@ export async function fetchLifecycleLatest(ticketId: string): Promise<LifecycleR
 export async function fetchLifecycleByServiceMsg(serviceMsgNum: string): Promise<LifecycleRow | null> {
   const serviceMsg = String(serviceMsgNum || '').trim();
   if (!serviceMsg) return null;
-  const query = buildQuery({ serviceMsgNum: serviceMsg, SERVICE_MSG_NUM: serviceMsg });
+  const query = buildQuery({ serviceMsgNum: serviceMsg });
   const paths = [
     `/api/workflow/order-lifecycle/by-service-msg/${encodeURIComponent(serviceMsg)}`,
     `/api/workflow/order-lifecycle/by-service-msg${query}`,

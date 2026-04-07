@@ -779,6 +779,14 @@ function normalizeIdLike(value: string): string {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizeTicketLookupId(value: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const slashForm = raw.match(/^(\d{5,12})\/(\d{1,3})$/);
+  if (slashForm) return slashForm[1];
+  return raw;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => {
     setTimeout(resolve, ms);
@@ -1442,12 +1450,13 @@ function messageLookupTicketCandidates(message: MessageItem): string[] {
   for (const rawValue of rawValues) {
     const trimmed = String(rawValue || '').trim();
     if (!trimmed) continue;
-    candidates.add(trimmed);
-    const slashHead = trimmed.split('/')[0]?.trim();
+    const normalized = normalizeTicketLookupId(trimmed);
+    if (normalized) candidates.add(normalized);
+    const slashHead = normalized.split('/')[0]?.trim();
     if (slashHead) candidates.add(slashHead);
   }
 
-  return Array.from(candidates).filter(value => /^\d{5,12}(?:\/\d{1,3})?$/.test(value));
+  return Array.from(candidates).filter(value => /^\d{5,12}$/.test(value));
 }
 
 function orderEnrichmentLookupCandidates(order: { ID?: string; USER_REFERENCE?: string; SALE_ID?: string; TICKET_POSITION?: string }): string[] {
@@ -1462,8 +1471,9 @@ function orderEnrichmentLookupCandidates(order: { ID?: string; USER_REFERENCE?: 
   for (const rawValue of [rawId, rawUserReference, rawSaleId, salePositionRef, displayOrderId]) {
     const trimmed = String(rawValue || '').trim();
     if (!trimmed) continue;
-    candidates.add(trimmed);
-    const head = trimmed.split('/')[0]?.trim() || '';
+    const normalized = normalizeTicketLookupId(trimmed);
+    if (normalized) candidates.add(normalized);
+    const head = normalized.split('/')[0]?.trim() || '';
     if (head) candidates.add(head);
   }
 
@@ -2720,6 +2730,7 @@ export default function App() {
   const activePaneSpinnerInFlightRef = useRef(0);
   const pollInFlightRef = useRef(false);
   const pollQueuedRef = useRef(false);
+  const hasCompletedInitialPollRef = useRef(false);
   const orderDetailZipByTicketRef = useRef<Map<string, string>>(new Map());
   const pendingDistanceByLookupKeyRef = useRef<Map<string, string>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -3159,6 +3170,15 @@ export default function App() {
     }
     try {
       setError('');
+      const isInitialPoll = !hasCompletedInitialPollRef.current;
+      const serviceMsgLimit = isInitialPoll ? 36 : 120;
+      const unresolvedAskLimit = isInitialPoll ? 36 : 120;
+      const askOrderStatusLimit = isInitialPoll ? 40 : 120;
+      const intakeLookupLimit = isInitialPoll ? 90 : 260;
+      const serviceMsgBatchSize = isInitialPoll ? 10 : 24;
+      const unresolvedAskBatchSize = isInitialPoll ? 8 : 18;
+      const askOrderStatusBatchSize = isInitialPoll ? 8 : 18;
+      const intakeLookupBatchSize = isInitialPoll ? 10 : 30;
       const ticketStatusCache = new Map<string, ReturnType<typeof fetchTicketStatus>>();
       const lifecycleCache = new Map<string, ReturnType<typeof fetchLifecycleLatest>>();
       const orderDetailsCache = new Map<string, ReturnType<typeof fetchOrderDetails>>();
@@ -3167,7 +3187,7 @@ export default function App() {
       const messageListCache = new Map<string, ReturnType<typeof fetchMessageList>>();
 
       const getTicketStatusCached = (ticketIdRaw: string): ReturnType<typeof fetchTicketStatus> => {
-        const ticketId = String(ticketIdRaw || '').trim();
+        const ticketId = normalizeTicketLookupId(ticketIdRaw);
         if (!ticketId) return Promise.resolve(null);
         const cacheKey = normalizeIdLike(ticketId);
         const existing = ticketStatusCache.get(cacheKey);
@@ -3178,7 +3198,7 @@ export default function App() {
       };
 
       const getLifecycleByTicketCached = (ticketIdRaw: string): ReturnType<typeof fetchLifecycleLatest> => {
-        const ticketId = String(ticketIdRaw || '').trim();
+        const ticketId = normalizeTicketLookupId(ticketIdRaw);
         if (!ticketId) return Promise.resolve(null);
         const cacheKey = normalizeIdLike(ticketId);
         const existing = lifecycleCache.get(cacheKey);
@@ -3189,7 +3209,7 @@ export default function App() {
       };
 
       const getOrderDetailsCached = (ticketIdRaw: string): ReturnType<typeof fetchOrderDetails> => {
-        const ticketId = String(ticketIdRaw || '').trim();
+        const ticketId = normalizeTicketLookupId(ticketIdRaw);
         if (!ticketId) return Promise.resolve(null);
         const cacheKey = normalizeIdLike(ticketId);
         const existing = orderDetailsCache.get(cacheKey);
@@ -4126,12 +4146,12 @@ export default function App() {
             .map(message => String(message.MERCURY_NUM || '').trim())
             .filter(Boolean),
         ),
-      ).slice(0, 120);
+      ).slice(0, serviceMsgLimit);
 
       if (serviceMsgCandidates.length > 0) {
         const serviceMsgResults = await allSettledInBatches(
           serviceMsgCandidates,
-          24,
+          serviceMsgBatchSize,
           async serviceMsg => {
             const lifecycleByServiceMsg = await getLifecycleByServiceMsgCached(serviceMsg);
             const ticketId = String(lifecycleByServiceMsg?.TICKET_ID || '').trim();
@@ -4220,10 +4240,11 @@ export default function App() {
       }
 
       const unresolvedAskQueries = Array.from(unresolvedAskBuckets.values()).slice(0, 120);
-      if (unresolvedAskQueries.length > 0) {
+      const unresolvedAskQueriesLimited = unresolvedAskQueries.slice(0, unresolvedAskLimit);
+      if (unresolvedAskQueriesLimited.length > 0) {
         const unresolvedAskResults = await allSettledInBatches(
-          unresolvedAskQueries,
-          18,
+          unresolvedAskQueriesLimited,
+          unresolvedAskBatchSize,
           async query => {
             const lookup = await getMessageListCached({
               maxRows: 220,
@@ -4310,12 +4331,12 @@ export default function App() {
             .map(message => String(inferOrderIdFromMessage(message) || '').trim().split('/')[0] || '')
             .filter(value => /^\d{5,12}$/.test(value)),
         ),
-      ).slice(0, 120);
+      ).slice(0, askOrderStatusLimit);
 
       if (askOrderNumbers.length > 0) {
         const askOrderStatusResults = await allSettledInBatches(
           askOrderNumbers,
-          18,
+          askOrderStatusBatchSize,
           async orderNumber => {
             const lookup = await fetchTicketSearch({
               notDelivered: false,
@@ -4410,12 +4431,12 @@ export default function App() {
           inboundIntakeMessages
             .flatMap(message => messageLookupTicketCandidates(message))
         ),
-      ).slice(0, 260);
+      ).slice(0, intakeLookupLimit);
 
       if (intakeLookupTicketIds.length > 0) {
         const intakeLookupResults = await allSettledInBatches(
           intakeLookupTicketIds,
-          30,
+          intakeLookupBatchSize,
           async ticketId => {
             const [details, ticketStatus, lifecycle] = await Promise.all([
               getOrderDetailsCached(ticketId),
@@ -4640,6 +4661,7 @@ export default function App() {
       setAllActiveOrders(reconciledActiveOrders);
       setPendingTickets(pendingWithDistance);
       setLastUpdated(new Date().toLocaleTimeString());
+      hasCompletedInitialPollRef.current = true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
