@@ -272,6 +272,19 @@ internal static class ServiceCommandHandler
   private static string BuildBinPath(string exePath, HostOptions options)
   {
     var role = options.Role == ServiceRole.Web ? "web" : "bridge";
+    var mapboxTokenProtected = string.Empty;
+    if (options.Role == ServiceRole.Bridge)
+    {
+      if (!string.IsNullOrWhiteSpace(options.MapboxTokenProtected))
+      {
+        mapboxTokenProtected = options.MapboxTokenProtected.Trim();
+      }
+      else if (!string.IsNullOrWhiteSpace(options.MapboxToken))
+      {
+        mapboxTokenProtected = SecretProtection.ProtectForLocalMachine(options.MapboxToken);
+      }
+    }
+
     var parts = new List<string>
     {
       EscapeArg(exePath),
@@ -291,6 +304,11 @@ internal static class ServiceCommandHandler
       $"--log-dir={EscapeValue(options.LogDirectory)}",
       $"--restart-delay-ms={options.RestartDelayMs}",
     };
+
+    if (!string.IsNullOrWhiteSpace(mapboxTokenProtected))
+    {
+      parts.Add($"--mapbox-token-protected={EscapeValue(mapboxTokenProtected)}");
+    }
 
     return string.Join(" ", parts);
   }

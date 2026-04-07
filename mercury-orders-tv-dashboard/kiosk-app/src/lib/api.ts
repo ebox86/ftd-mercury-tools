@@ -14,6 +14,24 @@ import type {
   TicketSearchDataset,
 } from './types';
 
+export interface DistanceEstimateResponse {
+  ok?: boolean;
+  distance_miles?: number | string | null;
+  duration_minutes?: number | string | null;
+  provider?: string;
+  warning?: string;
+  origin?: {
+    latitude?: number | null;
+    longitude?: number | null;
+    source?: string;
+  };
+  destination?: {
+    latitude?: number | null;
+    longitude?: number | null;
+    source?: string;
+  };
+}
+
 const RAW_ENV_BASE_URL = String((import.meta.env.VITE_WORKFLOW_BASE_URL as string | undefined) || '').trim();
 
 function normalizeBaseUrl(raw: string): string {
@@ -272,6 +290,34 @@ export async function fetchOrderDetails(ticketId: string): Promise<OrderDetailsR
     if (rowFromFlat) return rowFromFlat;
   }
   return null;
+}
+
+export async function fetchDistanceEstimate(params: {
+  ticketId?: string;
+  firmName?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+  latitude?: string | number;
+  longitude?: string | number;
+}): Promise<DistanceEstimateResponse | null> {
+  const query = buildQuery({
+    ticketId: params.ticketId ?? '',
+    firmName: params.firmName ?? '',
+    addressLine1: params.addressLine1 ?? '',
+    addressLine2: params.addressLine2 ?? '',
+    city: params.city ?? '',
+    state: params.state ?? '',
+    postalCode: params.postalCode ?? '',
+    country: params.country ?? '',
+    latitude: params.latitude ?? '',
+    longitude: params.longitude ?? '',
+  });
+  if (!query) return null;
+  return getJson<DistanceEstimateResponse>(`/api/workflow/distance/estimate${query}`);
 }
 
 export async function fetchLifecycleLatest(ticketId: string): Promise<LifecycleRow | null> {

@@ -3,7 +3,8 @@ param(
   [Parameter(Mandatory = $true)] [string]$NodeRuntimeDir,
   [string]$ServiceHostRuntimeIdentifier = "win-x64",
   [string]$Publisher = "ebox86.com",
-  [string]$PublisherUrl = "https://github.com/example/ftd-mercury-tools"
+  [string]$PublisherUrl = "https://github.com/example/ftd-mercury-tools",
+  [string]$MapboxToken = ""
 )
 
 Set-StrictMode -Version 2
@@ -112,6 +113,17 @@ $compileArgs = @(
   $defineUrl,
   $installerProjectPath
 )
+
+if ($MapboxToken) {
+  $escapedMapboxToken = $MapboxToken.Replace('"', '""')
+  $compileArgs = @(
+    $defineVersion,
+    $definePublisher,
+    $defineUrl,
+    '/DEmbeddedMapboxToken="' + $escapedMapboxToken + '"',
+    $installerProjectPath
+  )
+}
 
 Write-Host "Compiling Mercury dashboard installer with Inno Setup..."
 & $iscc.Source @compileArgs

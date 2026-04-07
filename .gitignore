@@ -7,3 +7,4 @@
 /opos-browser-bridge/dist/
 /weather-xoap-shim/artifacts/
 /weather-xoap-shim/dist/
+.env

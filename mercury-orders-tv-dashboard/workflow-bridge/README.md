@@ -8,6 +8,17 @@ Live Node bridge exposing JSON endpoints for the kiosk dashboard while sourcing 
 MERCURY_BASE_URL=http://127.0.0.1/WsMercuryWebAPI
 MERCURY_SOAP_NAMESPACE=http://localhost/webservices/
 MERCURY_TIMEOUT_MS=12000
+MAPBOX_TOKEN=pk_xxx_or_sk_xxx
+```
+
+Optional distance-related settings:
+
+```bash
+MAPBOX_DIRECTIONS_PROFILE=driving
+MAPBOX_TIMEOUT_MS=8000
+MAPBOX_ROUTE_CACHE_TTL_MS=21600000
+MAPBOX_ADDRESS_CACHE_TTL_MS=21600000
+MAPBOX_FALLBACK_TO_HAVERSINE=true
 ```
 
 ## Run
@@ -42,6 +53,7 @@ Optional environment variables:
 - `GET /api/workflow/tickets/search?fromDate=&toDate=&notDelivered=&includeDelivered=&recipientName=&customerName=&city=&zone=&orderNumber=`
 - `GET /api/workflow/ticket-status/:ticketId`
 - `GET /api/workflow/order-details/:ticketId`
+- `GET /api/workflow/distance/estimate?ticketId=&addressLine1=&city=&state=&postalCode=&country=&latitude=&longitude=`
 - `GET /api/workflow/order-lifecycle/:ticketId`
 - `GET /api/workflow/order-lifecycle/by-service-msg/:serviceMsgNum`
 - `GET /api/workflow/delivery/zone-summary?date=&thrudate=&priorityIDList=&designedOnly=`

@@ -18,6 +18,10 @@
   #define SetupIconPath "assets\mercury-dashboard.ico"
 #endif
 
+#ifndef EmbeddedMapboxToken
+  #define EmbeddedMapboxToken ""
+#endif
+
 #define MyAppName "FTD Mercury Orders Dashboard"
 #define MyAppId "{{2CFD7D74-C9C0-4660-A8BD-70AEF2E2505E}}"
 
@@ -54,7 +58,7 @@ Source: "{#SetupIconPath}"; DestDir: "{app}"; DestName: "app-icon.ico"; Flags: i
 Filename: "{app}\service-runtime\FTD.Mercury.Dashboard.ServiceHost.exe"; \
   Parameters: "{code:GetInstallBridgeParameters}"; \
   StatusMsg: "Installing Mercury workflow bridge service..."; \
-  Flags: runhidden waituntilterminated
+  Flags: runhidden waituntilterminated dontlogparameters
 Filename: "{app}\service-runtime\FTD.Mercury.Dashboard.ServiceHost.exe"; \
   Parameters: "{code:GetInstallWebParameters}"; \
   StatusMsg: "Installing Mercury dashboard web service..."; \
@@ -81,6 +85,7 @@ var
   CmdBridgeServiceName: string;
   CmdWebServiceName: string;
   CmdLocalNetworkOnly: string;
+  CmdMapboxToken: string;
 
 function ReadSwitchValue(const SwitchName: string; const DefaultValue: string): string;
 var
@@ -157,6 +162,7 @@ begin
   CmdBridgeServiceName := ReadSwitchValue('BRIDGESERVICENAME', 'FTD Mercury Workflow Bridge');
   CmdWebServiceName := ReadSwitchValue('WEBSERVICENAME', 'FTD Mercury Dashboard Web');
   CmdLocalNetworkOnly := NormalizeBool(ReadSwitchValue('LOCALNETWORKONLY', 'true'));
+  CmdMapboxToken := ReadSwitchValue('MAPBOXTOKEN', '{#EmbeddedMapboxToken}');
 
   if CmdMercuryBase = '' then
   begin
@@ -228,6 +234,11 @@ begin
     '--mercury-base-url=' + QuoteCmdValue(CmdMercuryBase) + ' ' +
     '--mercury-soap-namespace=' + QuoteCmdValue(CmdSoapNamespace) + ' ' +
     '--mercury-local-network-only=' + CmdLocalNetworkOnly;
+
+  if CmdMapboxToken <> '' then
+  begin
+    Result := Result + ' ' + '--mapbox-token=' + QuoteCmdValue(CmdMapboxToken);
+  end;
 end;
 
 function GetInstallWebParameters(Param: string): string;

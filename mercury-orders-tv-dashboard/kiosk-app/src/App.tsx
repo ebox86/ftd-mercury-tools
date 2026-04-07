@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faCalendarDay,
+  faClock,
   faCircleCheck,
   faChevronLeft,
   faChevronRight,
@@ -10,13 +11,16 @@ import {
   faInbox,
   faPlay,
   faScroll,
+  faTriangleExclamation,
   faTruck,
   faUpRightAndDownLeftFromCenter,
   faVolumeHigh,
   faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import {
+  type DistanceEstimateResponse,
   fetchEventsNow,
+  fetchDistanceEstimate,
   fetchLifecycleByServiceMsg,
   fetchLifecycleLatest,
   fetchMessageDetail,
@@ -53,6 +57,13 @@ interface IntakeTicketCard {
   recipientName: string;
   summary: string;
   displayRef: string;
+  destinationAddressLine: string;
+  destinationCity: string;
+  destinationState: string;
+  destinationZip: string;
+  destinationLabel: string;
+  distanceMilesLabel: string;
+  orderAmount: string;
   deliveryDate: string;
   messageDate: string;
   notes: string;
@@ -78,6 +89,9 @@ interface OrderReferenceEntry {
   RECIPIENT_NAME: string;
   SUMMARY_TEXT: string;
   DELIVERY_DATE: string;
+  DELIVERY_CITY_STATE_ZIP: string;
+  DELIVERY_ZIP: string;
+  ORDER_AMOUNT: string;
   USER_REFERENCE: string;
   SALE_ID: string;
   STAGE_LABEL?: string;
@@ -145,6 +159,12 @@ const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
   marketplaceCustomSoundDataUrl: '',
   customLogoDataUrl: '',
 };
+const USD_ORDER_TOTAL_FORMAT = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+});
 const RECIPIENT_STOP_WORDS = new Set([
   'a',
   'an',
@@ -388,6 +408,32 @@ function normalizeText(raw: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+function formatDisplayRecipientName(raw: string): string {
+  let text = String(raw || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+
+  // Drop trailing appended numeric token if present (e.g., "- 1372125").
+  text = text.replace(/\s+-\s+\d{5,12}\s*$/, '').trim();
+  if (!text) return '';
+
+  if (text.includes(',')) {
+    return text.toUpperCase();
+  }
+
+  const careOfMatch = text.match(/\s+(c\/o\s+.+)$/i);
+  const careOfSuffix = careOfMatch ? ` ${careOfMatch[1].trim()}` : '';
+  const baseName = careOfMatch ? text.slice(0, careOfMatch.index).trim() : text;
+  const parts = baseName.split(' ').filter(Boolean);
+
+  if (parts.length <= 1) {
+    return `${baseName}${careOfSuffix}`.trim().toUpperCase();
+  }
+
+  const last = parts[parts.length - 1];
+  const firstAndMiddle = parts.slice(0, -1).join(' ');
+  return `${last}, ${firstAndMiddle}${careOfSuffix}`.toUpperCase();
+}
+
 function firstNonEmptyText(...values: Array<string | number | null | undefined>): string {
   for (const value of values) {
     const text = String(value ?? '').trim();
@@ -404,6 +450,57 @@ function firstNonEmptyRowValue(row: unknown, keys: string[]): string {
     if (text) return text;
   }
   return '';
+}
+
+function normalizedRowKey(raw: string): string {
+  return String(raw || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function firstNonEmptyRowValueLoose(row: unknown, keys: string[]): string {
+  const record = row as Record<string, unknown> | null | undefined;
+  if (!record) return '';
+  const lookup = new Map<string, string>();
+  for (const [rawKey, rawValue] of Object.entries(record)) {
+    const key = normalizedRowKey(rawKey);
+    if (!key) continue;
+    const text = String(rawValue ?? '').trim();
+    if (!text) continue;
+    if (!lookup.has(key)) lookup.set(key, text);
+  }
+  for (const keyCandidate of keys) {
+    const key = normalizedRowKey(keyCandidate);
+    if (!key) continue;
+    const text = lookup.get(key) || '';
+    if (text) return text;
+  }
+  return '';
+}
+
+function firstAmountLikeRowValue(row: unknown): string {
+  const record = row as Record<string, unknown> | null | undefined;
+  if (!record) return '';
+  let bestScore = -1;
+  let bestRaw = '';
+  for (const [rawKey, rawValue] of Object.entries(record)) {
+    const valueText = String(rawValue ?? '').trim();
+    if (!valueText) continue;
+    if (!formatOrderAmount(valueText)) continue;
+    const key = normalizedRowKey(rawKey);
+    if (!key) continue;
+    if (key.includes('paid') || key.includes('auth') || key.includes('exchange') || key.includes('rate')) continue;
+    let score = -1;
+    if (key === 'ccamount') score = 120;
+    else if (key.includes('orderpriceamt')) score = 112;
+    else if (key.includes('orderamount')) score = 108;
+    else if (key.includes('totalamount')) score = 102;
+    else if (key === 'total' || key.includes('ordertotal') || key.includes('saletotal')) score = 96;
+    else if (key.includes('amount') || key.endsWith('amt') || key.includes('priceamt') || key.includes('chargeamt')) score = 88;
+    if (score > bestScore) {
+      bestScore = score;
+      bestRaw = valueText;
+    }
+  }
+  return bestRaw;
 }
 
 function normalizedStreetLine(row: unknown): string {
@@ -495,8 +592,98 @@ function normalizedPostalCode(row: unknown): string {
   ]);
 }
 
+function formatOrderAmount(raw: string): string {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  const numericText = text.replace(/[^0-9.-]/g, '');
+  if (!numericText || numericText === '-' || numericText === '.' || numericText === '-.') return '';
+  const numericValue = Number(numericText);
+  if (!Number.isFinite(numericValue)) return '';
+  return USD_ORDER_TOTAL_FORMAT.format(numericValue);
+}
+
+function normalizedOrderAmount(row: unknown): string {
+  const preferred = firstNonEmptyText(
+    firstNonEmptyRowValue(row, [
+      'CC_AMOUNT',
+      'ORDER_TOTAL',
+      'TOTAL_AMOUNT',
+      'TOTAL',
+      'AMOUNT',
+      'NET_AMOUNT',
+      'SALE_TOTAL',
+      'ORDER_PRICE_AMT',
+      'NEW_PRICE_AMT',
+      'CHARGE_AMT',
+      'ORDER_AMOUNT',
+      'MESSAGE_AMOUNT',
+      'TICKET_AMT',
+      'BALANCE_DUE',
+    ]),
+    firstNonEmptyRowValueLoose(row, [
+      'CC_AMOUNT',
+      'ORDER_TOTAL',
+      'TOTAL_AMOUNT',
+      'TOTAL',
+      'AMOUNT',
+      'NET_AMOUNT',
+      'SALE_TOTAL',
+      'ORDER_PRICE_AMT',
+      'NEW_PRICE_AMT',
+      'CHARGE_AMT',
+      'ORDER_AMOUNT',
+      'MESSAGE_AMOUNT',
+      'TICKET_AMT',
+      'BALANCE_DUE',
+    ]),
+    firstAmountLikeRowValue(row),
+  );
+  return formatOrderAmount(preferred);
+}
+
+function compactTownZipLabel(cityStateZipRaw: string, zipRaw: string): string {
+  const cityStateZip = String(cityStateZipRaw || '').trim();
+  const zip = extractUsZip5(zipRaw || cityStateZip);
+  const cityCandidate = cityStateZip ? cityStateZip.split(',')[0].trim() : '';
+  const city = cityCandidate && !extractUsZip5(cityCandidate) ? cityCandidate.toUpperCase() : '';
+  if (city && zip) return `${city} ${zip}`;
+  if (cityStateZip) {
+    if (city) {
+      const commaIndex = cityStateZip.indexOf(',');
+      if (commaIndex >= 0) {
+        return `${city}${cityStateZip.slice(commaIndex)}`;
+      }
+      return city;
+    }
+    return zip ? `ZIP ${zip}` : cityStateZip;
+  }
+  return zip ? `ZIP ${zip}` : '';
+}
+
 function deriveCardFooterZip(card: BoardCard): string {
   return String(card.deliveryZip || '').trim();
+}
+
+function normalizeAddressKeyText(raw: string): string {
+  return String(raw || '').trim().toUpperCase().replace(/\s+/g, ' ');
+}
+
+function pendingDistanceLookupKey(ticket: IntakeTicketCard): string {
+  const ticketId = String(ticket.relatedTicketId || '').trim();
+  if (ticketId) return `ticket:${ticketId}`;
+  const line1 = normalizeAddressKeyText(ticket.destinationAddressLine);
+  const city = normalizeAddressKeyText(ticket.destinationCity);
+  const state = normalizeAddressKeyText(ticket.destinationState);
+  const zip = String(ticket.destinationZip || '').trim().replace(/\D/g, '').slice(0, 5);
+  if (!line1 && !city && !state && !zip) return '';
+  return `addr:${line1}|${city}|${state}|${zip}`;
+}
+
+function formatDistanceMilesLabel(raw: unknown): string {
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  if (numeric >= 100) return `${Math.round(numeric)} MI`;
+  return `${numeric.toFixed(1)} MI`;
 }
 
 function toEpoch(raw: string): number {
@@ -585,10 +772,6 @@ function isPickupOrCodOrderType(orderTypeRaw: string): boolean {
     hasPickupKeyword(orderType)
     || orderType.toLowerCase().includes('cod')
   );
-}
-
-function shouldUsePickupDateLabel(card: BoardCard): boolean {
-  return hasPickupKeyword(card.addressLine, card.cityStateZip, card.orderType);
 }
 
 function normalizeIdLike(value: string): string {
@@ -904,7 +1087,6 @@ function buildAskIdCandidates(message: MessageItem): AskIdCandidate[] {
   addCandidate(String(message.ORDER_ID || ''), 'order_id', 'strong', 116);
   addCandidate(String(message.USER_REFERENCE || ''), 'user_reference', 'strong', 112);
   addCandidate(String(message.SALE_ID || ''), 'sale_id', 'strong', 108);
-  addCandidate(String(message.ID || ''), 'message_id', 'weak', 96);
   addCandidate(String(message.MERCURY_NUM || ''), 'service_msg', 'weak', 92);
 
   for (const numeric of extractNumericTokens(
@@ -931,6 +1113,12 @@ function extractOrderIdForDisplay(saleIdRaw: string, userReferenceRaw: string, t
   const ticketId = String(ticketIdRaw || '').trim();
   const userReferenceHead = userReference.split('/')[0]?.trim() || '';
 
+  // Prefer user-facing order refs (often USER_REFERENCE like 370282/1)
+  // over internal SALE_ID values (often 364xxx internal IDs).
+  if (userReferenceHead && userReferenceHead !== ticketId && /^\d{5,12}$/.test(userReferenceHead)) {
+    return userReferenceHead;
+  }
+  if (saleId && saleId !== ticketId && /^\d{5,12}$/.test(saleId)) return saleId;
   if (saleId) return saleId;
   if (userReferenceHead && userReferenceHead !== ticketId) return userReferenceHead;
   return '';
@@ -942,6 +1130,12 @@ function inferOrderIdFromMessage(message: MessageItem): string {
   const orderIdField = String(message.ORDER_ID || '').trim();
   const userReference = String(message.USER_REFERENCE || '').trim();
   const saleId = String(message.SALE_ID || '').trim();
+  const ticketNumHead = ticketNum.split('/')[0]?.trim() || '';
+
+  // ASK/linked message rows often include the external order as TICKET_NUM (e.g., 370282/1).
+  if (ticketNum.includes('/') && ticketNumHead && ticketNumHead !== messageId && /^\d{5,12}$/.test(ticketNumHead)) {
+    return ticketNumHead;
+  }
 
   for (const candidate of [saleId, userReference, orderIdField]) {
     const orderHead = String(candidate || '').split('/')[0]?.trim() || '';
@@ -1113,6 +1307,14 @@ function shouldShowSourceBadge(ticket: IntakeTicketCard): boolean {
   return ticket.messageTypeKey !== 'ask';
 }
 
+function linkedOrderStatusBadgeClass(statusRaw: string): string {
+  const semantic = deliverySemanticFromStatusText(statusRaw);
+  if (semantic === 'exception' || semantic === 'canceled') return 'badge--stage-linked-exception';
+  if (semantic === 'delivered') return 'badge--stage-linked-delivered';
+  if (semantic === 'queued') return 'badge--stage-linked-queued';
+  return 'badge--stage';
+}
+
 function parseMessageDirection(rawDirection: string | undefined): 'in' | 'out' | 'unknown' {
   const text = String(rawDirection || '').trim().toLowerCase();
   if (!text) return 'unknown';
@@ -1228,14 +1430,11 @@ function messageLookupTicketCandidates(message: MessageItem): string[] {
     String(message.ORDER_ID || ''),
     String(message.USER_REFERENCE || ''),
     String(message.SALE_ID || ''),
-    String(message.ID || ''),
     ...extractNumericTokens(
+      String(message.TICKET_NUM || ''),
       String(message.ORDER_ID || ''),
       String(message.USER_REFERENCE || ''),
       String(message.SALE_ID || ''),
-      String(message.SUMMARY_TEXT || ''),
-      String(message.MSG_NOTES || ''),
-      String(message.MERCURY_NUM || ''),
     ),
   ];
 
@@ -1562,6 +1761,12 @@ function mergeMessageFields(primary: MessageItem, secondary: MessageItem): Messa
   return merged;
 }
 
+function messageMergeKey(message: MessageItem): string {
+  const explicitId = String(message.ID || '').trim();
+  if (explicitId) return explicitId;
+  return `${normalizeText(String(message.RECIPIENT_NAME || message.SUMMARY_TEXT || ''))}|${String(message.MSG_DATE || '')}|${messageTypeText(message)}`;
+}
+
 function formatCityStateZip(city: string, state: string, zip: string): string {
   const cityPart = String(city || '').trim();
   const statePart = abbreviateState(state);
@@ -1579,13 +1784,6 @@ function formatDateOnly(raw: string): string {
     day: 'numeric',
     year: 'numeric',
   });
-}
-
-function formatMonthDay(raw: string): string {
-  if (!raw) return '';
-  const parts = parseCalendarDateParts(raw);
-  if (!parts) return raw;
-  return `${parts.month}/${parts.day}`;
 }
 
 function formatHeaderDateShort(date: Date): string {
@@ -1709,10 +1907,49 @@ function toMessageItem(row: MercuryMessageListRow): MessageItem {
   );
   const deliveryDate = firstNonEmptyText(
     row.DELIVERY_DATE,
+    extra.REQ_DELIVERY_DATE,
     extra.DELIVERY_DATETIME,
     extra.DELIV_DATE,
     extra.DELIVERYDATE,
   );
+  const recipientAddress = firstNonEmptyText(
+    extra.RECIPIENT_ADDRESS,
+    extra.RECIPIENT_ADDR1,
+    extra.RECIP_ADDR1,
+    extra.ADDRESS,
+    extra.ADDR1,
+    extra.RADDRESS,
+    extra.OFROM_ADDRESS,
+  );
+  const recipientCity = firstNonEmptyText(
+    extra.RECIPIENT_CITY,
+    extra.CITY_NAME,
+    extra.CITY,
+    extra.RCITY,
+  );
+  const recipientState = firstNonEmptyText(
+    extra.RECIPIENT_STATE,
+    extra.STATE_NAME,
+    extra.STATE,
+    extra.RSTATE,
+  );
+  const recipientStateAbbrev = firstNonEmptyText(
+    extra.RECIPIENT_STATE_ABBREV,
+    extra.STATE_ABBREV,
+    extra.STATE_ABBR,
+    extra.STATE_PROV,
+    extra.STATE_PROVINCE,
+    extra.RSTATE,
+  );
+  const recipientZip = firstNonEmptyText(
+    extra.RECIPIENT_ZIP,
+    extra.RECIPIENT_POSTAL_CODE,
+    extra.ZIP_CODE,
+    extra.ZIP,
+    extra.POSTAL_CODE,
+    extra.RZIP,
+  );
+  const messageAmount = normalizedOrderAmount(row);
 
   return {
     ID: String(firstNonEmptyText(row.MSG_ID, extra.ID, extra.INTERNAL_MSG_ID) || ''),
@@ -1720,16 +1957,22 @@ function toMessageItem(row: MercuryMessageListRow): MessageItem {
     ORDER_ID: String(orderId || ''),
     USER_REFERENCE: String(userReference || ''),
     SALE_ID: String(saleId || ''),
-    WIRE_SERVICE: String(row.WIRE_SERVICE || ''),
+    WIRE_SERVICE: String(firstNonEmptyText(row.WIRE_SERVICE, extra.WIRE_SERVICE_ABBR) || ''),
     CATEGORY: String(row.CATEGORY || ''),
     MSG_TYPE: String(msgType || ''),
-    SUMMARY_TEXT: String(row.SUMMARY_TEXT || ''),
+    SUMMARY_TEXT: String(firstNonEmptyText(row.SUMMARY_TEXT, extra.GEN_TEXT) || ''),
     MSG_NOTES: String(row.MSG_NOTES || ''),
     MSG_DIRECTION: String(msgDirection || ''),
     RECIPIENT_NAME: String(row.RECIPIENT_NAME || ''),
+    RECIPIENT_ADDRESS: String(recipientAddress || ''),
+    RECIPIENT_CITY: String(recipientCity || ''),
+    RECIPIENT_STATE: String(recipientState || ''),
+    RECIPIENT_STATE_ABBREV: String(recipientStateAbbrev || ''),
+    RECIPIENT_ZIP: String(recipientZip || ''),
     MSG_DATE: String(msgDate || ''),
     DELIVERY_DATE: String(deliveryDate || ''),
     MERCURY_NUM: String(row.MERCURY_NUM || ''),
+    CC_AMOUNT: String(messageAmount || ''),
     REQUIRES_ATTENTION: String(row.REQUIRES_ATTENTION || ''),
   };
 }
@@ -1826,6 +2069,8 @@ function buildPendingIntakeTickets(
     ticketId: string;
     orderNumber: string;
     statusLabel: string;
+    destinationLabel: string;
+    orderAmount: string;
     deliveryEpoch: number;
     deliveryDateKey: string;
     recipientNorm: string;
@@ -1891,10 +2136,16 @@ function buildPendingIntakeTickets(
     const recipientNorm = normalizeText(String(order.RECIPIENT_NAME || order.SUMMARY_TEXT || ''));
     const recipientTokens = tokenizeRecipient(String(order.RECIPIENT_NAME || order.SUMMARY_TEXT || ''));
     const deliveryDateKey = toDateKey(deliveryRaw);
+    const destinationLabel = compactTownZipLabel(
+      String(order.DELIVERY_CITY_STATE_ZIP || ''),
+      String(order.DELIVERY_ZIP || ''),
+    );
     const info: LinkedOrderInfo = {
       ticketId,
       orderNumber,
       statusLabel: String(order.STAGE_LABEL || '').trim(),
+      destinationLabel,
+      orderAmount: String(order.ORDER_AMOUNT || '').trim(),
       deliveryEpoch: toEpoch(deliveryRaw),
       deliveryDateKey,
       recipientNorm,
@@ -1939,7 +2190,10 @@ function buildPendingIntakeTickets(
     }));
   const latestAskEpochByThreadKey = new Map<string, number>();
   const latestAskHasTimeByThreadKey = new Map<string, boolean>();
-  for (const message of allMessages) {
+  // Dedupe ASK threads only within the current intake scope.
+  // Using full historical message feeds here can suppress currently visible
+  // event rows if an older/later ASK exists outside the active intake set.
+  for (const message of messageItems) {
     if (!isAskMessage(message)) continue;
     if (messageDirection(message) === 'out') continue;
     const summary = String(message.SUMMARY_TEXT || '').trim();
@@ -2237,8 +2491,9 @@ function buildPendingIntakeTickets(
       ? linkedOrder || (inferredLinkedOrder?.orderNumber ? inferredLinkedOrder : null)
       : linkedOrder || (inferredLinkedOrder?.orderNumber ? inferredLinkedOrder : null) || linkedOrderWithoutOrderNumber;
     const verifiedInferredOrderId = inferredLinkedOrder?.orderNumber || '';
-    const displayOrderId = resolvedLinkedOrder?.orderNumber
-      || (ask ? verifiedInferredOrderId : (verifiedInferredOrderId || inferredOrderId));
+    const displayOrderId = ask
+      ? (verifiedInferredOrderId || inferredOrderId || resolvedLinkedOrder?.orderNumber || '')
+      : (resolvedLinkedOrder?.orderNumber || verifiedInferredOrderId || inferredOrderId);
 
     if (!inferredOrderId && resolvedLinkedOrder?.orderNumber) {
       inferredOrderId = resolvedLinkedOrder.orderNumber;
@@ -2348,12 +2603,42 @@ function buildPendingIntakeTickets(
     const askDebugSummary = includeAskDebug
       ? askMatch?.summary || 'Unresolved ASK card.'
       : '';
+    const messageCityStateZip = formatCityStateZip(
+      String(message.RECIPIENT_CITY || ''),
+      firstNonEmptyText(
+        String(message.RECIPIENT_STATE_ABBREV || ''),
+        String(message.RECIPIENT_STATE || ''),
+      ),
+      String(message.RECIPIENT_ZIP || ''),
+    );
+    const destinationAddressLine = firstNonEmptyText(String(message.RECIPIENT_ADDRESS || ''));
+    const destinationCity = firstNonEmptyText(String(message.RECIPIENT_CITY || ''));
+    const destinationState = firstNonEmptyText(
+      String(message.RECIPIENT_STATE_ABBREV || ''),
+      String(message.RECIPIENT_STATE || ''),
+    );
+    const destinationZip = firstNonEmptyText(String(message.RECIPIENT_ZIP || ''));
+    const destinationLabel = firstNonEmptyText(
+      resolvedLinkedOrder?.destinationLabel || '',
+      compactTownZipLabel(messageCityStateZip, normalizedPostalCode(message)),
+    );
+    const orderAmount = firstNonEmptyText(
+      resolvedLinkedOrder?.orderAmount || '',
+      normalizedOrderAmount(message),
+    );
 
     pending.push({
       id,
       recipientName: recipient,
       summary,
       displayRef,
+      destinationAddressLine,
+      destinationCity,
+      destinationState,
+      destinationZip,
+      destinationLabel,
+      distanceMilesLabel: '',
+      orderAmount,
       deliveryDate: deliveryDateRaw,
       messageDate: msgDateRaw,
       notes,
@@ -2433,6 +2718,7 @@ export default function App() {
   const pollInFlightRef = useRef(false);
   const pollQueuedRef = useRef(false);
   const orderDetailZipByTicketRef = useRef<Map<string, string>>(new Map());
+  const pendingDistanceByLookupKeyRef = useRef<Map<string, string>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioAlertsEnabledRef = useRef(isAudioAlertsEnabled);
   const audioAlertSnapshotReadyRef = useRef(false);
@@ -2835,6 +3121,7 @@ export default function App() {
     if (!selectedDayOrderTotal) return 0;
     return Math.max(0, Math.min(100, Math.round((selectedDayOrderCompleted / selectedDayOrderTotal) * 100)));
   }, [selectedDayOrderCompleted, selectedDayOrderTotal]);
+  const selectedDayCompletionIsComplete = selectedDayCompletionPercent >= 100;
   const selectedDayCountLabel = useMemo(
     () => (selectedDateKey === currentLocalDateKey() ? 'Today' : formatHeaderDateShort(selectedDate)),
     [selectedDate, selectedDateKey],
@@ -3570,6 +3857,9 @@ export default function App() {
         if (incoming.RECIPIENT_NAME) merged.RECIPIENT_NAME = incoming.RECIPIENT_NAME;
         if (incoming.SUMMARY_TEXT) merged.SUMMARY_TEXT = incoming.SUMMARY_TEXT;
         if (incoming.DELIVERY_DATE) merged.DELIVERY_DATE = incoming.DELIVERY_DATE;
+        if (incoming.DELIVERY_CITY_STATE_ZIP) merged.DELIVERY_CITY_STATE_ZIP = incoming.DELIVERY_CITY_STATE_ZIP;
+        if (incoming.DELIVERY_ZIP) merged.DELIVERY_ZIP = incoming.DELIVERY_ZIP;
+        if (incoming.ORDER_AMOUNT) merged.ORDER_AMOUNT = incoming.ORDER_AMOUNT;
 
         const currentOrderId = extractOrderIdForDisplay(current.SALE_ID, current.USER_REFERENCE, current.ID);
         const incomingOrderId = extractOrderIdForDisplay(incoming.SALE_ID, incoming.USER_REFERENCE, incoming.ID);
@@ -3598,44 +3888,76 @@ export default function App() {
         referenceById.set(key, mergeOrderReference(existing, entry));
       };
       for (const order of orders) {
+        const orderZip = normalizedPostalCode(order);
         addOrderReference({
           ID: String(order.ID || ''),
           RECIPIENT_NAME: String(order.RECIPIENT_NAME || ''),
           SUMMARY_TEXT: String(order.SUMMARY_TEXT || ''),
           DELIVERY_DATE: String(order.DELIVERY_DATE || ''),
+          DELIVERY_CITY_STATE_ZIP: formatCityStateZip(
+            normalizedCity(order),
+            normalizedStateAbbrev(order),
+            orderZip,
+          ),
+          DELIVERY_ZIP: orderZip,
+          ORDER_AMOUNT: normalizedOrderAmount(order),
           USER_REFERENCE: String(order.USER_REFERENCE || ''),
           SALE_ID: String(order.SALE_ID || ''),
           STAGE_LABEL: statusLabelByTicketId.get(String(order.ID || '').trim()) || '',
         });
       }
       for (const row of zoneRows) {
+        const rowZip = normalizedPostalCode(row);
         addOrderReference({
           ID: String(row.ID || ''),
           RECIPIENT_NAME: String(row.RECIPIENT_NAME || ''),
           SUMMARY_TEXT: String(row.RECIPIENT_NAME || ''),
           DELIVERY_DATE: String(row.DELIVERY_DATE || ''),
+          DELIVERY_CITY_STATE_ZIP: formatCityStateZip(
+            normalizedCity(row),
+            normalizedStateAbbrev(row),
+            rowZip,
+          ),
+          DELIVERY_ZIP: rowZip,
+          ORDER_AMOUNT: '',
           USER_REFERENCE: String(row.SALE_ID || ''),
           SALE_ID: String(row.SALE_ID || ''),
           STAGE_LABEL: statusLabelByTicketId.get(String(row.ID || '').trim()) || '',
         });
       }
       for (const row of routeRows) {
+        const rowZip = normalizedPostalCode(row);
         addOrderReference({
           ID: String(row.ID || ''),
           RECIPIENT_NAME: String(row.RECIPIENT_NAME || ''),
           SUMMARY_TEXT: String(row.RECIPIENT_NAME || ''),
           DELIVERY_DATE: String(row.DELIVERY_DATE || ''),
+          DELIVERY_CITY_STATE_ZIP: formatCityStateZip(
+            normalizedCity(row),
+            normalizedStateAbbrev(row),
+            rowZip,
+          ),
+          DELIVERY_ZIP: rowZip,
+          ORDER_AMOUNT: '',
           USER_REFERENCE: String(row.SALE_ID || ''),
           SALE_ID: String(row.SALE_ID || ''),
           STAGE_LABEL: statusLabelByTicketId.get(String(row.ID || '').trim()) || '',
         });
       }
       for (const row of ticketSearchRows) {
+        const rowZip = normalizedPostalCode(row);
         addOrderReference({
           ID: String(row.ID || ''),
           RECIPIENT_NAME: String(row.RECIPIENT_NAME || ''),
           SUMMARY_TEXT: String(row.RECIPIENT_NAME || ''),
           DELIVERY_DATE: String(row.DELIVERY_DATE || ''),
+          DELIVERY_CITY_STATE_ZIP: formatCityStateZip(
+            normalizedCity(row),
+            normalizedStateAbbrev(row),
+            rowZip,
+          ),
+          DELIVERY_ZIP: rowZip,
+          ORDER_AMOUNT: normalizedOrderAmount(row),
           USER_REFERENCE: String(row.USER_REFERENCE || row.SALE_ID || ''),
           SALE_ID: String(row.SALE_ID || ''),
           STAGE_LABEL: statusLabelByTicketId.get(String(row.ID || '').trim()) || '',
@@ -3643,16 +3965,28 @@ export default function App() {
       }
 
       const messageByKey = new Map<string, MessageItem>();
-      for (const message of [...messageRowsFromEvents, ...messageRowsFromFeed]) {
-        const key = String(message.ID || '').trim()
-          || `${normalizeText(String(message.RECIPIENT_NAME || message.SUMMARY_TEXT || ''))}|${String(message.MSG_DATE || '')}|${messageTypeText(message)}`;
+      const eventMessageKeys = new Set<string>();
+      for (const message of messageRowsFromEvents) {
+        const key = messageMergeKey(message);
+        eventMessageKeys.add(key);
         const existing = messageByKey.get(key);
         messageByKey.set(key, existing ? mergeMessageFields(existing, message) : message);
       }
+      for (const message of messageRowsFromFeed) {
+        const key = messageMergeKey(message);
+        const existing = messageByKey.get(key);
+        messageByKey.set(key, existing ? mergeMessageFields(existing, message) : message);
+      }
+      const mergedMessageRows = Array.from(messageByKey.values());
+      const displayMessageRows = Array.from(eventMessageKeys)
+        .map(key => messageByKey.get(key))
+        .filter((message): message is MessageItem => Boolean(message))
+        .filter(message => isInboundIntakeMessage(message));
       const hasMessageThreadCoverage = messageRowsFromFeed.length > 0;
-      const inboundIntakeMessages = Array.from(messageByKey.values()).filter(message => isInboundIntakeMessage(message));
+      const inboundIntakeMessages = displayMessageRows.filter(message => isInboundIntakeMessage(message));
 
       const askMessages = inboundIntakeMessages.filter(message => isAskMessage(message));
+      const askStatusByOrderNumber = new Map<string, string>();
       const askDetailTargetsById = new Map<string, MessageItem>();
       for (const message of askMessages) {
         if (inferOrderIdFromMessage(message)) continue;
@@ -3797,6 +4131,7 @@ export default function App() {
             const saleId = String(details?.SALE_ID || '').trim();
             const userReference = String(details?.USER_REFERENCE || '').trim();
             const orderId = extractOrderIdForDisplay(saleId, userReference, ticketId);
+            const detailZip = normalizedPostalCode(details);
 
             return {
               serviceMsg,
@@ -3807,6 +4142,13 @@ export default function App() {
                 RECIPIENT_NAME: String(details?.RECIPIENT_NAME || '').trim(),
                 SUMMARY_TEXT: String(details?.SUMMARY_TEXT || details?.RECIPIENT_NAME || '').trim(),
                 DELIVERY_DATE: String(details?.DELIVERY_DATE || '').trim(),
+                DELIVERY_CITY_STATE_ZIP: formatCityStateZip(
+                  normalizedCity(details),
+                  normalizedStateAbbrev(details),
+                  detailZip,
+                ),
+                DELIVERY_ZIP: detailZip,
+                ORDER_AMOUNT: normalizedOrderAmount(details),
                 USER_REFERENCE: userReference,
                 SALE_ID: saleId || orderId,
                 STAGE_LABEL: stageLabel,
@@ -3939,6 +4281,107 @@ export default function App() {
         }
       }
 
+      const askOrderNumbers = Array.from(
+        new Set(
+          askMessages
+            .map(message => String(inferOrderIdFromMessage(message) || '').trim().split('/')[0] || '')
+            .filter(value => /^\d{5,12}$/.test(value)),
+        ),
+      ).slice(0, 120);
+
+      if (askOrderNumbers.length > 0) {
+        const askOrderStatusResults = await allSettledInBatches(
+          askOrderNumbers,
+          18,
+          async orderNumber => {
+            const lookup = await fetchTicketSearch({
+              notDelivered: false,
+              includeDelivered: true,
+              orderNumber,
+            });
+            const rows = lookup?.rows || [];
+            if (!rows.length) return null;
+
+            const normalizedOrder = normalizeIdLike(orderNumber);
+            const matchingRows = rows.filter(row => {
+              const saleId = normalizeIdLike(String(row.SALE_ID || ''));
+              const userReference = normalizeIdLike(String(row.USER_REFERENCE || ''));
+              const displayOrderHead = normalizeIdLike(
+                extractOrderIdForDisplay(
+                  String(row.SALE_ID || ''),
+                  String(row.USER_REFERENCE || ''),
+                  String(row.ID || ''),
+                ),
+              );
+              return (
+                saleId === normalizedOrder
+                || displayOrderHead === normalizedOrder
+                || userReference === normalizedOrder
+                || userReference.startsWith(`${normalizedOrder}/`)
+              );
+            });
+
+            const pool = matchingRows.length ? matchingRows : rows;
+            const scored = pool
+              .map(row => {
+                const deliveryStatus = effectiveDeliveryStatusFromTicketSearchRow(row);
+                const designStatus = String(row.DESIGN_STATUS || '').trim();
+                const stage = normalizeStageForOrderCard(
+                  stageFromExternalStatus(
+                    `${deliveryStatus} ${designStatus}`.trim(),
+                    designedIndicatorFromStatusText(designStatus),
+                  ),
+                );
+                return {
+                  row,
+                  stage,
+                  stageRank: ACTIVE_STAGE_RANK[stage] || 0,
+                  deliveryEpoch: deliveryDateSortEpoch(String(row.DELIVERY_DATE || '')),
+                  statusContext: `${deliveryStatus} ${designStatus}`.trim(),
+                };
+              })
+              .sort((a, b) => {
+                if (b.stageRank !== a.stageRank) return b.stageRank - a.stageRank;
+                if (b.deliveryEpoch !== a.deliveryEpoch) return b.deliveryEpoch - a.deliveryEpoch;
+                return String(a.row.ID || '').localeCompare(String(b.row.ID || ''));
+              });
+
+            const best = scored[0];
+            if (!best) return null;
+
+            const stageLabel = friendlyStatusLabel(best.stage, best.statusContext || `TicketSearch ${orderNumber}`);
+            const rowZip = normalizedPostalCode(best.row);
+            const entry: OrderReferenceEntry = {
+              ID: String(best.row.ID || '').trim(),
+              RECIPIENT_NAME: String(best.row.RECIPIENT_NAME || '').trim(),
+              SUMMARY_TEXT: String(best.row.RECIPIENT_NAME || '').trim(),
+              DELIVERY_DATE: String(best.row.DELIVERY_DATE || '').trim(),
+              DELIVERY_CITY_STATE_ZIP: formatCityStateZip(
+                normalizedCity(best.row),
+                normalizedStateAbbrev(best.row),
+                rowZip,
+              ),
+              DELIVERY_ZIP: rowZip,
+              ORDER_AMOUNT: normalizedOrderAmount(best.row),
+              USER_REFERENCE: String(best.row.USER_REFERENCE || '').trim(),
+              SALE_ID: String(best.row.SALE_ID || orderNumber).trim(),
+              STAGE_LABEL: stageLabel,
+            };
+
+            return { orderNumber, stageLabel, entry };
+          },
+        );
+
+        for (const result of askOrderStatusResults) {
+          if (result.status !== 'fulfilled' || !result.value) continue;
+          const normalizedOrder = normalizeIdLike(String(result.value.orderNumber || ''));
+          if (normalizedOrder && result.value.stageLabel) {
+            askStatusByOrderNumber.set(normalizedOrder, result.value.stageLabel);
+          }
+          addOrderReference(result.value.entry);
+        }
+      }
+
       const intakeLookupTicketIds = Array.from(
         new Set(
           inboundIntakeMessages
@@ -3968,12 +4411,20 @@ export default function App() {
             const saleId = String(details?.SALE_ID || '').trim();
             const userReference = String(details?.USER_REFERENCE || '').trim();
             const orderNumber = extractOrderIdForDisplay(saleId, userReference, ticketId);
+            const detailZip = normalizedPostalCode(details);
 
             return {
               ID: String(details?.ID || ticketId || '').trim(),
               RECIPIENT_NAME: String(details?.RECIPIENT_NAME || '').trim(),
               SUMMARY_TEXT: String(details?.SUMMARY_TEXT || details?.RECIPIENT_NAME || '').trim(),
               DELIVERY_DATE: String(details?.DELIVERY_DATE || '').trim(),
+              DELIVERY_CITY_STATE_ZIP: formatCityStateZip(
+                normalizedCity(details),
+                normalizedStateAbbrev(details),
+                detailZip,
+              ),
+              DELIVERY_ZIP: detailZip,
+              ORDER_AMOUNT: normalizedOrderAmount(details),
               USER_REFERENCE: userReference,
               SALE_ID: saleId || orderNumber,
               STAGE_LABEL: stageLabel,
@@ -3992,8 +4443,8 @@ export default function App() {
       const orderReferencePool = Array.from(referenceById.values());
 
       const pending = buildPendingIntakeTickets(
-        Array.from(messageByKey.values()),
-        Array.from(messageByKey.values()),
+        displayMessageRows,
+        mergedMessageRows,
         orderReferencePool,
         seenTicketIdsRef.current,
         flashUntilRef.current,
@@ -4003,8 +4454,90 @@ export default function App() {
           askStaleMs,
         },
       );
+      const pendingWithStatus = pending.map(ticket => {
+        if (ticket.kind !== 'ask') return { ...ticket };
+        const orderKey = normalizeIdLike(String(ticket.relatedOrderNumber || ''));
+        if (!orderKey) return { ...ticket };
+        const statusOverride = askStatusByOrderNumber.get(orderKey) || '';
+        if (!statusOverride) return { ...ticket };
+        return {
+          ...ticket,
+          relatedOrderStatus: statusOverride,
+        };
+      });
 
-      const unresolvedAsks = pending.filter(ticket => ticket.kind === 'ask' && !ticket.relatedOrderNumber && ticket.askDebugSummary);
+      const pendingWithDistance = pendingWithStatus.map(ticket => ({ ...ticket }));
+      const pendingDistanceLookupPlans = new Map<string, { ticket: IntakeTicketCard; indexes: number[] }>();
+      for (const [index, ticket] of pendingWithDistance.entries()) {
+        const lookupKey = pendingDistanceLookupKey(ticket);
+        if (!lookupKey) continue;
+        const cachedDistanceLabel = pendingDistanceByLookupKeyRef.current.get(lookupKey) || '';
+        if (cachedDistanceLabel) {
+          ticket.distanceMilesLabel = cachedDistanceLabel;
+          continue;
+        }
+        const existingPlan = pendingDistanceLookupPlans.get(lookupKey);
+        if (existingPlan) {
+          existingPlan.indexes.push(index);
+        } else {
+          pendingDistanceLookupPlans.set(lookupKey, {
+            ticket,
+            indexes: [index],
+          });
+        }
+      }
+
+      if (pendingDistanceLookupPlans.size > 0) {
+        const lookupEntries = Array.from(pendingDistanceLookupPlans.entries());
+        const distanceResults = await allSettledInBatches(
+          lookupEntries,
+          10,
+          async ([lookupKey, plan]) => {
+            const ticket = plan.ticket;
+            const ticketId = String(ticket.relatedTicketId || '').trim();
+            const addressLine1 = String(ticket.destinationAddressLine || '').trim();
+            const city = String(ticket.destinationCity || '').trim();
+            const state = String(ticket.destinationState || '').trim();
+            const postalCode = String(ticket.destinationZip || '').trim();
+            if (!ticketId && !addressLine1 && !city && !postalCode) {
+              return { lookupKey, distanceMilesLabel: '' };
+            }
+            let estimate: DistanceEstimateResponse | null = null;
+            try {
+              estimate = await fetchDistanceEstimate({
+                ticketId,
+                addressLine1,
+                city,
+                state,
+                postalCode,
+                country: 'US',
+              });
+            } catch {
+              estimate = null;
+            }
+            return {
+              lookupKey,
+              distanceMilesLabel: formatDistanceMilesLabel(estimate?.distance_miles),
+            };
+          },
+        );
+        for (const result of distanceResults) {
+          if (result.status !== 'fulfilled') continue;
+          const lookupKey = String(result.value.lookupKey || '').trim();
+          const distanceMilesLabel = String(result.value.distanceMilesLabel || '').trim();
+          if (!lookupKey || !distanceMilesLabel) continue;
+          pendingDistanceByLookupKeyRef.current.set(lookupKey, distanceMilesLabel);
+          const plan = pendingDistanceLookupPlans.get(lookupKey);
+          if (!plan) continue;
+          for (const index of plan.indexes) {
+            const ticket = pendingWithDistance[index];
+            if (!ticket) continue;
+            ticket.distanceMilesLabel = distanceMilesLabel;
+          }
+        }
+      }
+
+      const unresolvedAsks = pendingWithDistance.filter(ticket => ticket.kind === 'ask' && !ticket.relatedOrderNumber && ticket.askDebugSummary);
       if (askDebugEnabled) {
         const activeLogIds = new Set<string>();
         for (const ticket of unresolvedAsks) {
@@ -4051,7 +4584,7 @@ export default function App() {
           return true;
         })
         .sort(activeOrderSort);
-      const nextAudioAlertKinds = buildAudioAlertKindMap(pending, reconciledActiveOrders, currentLocalDateKey());
+      const nextAudioAlertKinds = buildAudioAlertKindMap(pendingWithDistance, reconciledActiveOrders, currentLocalDateKey());
       const nextAudioAlertKeys = new Set(nextAudioAlertKinds.keys());
       if (!audioAlertSnapshotReadyRef.current) {
         alertedItemKeysRef.current = nextAudioAlertKeys;
@@ -4082,7 +4615,7 @@ export default function App() {
         }
       }
       setAllActiveOrders(reconciledActiveOrders);
-      setPendingTickets(pending);
+      setPendingTickets(pendingWithDistance);
       setLastUpdated(new Date().toLocaleTimeString());
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -4712,7 +5245,6 @@ export default function App() {
       {!isConfigOpen ? (
         <>
       {error ? <div className="app__error">Feed error: {error}</div> : null}
-      {loading ? <div className="app__loading">Loading board...</div> : null}
 
       {!isDashboardMode ? (
         <div className="app__rotation">
@@ -4738,6 +5270,12 @@ export default function App() {
       ) : null}
 
       <main className="board-page">
+        {loading ? (
+          <div className="board-loading-overlay" role="status" aria-live="polite" aria-label="Loading board">
+            <span className="board-loading-overlay__spinner" aria-hidden="true" />
+            <span className="board-loading-overlay__label">Loading board...</span>
+          </div>
+        ) : null}
         <div className="board-lanes board-lanes--two">
             <section className="lane lane--critical">
               <header className="lane__header">
@@ -4754,6 +5292,13 @@ export default function App() {
                   pendingTickets.map(ticket => {
                     const intakeBadge = intakeBadgeForTicket(ticket);
                     const showSourceBadge = shouldShowSourceBadge(ticket);
+                    const showNewOrderTotalPill = ticket.kind === 'uncreated';
+                    const showInlineDisplayRef = Boolean(ticket.displayRef) && !ticket.relatedOrderNumber;
+                    const destinationLabelText = ticket.destinationLabel || '--';
+                    const deliveryDateText = formatDateOnly(ticket.deliveryDate) || '--';
+                    const displayRecipientName = formatDisplayRecipientName(
+                      ticket.recipientName || ticket.summary || 'Incoming Ticket',
+                    );
                     return (
                       <article
                         key={ticket.id}
@@ -4767,12 +5312,34 @@ export default function App() {
                             {showSourceBadge ? (
                               <span className="badge badge--source">{sourcePillLabel(ticket.wireService)}</span>
                             ) : null}
+                            {showNewOrderTotalPill ? (
+                              <span className="badge badge--total">Total: {ticket.orderAmount || '--'}</span>
+                            ) : null}
+                            {ticket.distanceMilesLabel ? (
+                              <span className="badge badge--distance">Distance: {ticket.distanceMilesLabel}</span>
+                            ) : null}
                           </div>
                           <div className="ticket-card__pills">
                             {ticket.relatedOrderNumber ? (
-                              <span className="badge badge--linked">Order {ticket.relatedOrderNumber}</span>
+                              <span className="badge badge--linked">ORDER {ticket.relatedOrderNumber}</span>
                             ) : null}
-                            {ticket.relatedOrderStatus ? <span className="badge badge--stage">{ticket.relatedOrderStatus}</span> : null}
+                            {ticket.relatedOrderStatus ? (() => {
+                              const statusText = String(ticket.relatedOrderStatus || '').trim();
+                              const statusDisplayText = statusText.toUpperCase();
+                              const semantic = deliverySemanticFromStatusText(statusText);
+                              const shouldHideLinkedStatus = ticket.kind === 'uncreated' && semantic === 'queued';
+                              if (shouldHideLinkedStatus) return null;
+                              const badgeClass = linkedOrderStatusBadgeClass(statusText);
+                              const statusIcon = semantic === 'exception'
+                                ? faTriangleExclamation
+                                : (semantic === 'delivered' ? faTruck : (semantic === 'queued' ? faClock : null));
+                              return (
+                                <span className={`badge ${badgeClass}`}>
+                                  {statusIcon ? <FontAwesomeIcon icon={statusIcon} className="badge__icon" /> : null}
+                                  {statusDisplayText}
+                                </span>
+                              );
+                            })() : null}
                             {askDebugEnabled && ticket.kind === 'ask' && !ticket.relatedOrderNumber && ticket.askDebugSummary ? (
                               <span
                                 className="badge badge--debug"
@@ -4791,11 +5358,12 @@ export default function App() {
                         </header>
                         <div className="ticket-card__main-row">
                           <div className="ticket-card__name">
-                            {(ticket.recipientName || ticket.summary || 'Incoming Ticket')}
-                            {ticket.displayRef ? ` - ${ticket.displayRef}` : ''}
+                            {displayRecipientName}
+                            {showInlineDisplayRef ? ` - ${ticket.displayRef}` : ''}
                           </div>
                           <div className="ticket-card__delivery-inline">
-                            Delivery: {formatDateOnly(ticket.deliveryDate) || 'No delivery date'}
+                            <span className="ticket-card__delivery-destination">{destinationLabelText}</span>
+                            <span className="ticket-card__delivery-date">{deliveryDateText}</span>
                           </div>
                         </div>
                       </article>
@@ -4828,8 +5396,8 @@ export default function App() {
                 ) : (
                   activeOrders.map(card => {
                     const statusPill = singleStatusPill(card);
-                    const dateLabel = shouldUsePickupDateLabel(card) ? 'Pickup' : 'Delivery';
                     const footerZip = deriveCardFooterZip(card);
+                    const displayRecipientName = formatDisplayRecipientName(card.recipientName || 'Unknown Recipient');
                     return (
                       <article
                         key={card.ticketId}
@@ -4843,12 +5411,12 @@ export default function App() {
                             </span>
                           </div>
                         </header>
-                        <div className="order-card__name">{card.recipientName || 'Unknown Recipient'}</div>
+                        <div className="order-card__name">{displayRecipientName}</div>
                         <div className="order-card__meta">{card.addressLine || 'No street address'}</div>
                         <div className="order-card__meta">{card.cityStateZip || 'No city/state/zip'}</div>
                         <footer className="order-card__footer">
-                          <span className="order-card__footer-item">{dateLabel} {formatMonthDay(card.deliveryDate) || '--'}</span>
-                          {footerZip ? <span className="order-card__footer-item">ZIP {footerZip}</span> : null}
+                          <span className="order-card__footer-item">{formatDateOnly(card.deliveryDate) || '--'}</span>
+                          {footerZip ? <span className="order-card__footer-item">{footerZip}</span> : null}
                         </footer>
                       </article>
                     );
@@ -4868,7 +5436,10 @@ export default function App() {
                   aria-valuenow={selectedDayCompletionPercent}
                   aria-label="Selected day order completion"
                 >
-                  <div className="lane__progress-fill" style={{ width: `${selectedDayCompletionPercent}%` }} />
+                  <div
+                    className={`lane__progress-fill${selectedDayCompletionIsComplete ? ' lane__progress-fill--complete' : ''}`}
+                    style={{ width: `${selectedDayCompletionPercent}%` }}
+                  />
                 </div>
               </footer>
             </section>

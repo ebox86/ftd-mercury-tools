@@ -8,6 +8,7 @@ param(
   [string]$MercuryBaseUrl = "http://127.0.0.1/WsMercuryWebAPI",
   [string]$MercurySoapNamespace = "http://localhost/webservices/",
   [string]$MercuryLocalNetworkOnly = "true",
+  [string]$MapboxToken = "",
   [string]$BridgeHost = "0.0.0.0",
   [string]$WebHost = "0.0.0.0"
 )
@@ -90,6 +91,10 @@ $bridgeArgs = @(
 
 if ($resolvedNodeExePath) {
   $bridgeArgs += "--node-exe=$resolvedNodeExePath"
+}
+
+if ($MapboxToken) {
+  $bridgeArgs += "--mapbox-token=$MapboxToken"
 }
 
 $webArgs = @(

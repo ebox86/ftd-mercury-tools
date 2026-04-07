@@ -24,6 +24,7 @@ export interface OrderItem {
   DELIVERY_DATE: string;
   DELIVERY_INST?: string;
   SPECIAL_INST?: string;
+  CC_AMOUNT?: string;
 }
 
 export interface MessageItem {
@@ -52,6 +53,7 @@ export interface MessageItem {
   SHOP_PHONE?: string;
   MSG_NOTES?: string;
   MERCURY_NUM?: string;
+  CC_AMOUNT?: string;
   REQUIRES_ATTENTION?: string;
 }
 

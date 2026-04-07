@@ -1,5 +1,5 @@
 ﻿import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,6 +7,49 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const refDir = join(__dirname, '..', 'reference');
 const serviceName = 'pi-kiosk-mercury-workflow-bridge';
+
+function parseEnvLine(rawLine = '') {
+  const line = String(rawLine || '').trim();
+  if (!line || line.startsWith('#')) return null;
+  const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+  if (!match) return null;
+  const key = String(match[1] || '').trim();
+  let value = String(match[2] || '');
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    value = value.slice(1, -1);
+  }
+  return { key, value };
+}
+
+function loadEnvFileIfPresent(filePath) {
+  if (!existsSync(filePath)) return;
+  let raw = '';
+  try {
+    raw = readFileSync(filePath, 'utf8');
+  } catch {
+    return;
+  }
+  const lines = String(raw || '').replace(/^\uFEFF/, '').split(/\r?\n/);
+  for (const rawLine of lines) {
+    const parsed = parseEnvLine(rawLine);
+    if (!parsed?.key) continue;
+    if (process.env[parsed.key] !== undefined && process.env[parsed.key] !== '') continue;
+    process.env[parsed.key] = parsed.value;
+  }
+}
+
+function loadLocalEnvFiles() {
+  // Keep explicit process env highest priority; then read local files.
+  const candidates = [
+    join(__dirname, '..', '.env'),
+    join(__dirname, '.env'),
+  ];
+  for (const candidate of candidates) {
+    loadEnvFileIfPresent(candidate);
+  }
+}
+
+loadLocalEnvFiles();
 
 function readJsonFile(filePath) {
   const raw = readFileSync(filePath, 'utf8');
@@ -48,6 +91,15 @@ const liveApiCacheMaxEntries = Number(process.env.MERCURY_LIVE_CACHE_MAX_ENTRIES
 const liveApiCacheBypassParam = String(process.env.MERCURY_LIVE_CACHE_BYPASS_PARAM || 'nocache').trim() || 'nocache';
 const liveApiResponseCache = new Map();
 const liveApiInFlight = new Map();
+const mapboxToken = String(process.env.MAPBOX_TOKEN || process.env.MAPBOX_ACCESS_TOKEN || '').trim();
+const mapboxApiBaseUrl = String(process.env.MAPBOX_API_BASE_URL || 'https://api.mapbox.com').trim().replace(/\/+$/, '') || 'https://api.mapbox.com';
+const mapboxProfileRaw = String(process.env.MAPBOX_DIRECTIONS_PROFILE || 'driving').trim();
+const mapboxProfile = mapboxProfileRaw.includes('/') ? mapboxProfileRaw : `mapbox/${mapboxProfileRaw}`;
+const mapboxTimeoutMs = Number(process.env.MAPBOX_TIMEOUT_MS || 8000);
+const mapboxRouteCacheTtlMs = Number(process.env.MAPBOX_ROUTE_CACHE_TTL_MS || 6 * 60 * 60 * 1000);
+const mapboxAddressCacheTtlMs = Number(process.env.MAPBOX_ADDRESS_CACHE_TTL_MS || 6 * 60 * 60 * 1000);
+const mapboxDistanceFallbackToHaversine = !/^(0|false|no)$/i.test(String(process.env.MAPBOX_FALLBACK_TO_HAVERSINE || 'true').trim());
+const liveMainStoreCoordCache = { expiresAt: 0, point: null };
 
 function xmlEscape(value) {
   return String(value)
@@ -199,6 +251,77 @@ function boolFromMercuryFlag(raw) {
   const numeric = Number(text);
   if (Number.isFinite(numeric)) return numeric > 0;
   return false;
+}
+
+function normalizeSpace(raw = '') {
+  return String(raw || '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeAddressText(raw = '') {
+  return normalizeSpace(raw).toUpperCase();
+}
+
+function normalizePostalCode(raw = '') {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  const zipMatch = text.match(/\b(\d{5})(?:-\d{4})?\b/);
+  if (zipMatch) return zipMatch[1];
+  return text.toUpperCase();
+}
+
+function normalizeCoord(raw, min, max) {
+  const value = Number(String(raw ?? '').trim());
+  if (!Number.isFinite(value)) return null;
+  if (value < min || value > max) return null;
+  return value;
+}
+
+function hasUsableCoords(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  // Common sentinel from failed geocode responses.
+  if (Math.abs(lat) < 0.000001 && Math.abs(lon) < 0.000001) return false;
+  return true;
+}
+
+function extractCoordsFromRow(row = {}, latKeys = [], lonKeys = []) {
+  let lat = null;
+  let lon = null;
+  for (const key of latKeys) {
+    lat = normalizeCoord(row?.[key], -90, 90);
+    if (lat !== null) break;
+  }
+  for (const key of lonKeys) {
+    lon = normalizeCoord(row?.[key], -180, 180);
+    if (lon !== null) break;
+  }
+  if (lat === null || lon === null) return null;
+  if (!hasUsableCoords(lat, lon)) return null;
+  return { latitude: lat, longitude: lon };
+}
+
+function roundTo(raw, decimals = 1) {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return null;
+  const factor = 10 ** Math.max(0, Math.floor(decimals));
+  return Math.round(value * factor) / factor;
+}
+
+function haversineDistanceMiles(origin, destination) {
+  const originLat = Number(origin?.latitude);
+  const originLon = Number(origin?.longitude);
+  const destLat = Number(destination?.latitude);
+  const destLon = Number(destination?.longitude);
+  if (![originLat, originLon, destLat, destLon].every(Number.isFinite)) return null;
+  const toRadians = (value) => value * (Math.PI / 180);
+  const dLat = toRadians(destLat - originLat);
+  const dLon = toRadians(destLon - originLon);
+  const lat1 = toRadians(originLat);
+  const lat2 = toRadians(destLat);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.sin(dLon / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const earthRadiusMiles = 3958.7613;
+  return earthRadiusMiles * c;
 }
 
 function buildTypedAnyTypeArrayXml(nodeName, values = []) {
@@ -1335,6 +1458,469 @@ function normalizeLiveZoneOrderRow(rawRow, fallbackDeliveryDate = '') {
   };
 }
 
+function addressLookupCacheKey(address = {}) {
+  return buildLiveCacheKey('distance-address-coords', {
+    firmName: normalizeAddressText(address.firmName || ''),
+    addressLine1: normalizeAddressText(address.addressLine1 || ''),
+    addressLine2: normalizeAddressText(address.addressLine2 || ''),
+    city: normalizeAddressText(address.city || ''),
+    state: normalizeAddressText(address.state || ''),
+    postalCode: normalizePostalCode(address.postalCode || ''),
+    country: normalizeAddressText(address.country || ''),
+  });
+}
+
+function routeDistanceCacheKey(origin, destination) {
+  const originLat = roundTo(origin?.latitude, 5);
+  const originLon = roundTo(origin?.longitude, 5);
+  const destinationLat = roundTo(destination?.latitude, 5);
+  const destinationLon = roundTo(destination?.longitude, 5);
+  return buildLiveCacheKey('distance-route', {
+    profile: mapboxProfile,
+    originLat,
+    originLon,
+    destinationLat,
+    destinationLon,
+  });
+}
+
+function scoreMatchedAddressCandidate(candidate = {}, target = {}) {
+  let score = 0;
+  const targetPostal = normalizePostalCode(target.postalCode || '');
+  const candidatePostal = normalizePostalCode(candidate.PostalCode || candidate.postalCode || '');
+  if (targetPostal && candidatePostal && targetPostal === candidatePostal) score += 40;
+
+  const targetCity = normalizeAddressText(target.city || '');
+  const candidateCity = normalizeAddressText(candidate.City || candidate.city || '');
+  if (targetCity && candidateCity && targetCity === candidateCity) score += 14;
+
+  const targetState = normalizeAddressText(target.state || '');
+  const candidateState = normalizeAddressText(candidate.State || candidate.state || '');
+  if (targetState && candidateState && targetState === candidateState) score += 12;
+
+  const targetAddressLine = normalizeAddressText(target.addressLine1 || '');
+  const candidateAddressLine = normalizeAddressText(candidate.AddressLine1 || candidate.addressLine1 || '');
+  if (targetAddressLine && candidateAddressLine) {
+    if (targetAddressLine === candidateAddressLine) score += 18;
+    else if (candidateAddressLine.includes(targetAddressLine) || targetAddressLine.includes(candidateAddressLine)) score += 8;
+  }
+  return score;
+}
+
+async function getLiveMainStoreCoords() {
+  const now = Date.now();
+  if (liveMainStoreCoordCache.expiresAt > now && liveMainStoreCoordCache.point) {
+    return liveMainStoreCoordCache.point;
+  }
+
+  const cacheKey = buildLiveCacheKey('distance-main-store', {});
+  const { payload } = await getLiveCachedPayload(cacheKey, Math.max(30000, liveDeliveryLookupTtlMs), async () => {
+    const xmlText = await callLiveMercurySoap12('delivery', 'LoadMainStore', '');
+    const dataset = parseSoapDatasetResponse(
+      xmlText,
+      'LoadMainStore',
+      ['DeliveryStoreDetailsLoad', 'LoadMainStore', 'StoreDetails'],
+      'StoreDetailsDataset',
+    );
+    const rows = [
+      ...(dataset.tables?.DeliveryStoreDetailsLoad || []),
+      ...(dataset.tables?.LoadMainStore || []),
+      ...(dataset.tables?.StoreDetails || []),
+    ];
+    for (const row of rows) {
+      const coords = extractCoordsFromRow(
+        row,
+        ['LATITUDE', 'Latitude', 'latitude'],
+        ['LONGITUDE', 'Longitude', 'longitude'],
+      );
+      if (coords) {
+        return {
+          ...coords,
+          source: 'main_store',
+        };
+      }
+    }
+    throw new Error('LoadMainStore did not return usable LATITUDE/LONGITUDE.');
+  });
+
+  liveMainStoreCoordCache.expiresAt = now + Math.max(30000, liveDeliveryLookupTtlMs);
+  liveMainStoreCoordCache.point = payload;
+  return payload;
+}
+
+function firstNonEmptyAddressField(...values) {
+  for (const value of values) {
+    const text = normalizeSpace(value);
+    if (text) return text;
+  }
+  return '';
+}
+
+async function getLiveOrderDistanceContext(ticketId) {
+  const id = String(ticketId || '').trim();
+  if (!id) return { coords: null, address: null };
+  const details = await getLiveOrderDetails(id);
+  const row = details?.rows?.[0] || null;
+  if (!row) return { coords: null, address: null };
+
+  const coords = extractCoordsFromRow(
+    row,
+    ['RECIPIENT_LATITUDE', 'LATITUDE', 'Latitude', 'latitude'],
+    ['RECIPIENT_LONGITUDE', 'LONGITUDE', 'Longitude', 'longitude'],
+  );
+
+  const address = {
+    firmName: firstNonEmptyAddressField(row.RECIPIENT_NAME, row.FIRM_NAME),
+    addressLine1: firstNonEmptyAddressField(
+      row.RECIPIENT_ADDRESS,
+      row.RECIPIENT_ADDRESS_1,
+      row.ADDRESS,
+      row.STREET,
+    ),
+    addressLine2: firstNonEmptyAddressField(row.RECIPIENT_ADDRESS_2, row.ADDRESS2),
+    city: firstNonEmptyAddressField(row.RECIPIENT_CITY, row.RECIPIENT_CITY_NAME, row.CITY_NAME, row.CITY),
+    state: firstNonEmptyAddressField(
+      row.RECIPIENT_STATE_ABBREV,
+      row.RECIPIENT_STATE_PROV_NAME,
+      row.RECIPIENT_STATE,
+      row.STATE_ABBREV,
+      row.STATE_NAME,
+      row.STATE,
+    ),
+    postalCode: firstNonEmptyAddressField(
+      row.RECIPIENT_ZIP,
+      row.RECIPIENT_POSTAL_CODE,
+      row.RECIPIENT_ZIP_CODE,
+      row.ZIP,
+      row.ZIP_CODE,
+      row.POSTAL_CODE,
+    ),
+    country: firstNonEmptyAddressField(row.COUNTRY_NAME, row.COUNTRY, 'US'),
+  };
+
+  return { coords, address };
+}
+
+async function resolveDestinationCoordsFromAddress(address = {}) {
+  const addressLine1 = normalizeSpace(address.addressLine1 || '');
+  const city = normalizeSpace(address.city || '');
+  const state = normalizeSpace(address.state || '');
+  const postalCode = normalizePostalCode(address.postalCode || '');
+  const country = normalizeSpace(address.country || 'US') || 'US';
+  const firmName = normalizeSpace(address.firmName || '');
+  const addressLine2 = normalizeSpace(address.addressLine2 || '');
+
+  if (!addressLine1 && !city && !state && !postalCode) return null;
+
+  const cacheKey = addressLookupCacheKey({
+    firmName,
+    addressLine1,
+    addressLine2,
+    city,
+    state,
+    postalCode,
+    country,
+  });
+
+  const { payload } = await getLiveCachedPayload(cacheKey, mapboxAddressCacheTtlMs, async () => {
+    const payloadXml = [
+      `<firmName>${xmlEscape(firmName)}</firmName>`,
+      `<addressLine1>${xmlEscape(addressLine1)}</addressLine1>`,
+      `<addressLine2>${xmlEscape(addressLine2)}</addressLine2>`,
+      `<city>${xmlEscape(city)}</city>`,
+      `<state>${xmlEscape(state)}</state>`,
+      `<postalCode>${xmlEscape(postalCode)}</postalCode>`,
+      `<country>${xmlEscape(country)}</country>`,
+      '<upgradeToMostProbableMatch>true</upgradeToMostProbableMatch>',
+    ].join('');
+
+    const xmlText = await callLiveMercurySoap11('addressverification', 'ValidateAddress', payloadXml);
+    const candidates = parseTableRows(xmlText, 'MatchedAddress');
+    let winner = null;
+    let winnerScore = Number.NEGATIVE_INFINITY;
+
+    for (const candidate of candidates) {
+      const coords = extractCoordsFromRow(
+        candidate,
+        ['Latitude', 'LATITUDE', 'latitude'],
+        ['Longitude', 'LONGITUDE', 'longitude'],
+      );
+      if (!coords) continue;
+      const score = scoreMatchedAddressCandidate(candidate, {
+        addressLine1,
+        city,
+        state,
+        postalCode,
+      });
+      if (score > winnerScore) {
+        winner = coords;
+        winnerScore = score;
+      }
+    }
+
+    if (!winner) {
+      throw new Error('AddressVerification.ValidateAddress returned no usable coordinates.');
+    }
+
+    return {
+      ...winner,
+      source: 'address_verification',
+    };
+  });
+
+  return payload;
+}
+
+async function getMapboxRouteDistance(origin, destination) {
+  if (!mapboxToken) {
+    throw new Error('MAPBOX_TOKEN is missing.');
+  }
+
+  const cacheKey = routeDistanceCacheKey(origin, destination);
+  const { payload } = await getLiveCachedPayload(cacheKey, mapboxRouteCacheTtlMs, async () => {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), Math.max(1000, mapboxTimeoutMs));
+    try {
+      const coordinates = `${destination.longitude},${destination.latitude}`;
+      const originCoords = `${origin.longitude},${origin.latitude}`;
+      const profilePath = String(mapboxProfile || 'mapbox/driving')
+        .split('/')
+        .map(part => encodeURIComponent(part))
+        .join('/');
+      const endpoint = `${mapboxApiBaseUrl}/directions/v5/${profilePath}/${originCoords};${coordinates}`;
+      const params = new URLSearchParams({
+        alternatives: 'false',
+        steps: 'false',
+        overview: 'false',
+        access_token: mapboxToken,
+      });
+      const response = await fetch(`${endpoint}?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+        signal: controller.signal,
+      });
+      const bodyText = await response.text();
+      if (!response.ok) {
+        throw new Error(`Mapbox Directions failed (${response.status}): ${bodyText.slice(0, 240)}`);
+      }
+      let body = null;
+      try {
+        body = JSON.parse(bodyText);
+      } catch {
+        throw new Error('Mapbox Directions returned invalid JSON.');
+      }
+      const route = Array.isArray(body?.routes) ? body.routes[0] : null;
+      const distanceMeters = Number(route?.distance);
+      const durationSeconds = Number(route?.duration);
+      if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) {
+        throw new Error('Mapbox Directions did not include route distance.');
+      }
+
+      const milesRaw = distanceMeters / 1609.344;
+      const minutesRaw = Number.isFinite(durationSeconds) && durationSeconds > 0 ? (durationSeconds / 60) : null;
+      return {
+        distance_miles: roundTo(milesRaw, 1),
+        duration_minutes: minutesRaw === null ? null : Math.max(1, Math.round(minutesRaw)),
+        provider: 'mapbox_directions',
+      };
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  });
+
+  return payload;
+}
+
+function buildMapboxGeocodeQuery(address = {}) {
+  const parts = [
+    normalizeSpace(address.addressLine1 || ''),
+    normalizeSpace(address.addressLine2 || ''),
+    normalizeSpace(address.city || ''),
+    normalizeSpace(address.state || ''),
+    normalizePostalCode(address.postalCode || ''),
+    normalizeSpace(address.country || ''),
+  ].filter(Boolean);
+  return parts.join(', ');
+}
+
+async function getMapboxGeocodeCoords(address = {}) {
+  if (!mapboxToken) {
+    throw new Error('MAPBOX_TOKEN is missing.');
+  }
+  const query = buildMapboxGeocodeQuery(address);
+  if (!query) {
+    throw new Error('Mapbox geocode query is empty.');
+  }
+  const country = normalizeSpace(address.country || 'US').toLowerCase();
+  const cacheKey = buildLiveCacheKey('distance-mapbox-geocode', { query, country });
+  const { payload } = await getLiveCachedPayload(cacheKey, mapboxAddressCacheTtlMs, async () => {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), Math.max(1000, mapboxTimeoutMs));
+    try {
+      const encodedQuery = encodeURIComponent(query);
+      const endpoint = `${mapboxApiBaseUrl}/geocoding/v5/mapbox.places/${encodedQuery}.json`;
+      const params = new URLSearchParams({
+        access_token: mapboxToken,
+        limit: '1',
+        autocomplete: 'false',
+      });
+      if (country) {
+        params.set('country', country);
+      }
+      const response = await fetch(`${endpoint}?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+        },
+        signal: controller.signal,
+      });
+      const bodyText = await response.text();
+      if (!response.ok) {
+        throw new Error(`Mapbox Geocoding failed (${response.status}): ${bodyText.slice(0, 240)}`);
+      }
+      let body = null;
+      try {
+        body = JSON.parse(bodyText);
+      } catch {
+        throw new Error('Mapbox Geocoding returned invalid JSON.');
+      }
+      const feature = Array.isArray(body?.features) ? body.features[0] : null;
+      const center = Array.isArray(feature?.center) ? feature.center : null;
+      if (!center || center.length < 2) {
+        throw new Error('Mapbox Geocoding returned no coordinate match.');
+      }
+      const lon = Number(center[0]);
+      const lat = Number(center[1]);
+      if (!hasUsableCoords(lat, lon)) {
+        throw new Error('Mapbox Geocoding returned unusable coordinates.');
+      }
+      return {
+        latitude: lat,
+        longitude: lon,
+        source: 'mapbox_geocoding',
+      };
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  });
+  return payload;
+}
+
+async function getLiveDistanceEstimate(params = {}) {
+  const ticketId = String(params.ticketId || '').trim();
+  const requestCoords = extractCoordsFromRow(
+    params,
+    ['latitude', 'lat', 'destLat', 'destinationLat'],
+    ['longitude', 'lon', 'lng', 'destLon', 'destinationLon'],
+  );
+  const requestAddress = {
+    firmName: String(params.firmName || '').trim(),
+    addressLine1: String(params.addressLine1 || '').trim(),
+    addressLine2: String(params.addressLine2 || '').trim(),
+    city: String(params.city || '').trim(),
+    state: String(params.state || '').trim(),
+    postalCode: String(params.postalCode || params.zip || '').trim(),
+    country: String(params.country || 'US').trim() || 'US',
+  };
+
+  const origin = await getLiveMainStoreCoords();
+  let destination = requestCoords ? { ...requestCoords, source: 'request_coordinates' } : null;
+  let destinationSource = destination?.source || '';
+  let destinationAddressUsed = { ...requestAddress };
+
+  if (!destination && ticketId) {
+    try {
+      const context = await getLiveOrderDistanceContext(ticketId);
+      if (context?.coords) {
+        destination = {
+          latitude: context.coords.latitude,
+          longitude: context.coords.longitude,
+          source: 'order_details',
+        };
+        destinationSource = 'order_details';
+      }
+      if (context?.address) {
+        destinationAddressUsed = {
+          firmName: destinationAddressUsed.firmName || context.address.firmName || '',
+          addressLine1: destinationAddressUsed.addressLine1 || context.address.addressLine1 || '',
+          addressLine2: destinationAddressUsed.addressLine2 || context.address.addressLine2 || '',
+          city: destinationAddressUsed.city || context.address.city || '',
+          state: destinationAddressUsed.state || context.address.state || '',
+          postalCode: destinationAddressUsed.postalCode || context.address.postalCode || '',
+          country: destinationAddressUsed.country || context.address.country || 'US',
+        };
+      }
+    } catch {
+      // Fall through to address verification path if order-details lookup fails.
+    }
+  }
+
+  if (!destination) {
+    try {
+      destination = await resolveDestinationCoordsFromAddress(destinationAddressUsed);
+      destinationSource = destination?.source || 'address_verification';
+    } catch {
+      destination = null;
+    }
+  }
+
+  if (!destination) {
+    destination = await getMapboxGeocodeCoords(destinationAddressUsed);
+    destinationSource = destination?.source || 'mapbox_geocoding';
+  }
+
+  if (!destination) {
+    throw new Error('Unable to resolve destination coordinates. Provide ticketId or a usable address.');
+  }
+
+  try {
+    const routed = await getMapboxRouteDistance(origin, destination);
+    return {
+      ok: true,
+      distance_miles: routed.distance_miles,
+      duration_minutes: routed.duration_minutes,
+      provider: routed.provider,
+      origin: {
+        latitude: roundTo(origin.latitude, 6),
+        longitude: roundTo(origin.longitude, 6),
+        source: origin.source || 'main_store',
+      },
+      destination: {
+        latitude: roundTo(destination.latitude, 6),
+        longitude: roundTo(destination.longitude, 6),
+        source: destinationSource || 'unknown',
+      },
+    };
+  } catch (error) {
+    if (!mapboxDistanceFallbackToHaversine) {
+      throw error;
+    }
+    const fallbackMiles = haversineDistanceMiles(origin, destination);
+    if (fallbackMiles === null) {
+      throw error;
+    }
+    return {
+      ok: true,
+      distance_miles: roundTo(fallbackMiles, 1),
+      duration_minutes: null,
+      provider: 'haversine_fallback',
+      origin: {
+        latitude: roundTo(origin.latitude, 6),
+        longitude: roundTo(origin.longitude, 6),
+        source: origin.source || 'main_store',
+      },
+      destination: {
+        latitude: roundTo(destination.latitude, 6),
+        longitude: roundTo(destination.longitude, 6),
+        source: destinationSource || destination.source || 'unknown',
+      },
+      warning: String(error?.message || error),
+    };
+  }
+}
+
 async function getLiveOrdersByZone(params) {
   const deliveryDate = String(params?.deliveryDate || '').trim();
   const deliveryThruDate = String(params?.deliveryThruDate || '').trim();
@@ -1517,11 +2103,16 @@ async function getLiveMessageList(params) {
     }
   }
 
-  const dataset = parseSoapDatasetResponse(xmlText, 'GetMessageList', ['GetMessageList'], 'MercuryMessageListDataSet');
+  const dataset = parseSoapDatasetResponse(xmlText, 'GetMessageList', ['GetMessageList', 'MessageList'], 'MercuryMessageListDataSet');
+  let rows = dataset.tables?.GetMessageList || dataset.tables?.MessageList || [];
+  if (!rows.length) {
+    const rawPayload = decodeXmlEntities(String(xmlText || ''));
+    rows = parseTableRows(rawPayload, 'MessageList');
+  }
   return {
     dataset: 'MercuryMessageListDataSet',
     table: 'GetMessageList',
-    rows: dataset.tables?.GetMessageList || []
+    rows
   };
 }
 
@@ -1809,6 +2400,14 @@ async function routeJson(res, url, pathname) {
         ttlMs: Math.max(0, Math.floor(liveApiCacheTtlMs)),
         maxEntries: Math.max(50, Math.floor(Number(liveApiCacheMaxEntries) || 0)),
         bypassParam: liveApiCacheBypassParam
+      },
+      mapbox: {
+        enabled: Boolean(mapboxToken),
+        profile: mapboxProfile,
+        apiBaseUrl: mapboxApiBaseUrl,
+        routeCacheTtlMs: Math.max(0, Math.floor(mapboxRouteCacheTtlMs)),
+        addressCacheTtlMs: Math.max(0, Math.floor(mapboxAddressCacheTtlMs)),
+        fallbackToHaversine: mapboxDistanceFallbackToHaversine,
       }
     });
   }
@@ -1957,6 +2556,43 @@ async function routeJson(res, url, pathname) {
       });
     }
     return sendJson(res, 200, singleOrderDetailsJson(ticketId));
+  }
+
+  if (pathname === '/api/workflow/distance/estimate') {
+    const params = {
+      ticketId: resolveParam(url, '', ['ticketId', 'ticketID', 'TicketID'], ''),
+      firmName: resolveParam(url, '', ['firmName'], ''),
+      addressLine1: resolveParam(url, '', ['addressLine1', 'address', 'street'], ''),
+      addressLine2: resolveParam(url, '', ['addressLine2'], ''),
+      city: resolveParam(url, '', ['city'], ''),
+      state: resolveParam(url, '', ['state', 'stateAbbrev'], ''),
+      postalCode: resolveParam(url, '', ['postalCode', 'zip', 'zipCode'], ''),
+      country: resolveParam(url, '', ['country'], 'US'),
+      latitude: resolveParam(url, '', ['latitude', 'lat', 'destLat', 'destinationLat'], ''),
+      longitude: resolveParam(url, '', ['longitude', 'lon', 'lng', 'destLon', 'destinationLon'], ''),
+    };
+
+    const hasTicket = Boolean(String(params.ticketId || '').trim());
+    const hasAddress = Boolean(
+      String(params.addressLine1 || '').trim()
+      || String(params.city || '').trim()
+      || String(params.postalCode || '').trim(),
+    );
+    const hasCoords = Boolean(String(params.latitude || '').trim() && String(params.longitude || '').trim());
+    if (!hasTicket && !hasAddress && !hasCoords) {
+      return sendJson(res, 400, {
+        error: 'distance estimate requires ticketId, coordinates, or destination address fields.',
+        endpoint: 'distance-estimate',
+      });
+    }
+
+    return sendLiveCachedJson(res, url, {
+      scope: 'distance-estimate',
+      params,
+      endpoint: 'distance-estimate',
+      ttlMs: mapboxRouteCacheTtlMs,
+      loader: () => getLiveDistanceEstimate(params),
+    });
   }
 
   if (pathname === '/api/workflow/order-lifecycle/by-service-msg') {
@@ -2243,6 +2879,14 @@ async function routeJson(res, url, pathname) {
         maxEntries: Math.max(50, Math.floor(Number(liveApiCacheMaxEntries) || 0)),
         bypassParam: liveApiCacheBypassParam
       },
+      mapbox: {
+        enabled: Boolean(mapboxToken),
+        profile: mapboxProfile,
+        apiBaseUrl: mapboxApiBaseUrl,
+        routeCacheTtlMs: Math.max(0, Math.floor(mapboxRouteCacheTtlMs)),
+        addressCacheTtlMs: Math.max(0, Math.floor(mapboxAddressCacheTtlMs)),
+        fallbackToHaversine: mapboxDistanceFallbackToHaversine,
+      },
       jsonEndpoints: [
         '/health',
         '/api/workflow/focus',
@@ -2253,6 +2897,7 @@ async function routeJson(res, url, pathname) {
         '/api/workflow/tickets/search',
         '/api/workflow/ticket-status/:ticketId',
         '/api/workflow/order-details/:ticketId',
+        '/api/workflow/distance/estimate',
         '/api/workflow/order-lifecycle/:ticketId',
         '/api/workflow/order-lifecycle/by-service-msg/:serviceMsgNum',
         '/api/workflow/delivery/zone-summary',

@@ -21,8 +21,40 @@ if (-not $npmCmd) {
   throw "Node.js/npm.cmd not found. Install Node.js and reopen terminal."
 }
 
+function Get-AvailableTcpPort {
+  param(
+    [Parameter(Mandatory = $true)]
+    [int]$StartPort,
+    [int]$MaxAttempts = 20
+  )
+
+  for ($offset = 0; $offset -lt $MaxAttempts; $offset++) {
+    $candidate = $StartPort + $offset
+    $listener = $null
+    try {
+      $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $candidate)
+      $listener.Start()
+      $listener.Stop()
+      return $candidate
+    } catch {
+      if ($listener) {
+        try {
+          $listener.Stop()
+        } catch {
+        }
+      }
+    }
+  }
+
+  throw "No available TCP port found starting at $StartPort."
+}
+
 $directApiBase = ([string]$env:WORKFLOW_API_BASE_URL).Trim()
 $soapBase = ([string]$env:MERCURY_BASE_URL).Trim()
+$kioskPort = 5173
+if ($env:KIOSK_PORT -and [int]::TryParse(([string]$env:KIOSK_PORT), [ref]$kioskPort) -eq $false) {
+  $kioskPort = 5173
+}
 $bridgePort = 17344
 if ($env:BRIDGE_PORT -and [int]::TryParse(([string]$env:BRIDGE_PORT), [ref]$bridgePort) -eq $false) {
   $bridgePort = 17344
@@ -38,6 +70,12 @@ if ($soapBase) {
 }
 
 if ($mode -eq 'bridge') {
+  $requestedBridgePort = $bridgePort
+  $bridgePort = Get-AvailableTcpPort -StartPort $requestedBridgePort -MaxAttempts 25
+  if ($bridgePort -ne $requestedBridgePort) {
+    Write-Host "Bridge port $requestedBridgePort is in use. Using $bridgePort instead."
+  }
+
   if (-not $env:MERCURY_SOAP_NAMESPACE) {
     $env:MERCURY_SOAP_NAMESPACE = "http://localhost/webservices/"
   }
@@ -46,22 +84,28 @@ if ($mode -eq 'bridge') {
   Start-Process powershell -ArgumentList @(
     "-NoExit",
     "-Command",
-    "$env:PORT='$bridgePort'; $env:MERCURY_BASE_URL='$soapBase'; $env:MERCURY_SOAP_NAMESPACE='$($env:MERCURY_SOAP_NAMESPACE)'; cd '$PSScriptRoot\\workflow-bridge'; & '$npmCmd' install; & '$npmCmd' start"
+    "`$env:PORT='$bridgePort'; `$env:MERCURY_BASE_URL='$soapBase'; `$env:MERCURY_SOAP_NAMESPACE='$($env:MERCURY_SOAP_NAMESPACE)'; Set-Location -LiteralPath '$PSScriptRoot\\workflow-bridge'; & '$npmCmd' install; & '$npmCmd' start"
   )
 
   Start-Sleep -Seconds 2
   $directApiBase = "http://127.0.0.1:$bridgePort"
 }
 
+$requestedKioskPort = $kioskPort
+$kioskPort = Get-AvailableTcpPort -StartPort $requestedKioskPort -MaxAttempts 25
+if ($kioskPort -ne $requestedKioskPort) {
+  Write-Host "Kiosk port $requestedKioskPort is in use. Using $kioskPort instead."
+}
+
 Write-Host "Starting kiosk app..."
 Start-Process powershell -ArgumentList @(
   "-NoExit",
   "-Command",
-  "$env:VITE_WORKFLOW_PROXY_TARGET='$directApiBase'; cd '$PSScriptRoot\\kiosk-app'; & '$npmCmd' install; & '$npmCmd' run dev -- --host"
+  "`$env:VITE_WORKFLOW_PROXY_TARGET='$directApiBase'; Set-Location -LiteralPath '$PSScriptRoot\\kiosk-app'; & '$npmCmd' install; & '$npmCmd' run dev -- --host --port $kioskPort"
 )
 
 Write-Host "Live dashboard boot started."
-Write-Host "Kiosk UI:       http://127.0.0.1:5173"
+Write-Host "Kiosk UI:       http://127.0.0.1:$kioskPort"
 Write-Host "Workflow API:   $directApiBase"
 if ($mode -eq 'bridge') {
   Write-Host "Mercury SOAP:   $soapBase"

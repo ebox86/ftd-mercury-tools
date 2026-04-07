@@ -38,6 +38,8 @@ internal sealed class HostOptions
   public string MercuryBaseUrl { get; init; } = "http://127.0.0.1/WsMercuryWebAPI";
   public string MercurySoapNamespace { get; init; } = "http://localhost/webservices/";
   public string MercuryLocalNetworkOnly { get; init; } = "true";
+  public string MapboxToken { get; init; } = string.Empty;
+  public string MapboxTokenProtected { get; init; } = string.Empty;
 
   public int RestartDelayMs { get; init; } = 3000;
 
@@ -75,7 +77,7 @@ internal sealed class HostOptions
       };
     }
 
-    return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
       ["PORT"] = BridgePort.ToString(),
       ["BRIDGE_HOST"] = BridgeHost,
@@ -83,6 +85,14 @@ internal sealed class HostOptions
       ["MERCURY_SOAP_NAMESPACE"] = MercurySoapNamespace,
       ["MERCURY_LOCAL_NETWORK_ONLY"] = MercuryLocalNetworkOnly,
     };
+
+    var resolvedMapboxToken = ResolveMapboxToken();
+    if (!string.IsNullOrWhiteSpace(resolvedMapboxToken))
+    {
+      env["MAPBOX_TOKEN"] = resolvedMapboxToken;
+    }
+
+    return env;
   }
 
   public static HostOptions FromArgs(string[] args)
@@ -136,9 +146,26 @@ internal sealed class HostOptions
       MercuryBaseUrl = parser.Get("mercury-base-url", "http://127.0.0.1/WsMercuryWebAPI"),
       MercurySoapNamespace = parser.Get("mercury-soap-namespace", "http://localhost/webservices/"),
       MercuryLocalNetworkOnly = parser.GetBool("mercury-local-network-only", true) ? "true" : "false",
+      MapboxToken = parser.Get("mapbox-token", string.Empty),
+      MapboxTokenProtected = parser.Get("mapbox-token-protected", string.Empty),
 
       RestartDelayMs = parser.GetInt("restart-delay-ms", 3000, 500, 300000),
     };
+  }
+
+  private string ResolveMapboxToken()
+  {
+    if (!string.IsNullOrWhiteSpace(MapboxToken))
+    {
+      return MapboxToken;
+    }
+
+    if (string.IsNullOrWhiteSpace(MapboxTokenProtected))
+    {
+      return string.Empty;
+    }
+
+    return SecretProtection.UnprotectForLocalMachine(MapboxTokenProtected);
   }
 
   private static ServiceCommand ResolveCommand(ArgumentParser parser)

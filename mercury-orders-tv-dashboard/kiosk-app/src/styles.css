@@ -342,10 +342,39 @@ body {
 }
 
 .board-page {
+  position: relative;
   min-height: 0;
   height: 100%;
   overflow: hidden;
   animation: board-page-enter 320ms ease;
+}
+
+.board-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(216, 216, 216, 0.82);
+  backdrop-filter: blur(1.5px);
+}
+
+.board-loading-overlay__spinner {
+  width: 92px;
+  height: 92px;
+  border-radius: 999px;
+  border: 10px solid #bbc7d7;
+  border-top-color: #2f61b1;
+  animation: lane-spinner 0.9s linear infinite;
+}
+
+.board-loading-overlay__label {
+  font-size: 26px;
+  font-weight: 800;
+  color: #213552;
 }
 
 @keyframes board-page-enter {
@@ -674,6 +703,10 @@ body {
   transition: width 220ms ease;
 }
 
+.lane__progress-fill--complete {
+  background: linear-gradient(90deg, #2aa854 0%, #1f8241 100%);
+}
+
 .lane__empty {
   width: 100%;
   min-height: 110px;
@@ -716,6 +749,15 @@ body {
   border-radius: 999px;
   font-size: 11px;
   font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.badge__icon {
+  margin-right: 4px;
+  font-size: 10px;
+  line-height: 1;
 }
 
 .badge--alert {
@@ -761,6 +803,18 @@ body {
   border: 1px solid #b7c6de;
 }
 
+.badge--total {
+  background: #e5f2e8;
+  color: #1f4b2a;
+  border: 1px solid #9fceb0;
+}
+
+.badge--distance {
+  background: #e6eef9;
+  color: #1c365a;
+  border: 1px solid #a7bbdb;
+}
+
 .badge--stale-ask {
   background: #ffefc8;
   color: #6b4a00;
@@ -777,6 +831,24 @@ body {
   background: #e2e7ef;
   color: #243145;
   border: 1px solid #b7c2d1;
+}
+
+.badge--stage-linked-delivered {
+  background: #dff5e7;
+  color: #1f5a2f;
+  border: 1px solid #9fd8b0;
+}
+
+.badge--stage-linked-queued {
+  background: #e5eefc;
+  color: #223f67;
+  border: 1px solid #aec1df;
+}
+
+.badge--stage-linked-exception {
+  background: #fff1bf;
+  color: #624600;
+  border: 1px solid #e0c06b;
 }
 
 .badge--stage-designed {
@@ -851,6 +923,11 @@ body {
   background: #f7f8fa;
   padding: 8px 10px;
   transition: box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.ticket-card {
+  position: relative;
+  padding: 7px 10px 4px;
 }
 
 .order-card {
@@ -1006,6 +1083,7 @@ body {
 
 .ticket-card__header {
   align-items: center;
+  justify-content: flex-start;
 }
 
 .ticket-card__kind-pills {
@@ -1027,14 +1105,16 @@ body {
 }
 
 .ticket-card__main-row {
-  margin-top: 4px;
+  margin-top: 0;
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+  padding-right: 260px;
 }
 
 .ticket-card__main-row .ticket-card__name {
+  font-size: 20px;
   margin-top: 0;
   flex: 1 1 auto;
   min-width: 0;
@@ -1044,12 +1124,38 @@ body {
 }
 
 .ticket-card__delivery-inline {
-  flex: 0 0 auto;
-  font-size: 17px;
-  font-weight: 800;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-start;
+  position: absolute;
+  top: 6px;
+  right: 10px;
   color: #171b22;
   text-align: right;
+  line-height: 1.08;
+}
+
+.ticket-card__delivery-destination,
+.ticket-card__delivery-date {
+  font-size: 20px;
+  font-weight: 800;
   white-space: nowrap;
+}
+
+.ticket-card__delivery-distance {
+  margin-top: 1px;
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+  color: #2d3a4d;
+}
+
+.ticket-card__main-row .ticket-card__name,
+.ticket-card__delivery-destination,
+.ticket-card__delivery-date,
+.ticket-card__delivery-distance {
+  font-family: Consolas, "Courier New", monospace;
 }
 
 .ticket-card__meta,
@@ -1092,14 +1198,15 @@ body {
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: flex-end;
-  flex-wrap: nowrap;
+  justify-content: flex-start;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
 .order-card__ref {
   font-weight: 800;
   color: #141922;
+  font-family: Consolas, "Courier New", monospace;
 }
 
 .order-card__pills {
@@ -1122,10 +1229,11 @@ body {
 }
 
 .order-card__footer-item {
-  font-size: 15px;
+  font-size: 20px;
   color: #1f2937;
   font-weight: 800;
   letter-spacing: 0.01em;
+  font-family: Consolas, "Courier New", monospace;
 }
 
 .order-card--muted {

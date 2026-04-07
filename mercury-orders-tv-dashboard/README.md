@@ -69,5 +69,9 @@ Optional installer switches:
 - `/BRIDGEHOST=0.0.0.0`
 - `/WEBHOST=0.0.0.0`
 - `/LOCALNETWORKONLY=true`
+- `/MAPBOXTOKEN=<mapbox-token>`
+
+`/MAPBOXTOKEN` is optional and only used by the workflow-bridge service.  
+During service installation, the token is protected and persisted as encrypted service configuration (not plain text).
 
 Optional PowerShell wrappers are still available under `service/` for manual admin tooling, but they now call the same compiled service host executable.
