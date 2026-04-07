@@ -639,6 +639,57 @@ body {
   animation: lane-spinner 0.8s linear infinite;
 }
 
+.lane__header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lane__search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.lane__search-toggle {
+  appearance: none;
+  border: 1px solid #8fa2be;
+  border-radius: 7px;
+  background: #edf3fb;
+  color: #203c63;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.lane__search-toggle:hover {
+  filter: brightness(0.98);
+}
+
+.lane__search-input {
+  width: min(220px, 40vw);
+  min-width: 130px;
+  height: 30px;
+  border: 1px solid #9eacbf;
+  border-radius: 7px;
+  background: #fff;
+  color: #172a44;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lane__search-input::placeholder {
+  color: #6a778a;
+  font-weight: 600;
+}
+
 .lane__count {
   display: inline-flex;
   align-items: center;
@@ -1257,6 +1308,19 @@ body {
 
   .lane__cards--two-col {
     grid-template-columns: 1fr;
+  }
+
+  .lane__header {
+    flex-wrap: wrap;
+  }
+
+  .lane__header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .lane__search-input {
+    width: min(100%, 280px);
   }
 
   .app__config-grid {

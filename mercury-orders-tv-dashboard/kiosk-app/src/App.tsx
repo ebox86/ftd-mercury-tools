@@ -9,6 +9,7 @@ import {
   faFloppyDisk,
   faGear,
   faInbox,
+  faMagnifyingGlass,
   faPlay,
   faScroll,
   faTriangleExclamation,
@@ -2699,6 +2700,8 @@ export default function App() {
   const [dateOffsetDays, setDateOffsetDays] = useState(0);
   const [includeNextDay, setIncludeNextDay] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [isActiveSearchOpen, setIsActiveSearchOpen] = useState(false);
+  const [activeOrderSearchQuery, setActiveOrderSearchQuery] = useState('');
   const [isAudioAlertsEnabled, setIsAudioAlertsEnabled] = useState<boolean>(() => initialAudioAlertsEnabled());
   const [isDashboardMode, setIsDashboardMode] = useState<boolean>(() => initialDashboardMode());
   const [isConfigOpen, setIsConfigOpen] = useState(false);
@@ -3091,6 +3094,26 @@ export default function App() {
   const activeOrders = useMemo(() => {
     return displayEligibleOrders.filter(card => isWithinDateKeys(card.deliveryDate, allowedDeliveryDateKeys));
   }, [displayEligibleOrders, allowedDeliveryDateKeys]);
+  const normalizedActiveOrderSearchQuery = useMemo(
+    () => normalizeText(activeOrderSearchQuery),
+    [activeOrderSearchQuery],
+  );
+  const filteredActiveOrders = useMemo(() => {
+    if (!normalizedActiveOrderSearchQuery) return activeOrders;
+    return activeOrders.filter(card => {
+      const statusLabel = singleStatusPill(card).label;
+      const haystack = [
+        card.recipientName,
+        card.userReference,
+        card.ticketId,
+        card.addressLine,
+        card.cityStateZip,
+        card.deliveryZip,
+        statusLabel,
+      ].map(value => normalizeText(String(value || ''))).join(' ');
+      return haystack.includes(normalizedActiveOrderSearchQuery);
+    });
+  }, [activeOrders, normalizedActiveOrderSearchQuery]);
   const selectedDateKey = useMemo(() => dateKeyFromDate(selectedDate), [selectedDate]);
   const nextDateKey = useMemo(() => {
     const next = new Date(selectedDate);
@@ -5385,16 +5408,48 @@ export default function App() {
                     <span>Next day: {nextDaySummaryCount}</span>
                   </div>
                 </div>
-                <span className="lane__count">{activeOrders.length}</span>
+                <div className="lane__header-actions">
+                  <div className={`lane__search${isActiveSearchOpen ? ' lane__search--open' : ''}`}>
+                    <button
+                      type="button"
+                      className="lane__search-toggle"
+                      aria-label={isActiveSearchOpen ? 'Close active order search' : 'Open active order search'}
+                      title={isActiveSearchOpen ? 'Close search' : 'Search active orders'}
+                      onClick={() => {
+                        if (isActiveSearchOpen) {
+                          setActiveOrderSearchQuery('');
+                          setIsActiveSearchOpen(false);
+                          return;
+                        }
+                        setIsActiveSearchOpen(true);
+                      }}
+                    >
+                      <FontAwesomeIcon icon={faMagnifyingGlass} />
+                    </button>
+                    {isActiveSearchOpen ? (
+                      <input
+                        className="lane__search-input"
+                        type="text"
+                        value={activeOrderSearchQuery}
+                        onChange={(event) => setActiveOrderSearchQuery(event.target.value)}
+                        placeholder="Filter active orders"
+                        aria-label="Filter active orders"
+                      />
+                    ) : null}
+                  </div>
+                  <span className="lane__count">{filteredActiveOrders.length}</span>
+                </div>
               </header>
               <div className="lane__cards lane__cards--two-col" ref={activeListRef}>
-                {activeOrders.length === 0 ? (
+                {filteredActiveOrders.length === 0 ? (
                   <div className="lane__empty">
                     <FontAwesomeIcon className="lane__empty-icon" icon={faTruck} />
-                    <span className="lane__empty-text">No active orders at the moment.</span>
+                    <span className="lane__empty-text">
+                      {normalizedActiveOrderSearchQuery ? 'No active orders match this filter.' : 'No active orders at the moment.'}
+                    </span>
                   </div>
                 ) : (
-                  activeOrders.map(card => {
+                  filteredActiveOrders.map(card => {
                     const statusPill = singleStatusPill(card);
                     const footerZip = deriveCardFooterZip(card);
                     const displayRecipientName = formatDisplayRecipientName(card.recipientName || 'Unknown Recipient');
