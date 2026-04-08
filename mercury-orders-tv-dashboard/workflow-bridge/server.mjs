@@ -1,12 +1,33 @@
 ﻿import { createServer } from 'node:http';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const refDir = join(__dirname, '..', 'reference');
+const dashboardConfigDir = join(__dirname, '..', 'artifacts', 'tooling-local');
+const dashboardServerConfigPath = join(dashboardConfigDir, 'dashboard-server-config.json');
 const serviceName = 'pi-kiosk-mercury-workflow-bridge';
+
+function readDashboardServerConfig() {
+  if (!existsSync(dashboardServerConfigPath)) return {};
+  const raw = readFileSync(dashboardServerConfigPath, 'utf8');
+  const parsed = JSON.parse(String(raw || '').replace(/^\uFEFF/, ''));
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return {};
+  }
+  return parsed;
+}
+
+function writeDashboardServerConfig(payload) {
+  const config = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload
+    : {};
+  mkdirSync(dashboardConfigDir, { recursive: true });
+  writeFileSync(dashboardServerConfigPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  return config;
+}
 
 function parseEnvLine(rawLine = '') {
   const line = String(rawLine || '').trim();
@@ -2383,7 +2404,7 @@ async function getLiveTicketSearch(params = {}) {
   }
 }
 
-async function routeJson(res, url, pathname) {
+async function routeJson(req, res, url, pathname) {
   if (pathname === '/health') {
     return sendJson(res, 200, {
       ok: true,
@@ -2414,6 +2435,31 @@ async function routeJson(res, url, pathname) {
 
   if (pathname === '/api/workflow/focus') {
     return sendJson(res, 200, workflowFocus);
+  }
+
+  if (pathname === '/api/workflow/dashboard-config/server') {
+    if (req.method === 'GET') {
+      try {
+        return sendJson(res, 200, readDashboardServerConfig());
+      } catch (error) {
+        return sendJson(res, 500, { error: String(error?.message || error), endpoint: 'dashboard-config-read' });
+      }
+    }
+
+    if (req.method === 'PUT' || req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        const parsed = JSON.parse(String(body || '{}'));
+        const payload = parsed?.config && typeof parsed.config === 'object' && !Array.isArray(parsed.config)
+          ? parsed.config
+          : parsed;
+        return sendJson(res, 200, writeDashboardServerConfig(payload));
+      } catch (error) {
+        return sendJson(res, 400, { error: String(error?.message || error), endpoint: 'dashboard-config-write' });
+      }
+    }
+
+    return sendJson(res, 405, { error: 'Method not allowed' });
   }
 
   if (pathname === '/api/workflow/enabled' || pathname === '/api/workflow/dashboard/enabled') {
@@ -3138,7 +3184,7 @@ const server = createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, X-Mercury-Key, X-API-Key'
     });
     res.end();
@@ -3150,7 +3196,7 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  const jsonHandled = await routeJson(res, url, pathname);
+  const jsonHandled = await routeJson(req, res, url, pathname);
   if (jsonHandled !== false) {
     return;
   }

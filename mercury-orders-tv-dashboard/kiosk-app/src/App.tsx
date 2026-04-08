@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faCalendarDay,
@@ -19,6 +19,7 @@ import {
   faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import {
+  fetchDashboardServerConfig,
   type DistanceEstimateResponse,
   fetchEventsNow,
   fetchDistanceEstimate,
@@ -33,6 +34,7 @@ import {
   fetchTicketSearch,
   fetchTicketStatus,
   fetchUndeliveredOrders,
+  saveDashboardServerConfig,
 } from './lib/api';
 import { deriveStage } from './lib/stageResolver';
 import {
@@ -48,6 +50,10 @@ import {
   type TicketSearchRow,
   type TicketStatusRow,
 } from './lib/types';
+import { buildTickerItems, buildTickerScrollText } from './ticker/buildTickerFeed';
+import { normalizeTickerModuleIds, TICKER_MODULE_DEFINITIONS } from './ticker/registry';
+import { normalizeWeatherZip, prefetchWeatherTicker } from './ticker/modules/weather';
+import type { TickerModuleId, WeatherTickerSnapshot } from './ticker/types';
 
 type GroupedCards = Record<StatusStage, BoardCard[]>;
 type IntakeKind = 'uncreated' | 'ask' | 'cancel' | 'message';
@@ -120,6 +126,7 @@ interface AskCandidateAttempt {
 
 type AudioAlertKind = 'marketplace' | 'today';
 type AlertSoundPreset = 'alarm_pulse' | 'classic_ding' | 'bright_beep' | 'custom_upload';
+type ClockFormat = '12h' | '24h';
 interface DashboardUserConfig {
   pollMs: number;
   flashMs: number;
@@ -133,6 +140,12 @@ interface DashboardUserConfig {
   marketplaceSoundPreset: AlertSoundPreset;
   marketplaceCustomSoundDataUrl: string;
   customLogoDataUrl: string;
+  clockFormat: ClockFormat;
+  clockFlashColons: boolean;
+  clockShowNanoseconds: boolean;
+  tickerScrollDurationSec: number;
+  tickerWeatherZip: string;
+  tickerModules: TickerModuleId[];
 }
 
 const DEFAULT_POLL_MS = 15000;
@@ -144,9 +157,11 @@ const MERCURY_FEED_STAGGER_MS = 500;
 const DEFAULT_MARKETPLACE_DINGS = 3;
 const DEFAULT_TODAY_DINGS = 1;
 const DEFAULT_DING_GAP_MS = 620;
+const NEW_ORDER_PULSE_WINDOW_MINUTES = 30;
 const DASHBOARD_MODE_STORAGE_KEY = 'kiosk_dashboard_mode';
 const AUDIO_ALERTS_STORAGE_KEY = 'kiosk_audio_alerts';
-const DASHBOARD_CONFIG_STORAGE_KEY = 'kiosk_dashboard_user_config_v1';
+const DASHBOARD_CLIENT_CONFIG_STORAGE_KEY = 'kiosk_dashboard_client_config_v1';
+const DASHBOARD_CONFIG_STORAGE_KEY_LEGACY = 'kiosk_dashboard_user_config_v1';
 const UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 const MARKETPLACE_REGEX = /\b(uber\s*eats|door\s*dash|doordash)\b/i;
 const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
@@ -162,6 +177,12 @@ const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
   marketplaceSoundPreset: 'alarm_pulse',
   marketplaceCustomSoundDataUrl: '',
   customLogoDataUrl: '',
+  clockFormat: '12h',
+  clockFlashColons: true,
+  clockShowNanoseconds: false,
+  tickerScrollDurationSec: 22,
+  tickerWeatherZip: '15212',
+  tickerModules: normalizeTickerModuleIds(undefined),
 };
 const USD_ORDER_TOTAL_FORMAT = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -907,6 +928,54 @@ function normalizeMercuryBaseUrl(value: unknown): string {
   return String(value || '').trim().replace(/\/+$/, '');
 }
 
+function normalizeClockFormat(value: unknown): ClockFormat {
+  return value === '24h' ? '24h' : '12h';
+}
+
+function normalizeToggle(value: unknown, fallback: boolean): boolean {
+  if (value === undefined || value === null || value === '') return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no') return false;
+  return fallback;
+}
+
+function pickServerConfigFields(raw: Partial<DashboardUserConfig> | null | undefined): Partial<DashboardUserConfig> {
+  return {
+    pollMs: raw?.pollMs,
+    flashMs: raw?.flashMs,
+    askStaleHours: raw?.askStaleHours,
+    mercuryBaseUrl: raw?.mercuryBaseUrl,
+    marketplaceDings: raw?.marketplaceDings,
+    todayDings: raw?.todayDings,
+    dingGapMs: raw?.dingGapMs,
+    clockFormat: raw?.clockFormat,
+    clockFlashColons: raw?.clockFlashColons,
+    clockShowNanoseconds: raw?.clockShowNanoseconds,
+    tickerScrollDurationSec: raw?.tickerScrollDurationSec,
+    customLogoDataUrl: raw?.customLogoDataUrl,
+    tickerWeatherZip: raw?.tickerWeatherZip,
+    tickerModules: raw?.tickerModules,
+  };
+}
+
+function pickClientConfigFields(raw: Partial<DashboardUserConfig> | null | undefined): Partial<DashboardUserConfig> {
+  return {
+    soundPreset: raw?.soundPreset,
+    customSoundDataUrl: raw?.customSoundDataUrl,
+    marketplaceSoundPreset: raw?.marketplaceSoundPreset,
+    marketplaceCustomSoundDataUrl: raw?.marketplaceCustomSoundDataUrl,
+  };
+}
+
+function sanitizeServerBackedConfig(raw: Partial<DashboardUserConfig> | null | undefined): Partial<DashboardUserConfig> {
+  return pickServerConfigFields(sanitizeDashboardConfig(raw));
+}
+
+function sanitizeClientConfig(raw: Partial<DashboardUserConfig> | null | undefined): Partial<DashboardUserConfig> {
+  return pickClientConfigFields(sanitizeDashboardConfig(raw));
+}
+
 function sanitizeDashboardConfig(raw: Partial<DashboardUserConfig> | null | undefined): DashboardUserConfig {
   return {
     pollMs: clampInteger(raw?.pollMs, 15000, 60000, DEFAULT_DASHBOARD_CONFIG.pollMs),
@@ -921,6 +990,12 @@ function sanitizeDashboardConfig(raw: Partial<DashboardUserConfig> | null | unde
     marketplaceSoundPreset: normalizeSoundPreset(raw?.marketplaceSoundPreset),
     marketplaceCustomSoundDataUrl: String(raw?.marketplaceCustomSoundDataUrl || '').trim(),
     customLogoDataUrl: String(raw?.customLogoDataUrl || '').trim(),
+    clockFormat: normalizeClockFormat(raw?.clockFormat),
+    clockFlashColons: normalizeToggle(raw?.clockFlashColons, DEFAULT_DASHBOARD_CONFIG.clockFlashColons),
+    clockShowNanoseconds: normalizeToggle(raw?.clockShowNanoseconds, DEFAULT_DASHBOARD_CONFIG.clockShowNanoseconds),
+    tickerScrollDurationSec: clampInteger(raw?.tickerScrollDurationSec, 8, 80, DEFAULT_DASHBOARD_CONFIG.tickerScrollDurationSec),
+    tickerWeatherZip: normalizeWeatherZip(raw?.tickerWeatherZip),
+    tickerModules: normalizeTickerModuleIds(raw?.tickerModules),
   };
 }
 
@@ -950,16 +1025,26 @@ function isDashboardConfigEqual(leftRaw: DashboardUserConfig, rightRaw: Dashboar
     && left.customSoundDataUrl === right.customSoundDataUrl
     && left.marketplaceSoundPreset === right.marketplaceSoundPreset
     && left.marketplaceCustomSoundDataUrl === right.marketplaceCustomSoundDataUrl
-    && left.customLogoDataUrl === right.customLogoDataUrl;
+    && left.customLogoDataUrl === right.customLogoDataUrl
+    && left.clockFormat === right.clockFormat
+    && left.clockFlashColons === right.clockFlashColons
+    && left.clockShowNanoseconds === right.clockShowNanoseconds
+    && left.tickerScrollDurationSec === right.tickerScrollDurationSec
+    && left.tickerWeatherZip === right.tickerWeatherZip
+    && left.tickerModules.join('|') === right.tickerModules.join('|');
 }
 
 function initialDashboardConfig(): DashboardUserConfig {
   if (typeof window === 'undefined') return DEFAULT_DASHBOARD_CONFIG;
   try {
-    const saved = window.localStorage.getItem(DASHBOARD_CONFIG_STORAGE_KEY);
+    const saved = window.localStorage.getItem(DASHBOARD_CLIENT_CONFIG_STORAGE_KEY)
+      || window.localStorage.getItem(DASHBOARD_CONFIG_STORAGE_KEY_LEGACY);
     if (!saved) return DEFAULT_DASHBOARD_CONFIG;
     const parsed = JSON.parse(saved) as Partial<DashboardUserConfig>;
-    return sanitizeDashboardConfig(parsed);
+    return sanitizeDashboardConfig({
+      ...DEFAULT_DASHBOARD_CONFIG,
+      ...sanitizeClientConfig(parsed),
+    });
   } catch {
     return DEFAULT_DASHBOARD_CONFIG;
   }
@@ -2731,6 +2816,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [isRefreshingActiveOrders, setIsRefreshingActiveOrders] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
+  const [tickerNow, setTickerNow] = useState<Date>(() => new Date());
   const [error, setError] = useState<string>('');
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
   const [todayAnchorKey, setTodayAnchorKey] = useState<string>(() => currentLocalDateKey());
@@ -2744,7 +2830,9 @@ export default function App() {
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [config, setConfig] = useState<DashboardUserConfig>(() => initialDashboardConfig());
   const [configDraft, setConfigDraft] = useState<DashboardUserConfig | null>(null);
+  const [configWeatherZipDraft, setConfigWeatherZipDraft] = useState<string>(() => DEFAULT_DASHBOARD_CONFIG.tickerWeatherZip);
   const [configMessage, setConfigMessage] = useState('');
+  const [weatherTickerSnapshot, setWeatherTickerSnapshot] = useState<WeatherTickerSnapshot | null>(null);
   const seenTicketIdsRef = useRef<Set<string>>(new Set());
   const flashUntilRef = useRef<Map<string, number>>(new Map());
   const pendingListRef = useRef<HTMLDivElement | null>(null);
@@ -2771,8 +2859,11 @@ export default function App() {
   const alertPlaybackQueueRef = useRef<Promise<void>>(Promise.resolve());
   const askDebugEnabled = useMemo(() => isAskDebugEnabledFromBrowser(), []);
   const editingConfig = useMemo(
-    () => sanitizeDashboardConfig(configDraft || config),
-    [config, configDraft],
+    () => sanitizeDashboardConfig({
+      ...(configDraft || config),
+      tickerWeatherZip: configWeatherZipDraft,
+    }),
+    [config, configDraft, configWeatherZipDraft],
   );
   const hasConfigChanges = useMemo(
     () => !isDashboardConfigEqual(editingConfig, config),
@@ -2953,28 +3044,49 @@ export default function App() {
   }, [config, playAlertSound]);
   const openConfigPage = useCallback(() => {
     setConfigDraft(sanitizeDashboardConfig(config));
+    setConfigWeatherZipDraft(sanitizeDashboardConfig(config).tickerWeatherZip);
     setConfigMessage('');
     setIsConfigOpen(true);
   }, [config]);
   const cancelConfigChanges = useCallback(() => {
     setConfigDraft(null);
+    setConfigWeatherZipDraft(sanitizeDashboardConfig(config).tickerWeatherZip);
     setConfigMessage('');
     setIsConfigOpen(false);
     if (soundUploadRef.current) soundUploadRef.current.value = '';
     if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
     if (logoUploadRef.current) logoUploadRef.current.value = '';
-  }, []);
-  const saveConfigChanges = useCallback(() => {
-    const nextConfig = sanitizeDashboardConfig(configDraft || config);
+  }, [config]);
+  const saveConfigChanges = useCallback(async () => {
+    const nextConfig = editingConfig;
     if (isDashboardConfigEqual(nextConfig, config)) return;
+
+    const serverConfigSaved = await saveDashboardServerConfig(
+      sanitizeServerBackedConfig(nextConfig) as Record<string, unknown>,
+    );
+
     setConfig(nextConfig);
     setConfigDraft(null);
-    setConfigMessage('');
+    setConfigWeatherZipDraft(nextConfig.tickerWeatherZip);
+    setConfigMessage(serverConfigSaved ? '' : 'Saved client settings; server settings disk save is unavailable.');
     setIsConfigOpen(false);
     if (soundUploadRef.current) soundUploadRef.current.value = '';
     if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
     if (logoUploadRef.current) logoUploadRef.current.value = '';
-  }, [config, configDraft]);
+  }, [config, editingConfig]);
+  const saveServerSettingsOnly = useCallback(async () => {
+    const serverSlice = sanitizeServerBackedConfig(editingConfig);
+    const serverConfigSaved = await saveDashboardServerConfig(serverSlice as Record<string, unknown>);
+    if (!serverConfigSaved) {
+      setConfigMessage('Could not save server settings to disk.');
+      return;
+    }
+    setConfig(previous => sanitizeDashboardConfig({
+      ...previous,
+      ...serverSlice,
+    }));
+    setConfigMessage('Server settings saved to disk.');
+  }, [editingConfig]);
   const updateConfigNumber = useCallback((key: keyof DashboardUserConfig, valueRaw: string) => {
     const value = Number(valueRaw);
     setConfigDraft(previous => {
@@ -2984,11 +3096,24 @@ export default function App() {
   }, [config]);
   const resetConfigDefaults = useCallback(() => {
     setConfigDraft(DEFAULT_DASHBOARD_CONFIG);
+    setConfigWeatherZipDraft(DEFAULT_DASHBOARD_CONFIG.tickerWeatherZip);
     setConfigMessage('Config reset to defaults.');
     if (soundUploadRef.current) soundUploadRef.current.value = '';
     if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
     if (logoUploadRef.current) logoUploadRef.current.value = '';
   }, []);
+  const toggleTickerModuleInDraft = useCallback((moduleId: TickerModuleId, enabled: boolean) => {
+    setConfigDraft(previous => {
+      const base = sanitizeDashboardConfig(previous || config);
+      const nextIds = enabled
+        ? [...base.tickerModules, moduleId]
+        : base.tickerModules.filter(id => id !== moduleId);
+      return sanitizeDashboardConfig({
+        ...base,
+        tickerModules: nextIds,
+      });
+    });
+  }, [config]);
   const handleCustomSoundUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -4833,6 +4958,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const tickMs = config.clockShowNanoseconds ? 50 : 1000;
+    const timer = window.setInterval(() => {
+      setTickerNow(new Date());
+    }, tickMs);
+    return () => window.clearInterval(timer);
+  }, [config.clockShowNanoseconds]);
+
+  useEffect(() => {
     setWorkflowBaseUrlOverride(config.mercuryBaseUrl);
   }, [config.mercuryBaseUrl]);
 
@@ -4861,11 +4994,26 @@ export default function App() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      window.localStorage.setItem(DASHBOARD_CONFIG_STORAGE_KEY, JSON.stringify(sanitizeDashboardConfig(config)));
+      window.localStorage.setItem(DASHBOARD_CLIENT_CONFIG_STORAGE_KEY, JSON.stringify(sanitizeClientConfig(config)));
     } catch {
       // localStorage unavailable (private mode, policy, etc)
     }
   }, [config]);
+
+  useEffect(() => {
+    let disposed = false;
+    void (async () => {
+      const serverConfigRaw = await fetchDashboardServerConfig();
+      if (disposed || !serverConfigRaw) return;
+      setConfig(previous => sanitizeDashboardConfig({
+        ...previous,
+        ...sanitizeServerBackedConfig(serverConfigRaw as Partial<DashboardUserConfig>),
+      }));
+    })();
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!configMessage) return;
@@ -4874,6 +5022,40 @@ export default function App() {
     }, 3500);
     return () => window.clearTimeout(timer);
   }, [configMessage]);
+
+  useEffect(() => {
+    if (!config.tickerModules.includes('weather')) return;
+
+    let disposed = false;
+    let activeController: AbortController | null = null;
+
+    const refreshWeather = async (): Promise<void> => {
+      if (activeController) {
+        activeController.abort();
+      }
+      const controller = new AbortController();
+      activeController = controller;
+      try {
+        const snapshot = await prefetchWeatherTicker(config.tickerWeatherZip, controller.signal);
+        if (!disposed && snapshot) {
+          setWeatherTickerSnapshot(snapshot);
+        }
+      } catch {
+        // Keep the last successful snapshot visible; do not surface loading/errors in the ticker.
+      }
+    };
+
+    void refreshWeather();
+    const timer = window.setInterval(() => {
+      void refreshWeather();
+    }, 15 * 60 * 1000);
+
+    return () => {
+      disposed = true;
+      if (activeController) activeController.abort();
+      window.clearInterval(timer);
+    };
+  }, [config.tickerModules, config.tickerWeatherZip]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -4971,6 +5153,27 @@ export default function App() {
     () => pendingTickets.filter(ticket => ticket.kind === 'uncreated').length,
     [pendingTickets],
   );
+  const staleAskTicketCount = useMemo(
+    () => pendingTickets.filter(ticket => ticket.isStaleAsk).length,
+    [pendingTickets],
+  );
+  const marketplacePendingTicketCount = useMemo(
+    () => pendingTickets.filter(ticket => ticket.isMarketplace).length,
+    [pendingTickets],
+  );
+  const selectedDayExceptionCount = useMemo(
+    () => allActiveOrders.filter(card => (
+      toDateKey(card.deliveryDate) === selectedDateKey
+      && isExceptionStatusReason(`${card.stageReason} ${card.deliveryStatus}`)
+    )).length,
+    [allActiveOrders, selectedDateKey],
+  );
+  const newOrdersPulseCount = useMemo(() => {
+    const cutoffEpoch = Date.now() - (NEW_ORDER_PULSE_WINDOW_MINUTES * 60 * 1000);
+    return pendingTickets.filter(ticket => (
+      ticket.kind === 'uncreated' && toEpoch(ticket.messageDate) >= cutoffEpoch
+    )).length;
+  }, [pendingTickets, tickerNow]);
 
   const todayLabel = useMemo(() => {
     const startLabel = includeNextDay ? formatHeaderDateShort(selectedDate) : formatHeaderDateFullYear(selectedDate);
@@ -4980,6 +5183,99 @@ export default function App() {
     const endLabel = formatHeaderDateShort(nextDate);
     return `${startLabel} - ${endLabel}`;
   }, [selectedDate, includeNextDay]);
+
+  const tickerHourLabel = useMemo(() => {
+    const hours24 = tickerNow.getHours();
+    if (config.clockFormat === '24h') {
+      return String(hours24).padStart(2, '0');
+    }
+    const hours12 = hours24 % 12 || 12;
+    return String(hours12).padStart(2, '0');
+  }, [config.clockFormat, tickerNow]);
+  const tickerMinuteLabel = useMemo(
+    () => String(tickerNow.getMinutes()).padStart(2, '0'),
+    [tickerNow],
+  );
+  const tickerSecondLabel = useMemo(
+    () => String(tickerNow.getSeconds()).padStart(2, '0'),
+    [tickerNow],
+  );
+  const tickerMeridiemLabel = useMemo(
+    () => (config.clockFormat === '24h' ? '' : (tickerNow.getHours() >= 12 ? 'PM' : 'AM')),
+    [config.clockFormat, tickerNow],
+  );
+  const tickerSeparatorsVisible = config.clockFlashColons ? tickerNow.getSeconds() % 2 === 0 : true;
+  const tickerNanosecondsLabel = useMemo(() => {
+    if (!config.clockShowNanoseconds) return '';
+    const fractionalMs = performance.now() % 1000;
+    const nanos = Math.floor(fractionalMs * 1_000_000);
+    return String(nanos).padStart(9, '0');
+  }, [config.clockShowNanoseconds, tickerNow]);
+  const tickerDateLabel = useMemo(
+    () => tickerNow.toLocaleDateString([], {
+      month: '2-digit',
+      day: '2-digit',
+      year: '2-digit',
+    }),
+    [tickerNow],
+  );
+  const tickerScrollDurationStyle = useMemo(
+    () => ({ '--ticker-scroll-duration': `${config.tickerScrollDurationSec}s` } as CSSProperties),
+    [config.tickerScrollDurationSec],
+  );
+  const tickerItems = useMemo(() => buildTickerItems({
+    enabledModuleIds: config.tickerModules,
+    weatherZip: config.tickerWeatherZip,
+    weatherSnapshot: weatherTickerSnapshot,
+    completion: {
+      dayLabel: selectedDayCountLabel,
+      completed: selectedDayOrderCompleted,
+      total: selectedDayOrderTotal,
+      percent: selectedDayCompletionPercent,
+    },
+    intake: {
+      pendingCount: pendingTickets.length,
+      newOrderCount: uncreatedTicketCount,
+      staleAskCount: staleAskTicketCount,
+      marketplaceCount: marketplacePendingTicketCount,
+    },
+    exceptionWatch: {
+      dayLabel: selectedDayCountLabel,
+      exceptionCount: selectedDayExceptionCount,
+    },
+    newOrders: {
+      windowMinutes: NEW_ORDER_PULSE_WINDOW_MINUTES,
+      count: newOrdersPulseCount,
+    },
+  }), [
+    config.tickerModules,
+    config.tickerWeatherZip,
+    weatherTickerSnapshot,
+    selectedDayCountLabel,
+    selectedDayOrderCompleted,
+    selectedDayOrderTotal,
+    selectedDayCompletionPercent,
+    pendingTickets.length,
+    uncreatedTicketCount,
+    staleAskTicketCount,
+    marketplacePendingTicketCount,
+    selectedDayExceptionCount,
+    newOrdersPulseCount,
+  ]);
+  const feedErrorLabel = useMemo(() => {
+    const detail = String(error || '').trim();
+    if (!detail) return '';
+    if (detail.toLowerCase().startsWith('feed error:')) return `⚠️ ${detail}`;
+    return `⚠️ Feed error: ${detail}`;
+  }, [error]);
+  const tickerErrorText = useMemo(
+    () => feedErrorLabel,
+    [feedErrorLabel],
+  );
+  const tickerScrollText = useMemo(
+    () => tickerErrorText || buildTickerScrollText(tickerItems),
+    [tickerErrorText, tickerItems],
+  );
 
   const toggleDashboardMode = useCallback(async () => {
     const nextMode = !isDashboardMode;
@@ -5161,64 +5457,242 @@ export default function App() {
           </div>
           {configMessage ? <div className="app__config-message">{configMessage}</div> : null}
 
-          <section className="app__config-section">
-            <h2 className="app__config-section-title">API / Mercury</h2>
-            <div className="app__config-grid">
-              <label className="app__config-row">
-                <span>Dashboard API route</span>
-                <input type="text" value="same-origin (/api)" readOnly />
-              </label>
-              <label className="app__config-row app__config-row--full">
-                <span>Mercury base URL (optional)</span>
-                <input
-                  type="text"
-                  value={editingConfig.mercuryBaseUrl}
-                  placeholder="http://127.0.0.1:17344"
-                  onChange={(event) => {
-                    const nextValue = event.target.value;
-                    setConfigDraft(previous => sanitizeDashboardConfig({
-                      ...(previous || config),
-                      mercuryBaseUrl: nextValue,
-                    }));
-                  }}
-                />
-              </label>
+          <section className="app__config-panel app__config-panel--server">
+            <h2 className="app__config-panel-title">Server Settings</h2>
+
+            <section className="app__config-section app__config-section--server">
+              <h3 className="app__config-section-title">API / Mercury</h3>
+              <div className="app__config-grid">
+                <label className="app__config-row">
+                  <span>Dashboard API route</span>
+                  <input type="text" value="same-origin (/api)" readOnly />
+                </label>
+                <label className="app__config-row app__config-row--full">
+                  <span>Mercury base URL (optional)</span>
+                  <input
+                    type="text"
+                    value={editingConfig.mercuryBaseUrl}
+                    placeholder="http://127.0.0.1:17344"
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setConfigDraft(previous => sanitizeDashboardConfig({
+                        ...(previous || config),
+                        mercuryBaseUrl: nextValue,
+                      }));
+                    }}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="app__config-section app__config-section--server">
+              <h3 className="app__config-section-title">Feed and Timing</h3>
+              <div className="app__config-grid">
+                <label className="app__config-row">
+                  <span>Poll interval (ms)</span>
+                  <input
+                    type="number"
+                    min={15000}
+                    max={60000}
+                    value={editingConfig.pollMs}
+                    onChange={(event) => updateConfigNumber('pollMs', event.target.value)}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Flash duration (ms)</span>
+                  <input
+                    type="number"
+                    min={10000}
+                    max={600000}
+                    value={editingConfig.flashMs}
+                    onChange={(event) => updateConfigNumber('flashMs', event.target.value)}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Message stale threshold (hours)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={72}
+                    value={editingConfig.askStaleHours}
+                    onChange={(event) => updateConfigNumber('askStaleHours', event.target.value)}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Delivery-service alert repeats</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={9}
+                    value={editingConfig.marketplaceDings}
+                    onChange={(event) => updateConfigNumber('marketplaceDings', event.target.value)}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Regular-order alert repeats</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={9}
+                    value={editingConfig.todayDings}
+                    onChange={(event) => updateConfigNumber('todayDings', event.target.value)}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Alert repeat interval (ms)</span>
+                  <input
+                    type="number"
+                    min={250}
+                    max={2500}
+                    value={editingConfig.dingGapMs}
+                    onChange={(event) => updateConfigNumber('dingGapMs', event.target.value)}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="app__config-section app__config-section--server">
+              <h3 className="app__config-section-title">Ticker Settings</h3>
+              <div className="app__config-grid">
+                <label className="app__config-row">
+                  <span>Scroll speed (seconds per loop)</span>
+                  <input
+                    type="number"
+                    min={8}
+                    max={80}
+                    value={editingConfig.tickerScrollDurationSec}
+                    onChange={(event) => updateConfigNumber('tickerScrollDurationSec', event.target.value)}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Clock format</span>
+                  <select
+                    value={editingConfig.clockFormat}
+                    onChange={(event) => {
+                      setConfigDraft(previous => sanitizeDashboardConfig({
+                        ...(previous || config),
+                        clockFormat: normalizeClockFormat(event.target.value),
+                      }));
+                    }}
+                  >
+                    <option value="12h">12-hour</option>
+                    <option value="24h">24-hour</option>
+                  </select>
+                </label>
+                <label className="app__config-row app__config-toggle-row">
+                  <span>Flash clock colons</span>
+                  <input
+                    type="checkbox"
+                    checked={editingConfig.clockFlashColons}
+                    onChange={(event) => {
+                      setConfigDraft(previous => sanitizeDashboardConfig({
+                        ...(previous || config),
+                        clockFlashColons: event.target.checked,
+                      }));
+                    }}
+                  />
+                </label>
+                <label className="app__config-row app__config-toggle-row">
+                  <span>Nanosecond time display</span>
+                  <input
+                    type="checkbox"
+                    checked={editingConfig.clockShowNanoseconds}
+                    onChange={(event) => {
+                      setConfigDraft(previous => sanitizeDashboardConfig({
+                        ...(previous || config),
+                        clockShowNanoseconds: event.target.checked,
+                      }));
+                    }}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="app__config-section app__config-section--server">
+              <h3 className="app__config-section-title">Ticker Modules</h3>
+              <div className="app__config-grid">
+                <label className="app__config-row">
+                  <span>Weather ZIP code</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={5}
+                    value={configWeatherZipDraft}
+                    onChange={(event) => {
+                      setConfigWeatherZipDraft(event.target.value.replace(/\D/g, '').slice(0, 5));
+                    }}
+                  />
+                </label>
+                <div className="app__config-row app__config-row--full">
+                  <span>Enabled ticker modules</span>
+                  <div className="app__config-module-list">
+                    {TICKER_MODULE_DEFINITIONS.map(moduleDefinition => {
+                      const isEnabled = editingConfig.tickerModules.includes(moduleDefinition.id);
+                      return (
+                        <label key={moduleDefinition.id} className="app__config-module-card">
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={(event) => toggleTickerModuleInDraft(moduleDefinition.id, event.target.checked)}
+                          />
+                          <span className="app__config-module-copy">
+                            <strong>{moduleDefinition.label}</strong>
+                            <span>{moduleDefinition.description}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="app__config-section app__config-section--server">
+              <h3 className="app__config-section-title">Branding</h3>
+              <div className="app__config-grid">
+                <div className="app__config-row app__config-row--full">
+                  <span>Shop logo image</span>
+                  <div className="app__config-inline-actions">
+                    <input
+                      ref={logoUploadRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => {
+                        void handleLogoUpload(event);
+                      }}
+                    />
+                    <button type="button" className="app__control-btn" onClick={clearCustomLogo}>
+                      Reset logo
+                    </button>
+                  </div>
+                  <div className="app__config-branding-preview">
+                    <div className="app__config-branding-preview-label">
+                      {editingConfig.customLogoDataUrl ? 'Custom logo is active' : 'Using default logo'}
+                    </div>
+                    <div className="app__config-branding-preview-frame">
+                      <img
+                        src={editingConfig.customLogoDataUrl || '/olivers.png'}
+                        alt="Configured shop logo preview"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <div className="app__config-panel-actions">
+              <button type="button" className="app__control-btn app__control-btn--primary" onClick={() => void saveServerSettingsOnly()}>
+                Save Server Settings
+              </button>
             </div>
           </section>
 
+          <section className="app__config-panel app__config-panel--client">
+            <h2 className="app__config-panel-title">Client / Local Settings</h2>
+
           <section className="app__config-section">
-            <h2 className="app__config-section-title">Audio Alert Settings</h2>
+            <h3 className="app__config-section-title">Audio Alert Settings</h3>
             <div className="app__config-grid">
-              <label className="app__config-row">
-                <span>Delivery-service alert repeats</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={9}
-                  value={editingConfig.marketplaceDings}
-                  onChange={(event) => updateConfigNumber('marketplaceDings', event.target.value)}
-                />
-              </label>
-              <label className="app__config-row">
-                <span>Regular-order alert repeats</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={9}
-                  value={editingConfig.todayDings}
-                  onChange={(event) => updateConfigNumber('todayDings', event.target.value)}
-                />
-              </label>
-              <label className="app__config-row">
-                <span>Alert repeat interval (ms)</span>
-                <input
-                  type="number"
-                  min={250}
-                  max={2500}
-                  value={editingConfig.dingGapMs}
-                  onChange={(event) => updateConfigNumber('dingGapMs', event.target.value)}
-                />
-              </label>
               <label className="app__config-row app__config-row--full">
                 <span>Regular order sound preset</span>
                 <select
@@ -5310,73 +5784,6 @@ export default function App() {
             </div>
           </section>
 
-          <section className="app__config-section">
-            <h2 className="app__config-section-title">Feed and Timing</h2>
-            <div className="app__config-grid">
-              <label className="app__config-row">
-                <span>Poll interval (ms)</span>
-                <input
-                  type="number"
-                  min={15000}
-                  max={60000}
-                  value={editingConfig.pollMs}
-                  onChange={(event) => updateConfigNumber('pollMs', event.target.value)}
-                />
-              </label>
-              <label className="app__config-row">
-                <span>Flash duration (ms)</span>
-                <input
-                  type="number"
-                  min={10000}
-                  max={600000}
-                  value={editingConfig.flashMs}
-                  onChange={(event) => updateConfigNumber('flashMs', event.target.value)}
-                />
-              </label>
-              <label className="app__config-row">
-                <span>Message stale threshold (hours)</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={72}
-                  value={editingConfig.askStaleHours}
-                  onChange={(event) => updateConfigNumber('askStaleHours', event.target.value)}
-                />
-              </label>
-            </div>
-          </section>
-
-          <section className="app__config-section">
-            <h2 className="app__config-section-title">Branding</h2>
-            <div className="app__config-grid">
-              <div className="app__config-row app__config-row--full">
-                <span>Shop logo image</span>
-                <div className="app__config-inline-actions">
-                  <input
-                    ref={logoUploadRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) => {
-                      void handleLogoUpload(event);
-                    }}
-                  />
-                  <button type="button" className="app__control-btn" onClick={clearCustomLogo}>
-                    Reset logo
-                  </button>
-                </div>
-                <div className="app__config-branding-preview">
-                  <div className="app__config-branding-preview-label">
-                    {editingConfig.customLogoDataUrl ? 'Custom logo is active' : 'Using default logo'}
-                  </div>
-                  <div className="app__config-branding-preview-frame">
-                    <img
-                      src={editingConfig.customLogoDataUrl || '/olivers.png'}
-                      alt="Configured shop logo preview"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
           </section>
 
           <div className="app__config-actions">
@@ -5401,7 +5808,7 @@ export default function App() {
 
       {!isConfigOpen ? (
         <>
-      {error ? <div className="app__error">Feed error: {error}</div> : null}
+      {feedErrorLabel ? <div className="app__error">{feedErrorLabel}</div> : null}
 
       {!isDashboardMode ? (
         <div className="app__rotation">
@@ -5426,7 +5833,7 @@ export default function App() {
         </div>
       ) : null}
 
-      <main className="board-page">
+      <main className={`board-page${error ? ' board-page--disabled' : ''}`}>
         {loading ? (
           <div className="board-loading-overlay" role="status" aria-live="polite" aria-label="Loading board">
             <span className="board-loading-overlay__spinner" aria-hidden="true" />
@@ -5635,6 +6042,25 @@ export default function App() {
       </main>
         </>
       ) : null}
+
+      <div className="app__ticker" aria-label="Dashboard ticker">
+        <div className="app__ticker-clock" aria-label="Current time and date">
+          <span className="app__ticker-time" aria-label={`${tickerHourLabel}:${tickerMinuteLabel}:${tickerSecondLabel}`}>
+            <span className="app__ticker-time-part">{tickerHourLabel}</span>
+            <span className={`app__ticker-separator${tickerSeparatorsVisible ? '' : ' app__ticker-separator--hidden'}`}>:</span>
+            <span className="app__ticker-time-part">{tickerMinuteLabel}</span>
+            <span className={`app__ticker-separator${tickerSeparatorsVisible ? '' : ' app__ticker-separator--hidden'}`}>:</span>
+            <span className="app__ticker-time-part app__ticker-time-part--seconds">{tickerSecondLabel}</span>
+            {tickerNanosecondsLabel ? <span className="app__ticker-time-part app__ticker-time-part--nanos">.{tickerNanosecondsLabel}</span> : null}
+            {tickerMeridiemLabel ? <span className="app__ticker-meridiem">{tickerMeridiemLabel}</span> : null}
+          </span>
+          <span className="app__ticker-date">{tickerDateLabel}</span>
+        </div>
+        <div className="app__ticker-track" aria-hidden="true" style={tickerScrollDurationStyle}>
+          <span className="app__ticker-copy">{tickerScrollText}</span>
+          <span className="app__ticker-copy">{tickerScrollText}</span>
+        </div>
+      </div>
     </div>
   );
 }

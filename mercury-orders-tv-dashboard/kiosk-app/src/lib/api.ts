@@ -99,11 +99,40 @@ async function getJson<T>(path: string): Promise<T> {
   }
 }
 
+async function putJson<T>(path: string, payload: unknown): Promise<T> {
+  const requestUrl = buildRequestUrl(path);
+  const response = await fetch(requestUrl, {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload || {}),
+  });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${requestUrl} (${response.status})`);
+  }
+  return response.json() as Promise<T>;
+}
+
 async function getJsonOrNull<T>(path: string): Promise<T | null> {
   try {
     return await getJson<T>(path);
   } catch {
     return null;
+  }
+}
+
+export async function fetchDashboardServerConfig(): Promise<Record<string, unknown> | null> {
+  return getJsonOrNull<Record<string, unknown>>('/api/workflow/dashboard-config/server');
+}
+
+export async function saveDashboardServerConfig(config: Record<string, unknown>): Promise<boolean> {
+  try {
+    await putJson<Record<string, unknown>>('/api/workflow/dashboard-config/server', config);
+    return true;
+  } catch {
+    return false;
   }
 }
 
