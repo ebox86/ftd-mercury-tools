@@ -5309,7 +5309,7 @@ export default function App() {
             <img className="app__logo" src={customLogoSrc} alt="Shop logo" />
           </div>
           <div className="app__title-text">
-            <h1>Oliver Flowers Order Flow Board</h1>
+            <h1>Oliver Flowers Order Flow Dashboard</h1>
             {!isConfigOpen ? (
               <div className="app__today-wrap">
                 <button

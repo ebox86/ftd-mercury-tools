@@ -464,6 +464,7 @@ body {
 }
 
 .board-page {
+  grid-row: 4;
   position: relative;
   min-height: 0;
   height: 100%;
@@ -535,6 +536,7 @@ body {
   height: 100%;
   min-height: 0;
   position: relative;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .board-lanes--two {
@@ -551,6 +553,7 @@ body {
   display: grid;
   grid-template-rows: auto 1fr;
   min-height: 0;
+  height: 100%;
 }
 
 .lane--with-progress {
@@ -935,6 +938,20 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  background-image:
+    linear-gradient(rgba(74, 92, 117, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(74, 92, 117, 0.05) 1px, transparent 1px);
+  background-size: 100% 36px, 36px 100%;
+  background-position: top left;
+}
+
+.app--dashboard .lane__cards,
+.app--dashboard .lane__cards--two-col {
+  background-image:
+    linear-gradient(rgba(74, 92, 117, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(74, 92, 117, 0.06) 1px, transparent 1px);
+  background-size: 100% 36px, 36px 100%;
+  background-position: top left;
 }
 
 .lane__cards--two-col {
