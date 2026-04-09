@@ -2815,7 +2815,7 @@ export default function App() {
   const [pendingTickets, setPendingTickets] = useState<IntakeTicketCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshingActiveOrders, setIsRefreshingActiveOrders] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<string>('');
+  // Removed unused lastUpdated state to fix TS6133 error
   const [tickerNow, setTickerNow] = useState<Date>(() => new Date());
   const [error, setError] = useState<string>('');
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
