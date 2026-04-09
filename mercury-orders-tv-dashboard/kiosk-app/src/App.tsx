@@ -5168,11 +5168,33 @@ export default function App() {
     )).length,
     [allActiveOrders, selectedDateKey],
   );
-  const newOrdersPulseCount = useMemo(() => {
-    const cutoffEpoch = Date.now() - (NEW_ORDER_PULSE_WINDOW_MINUTES * 60 * 1000);
-    return pendingTickets.filter(ticket => (
-      ticket.kind === 'uncreated' && toEpoch(ticket.messageDate) >= cutoffEpoch
-    )).length;
+  const newOrdersPulse = useMemo(() => {
+    const windowMs = NEW_ORDER_PULSE_WINDOW_MINUTES * 60 * 1000;
+    const nowEpoch = tickerNow.getTime();
+    const currentWindowStart = nowEpoch - windowMs;
+    const previousWindowStart = currentWindowStart - windowMs;
+
+    let currentCount = 0;
+    let previousCount = 0;
+
+    for (const ticket of pendingTickets) {
+      if (ticket.kind !== 'uncreated') continue;
+      const messageEpoch = toEpoch(ticket.messageDate);
+      if (!messageEpoch) continue;
+
+      if (messageEpoch >= currentWindowStart && messageEpoch <= nowEpoch) {
+        currentCount += 1;
+        continue;
+      }
+      if (messageEpoch >= previousWindowStart && messageEpoch < currentWindowStart) {
+        previousCount += 1;
+      }
+    }
+
+    return {
+      currentCount,
+      previousCount,
+    };
   }, [pendingTickets, tickerNow]);
 
   const todayLabel = useMemo(() => {
@@ -5245,7 +5267,8 @@ export default function App() {
     },
     newOrders: {
       windowMinutes: NEW_ORDER_PULSE_WINDOW_MINUTES,
-      count: newOrdersPulseCount,
+      count: newOrdersPulse.currentCount,
+      previousCount: newOrdersPulse.previousCount,
     },
   }), [
     config.tickerModules,
@@ -5260,7 +5283,7 @@ export default function App() {
     staleAskTicketCount,
     marketplacePendingTicketCount,
     selectedDayExceptionCount,
-    newOrdersPulseCount,
+    newOrdersPulse,
   ]);
   const feedErrorLabel = useMemo(() => {
     const detail = String(error || '').trim();
@@ -5302,7 +5325,7 @@ export default function App() {
   }, [isDashboardMode]);
 
   return (
-    <div className={`app${isDashboardMode ? ' app--dashboard' : ''}`} ref={appRef}>
+    <div className={`app${isDashboardMode ? ' app--dashboard' : ''}${error ? ' app--with-error' : ''}`} ref={appRef}>
       <header className="app__header">
         <div className="app__title">
           <div className="app__logo-wrap">
@@ -5554,8 +5577,16 @@ export default function App() {
             <section className="app__config-section app__config-section--server">
               <h3 className="app__config-section-title">Ticker Settings</h3>
               <div className="app__config-grid">
-                <label className="app__config-row">
-                  <span>Scroll speed (seconds per loop)</span>
+                <div className="app__config-row app__config-row--full">
+                  <span>Ticker scroll speed</span>
+                  <input
+                    type="range"
+                    min={8}
+                    max={80}
+                    step={1}
+                    value={editingConfig.tickerScrollDurationSec}
+                    onChange={(event) => updateConfigNumber('tickerScrollDurationSec', event.target.value)}
+                  />
                   <input
                     type="number"
                     min={8}
@@ -5563,7 +5594,8 @@ export default function App() {
                     value={editingConfig.tickerScrollDurationSec}
                     onChange={(event) => updateConfigNumber('tickerScrollDurationSec', event.target.value)}
                   />
-                </label>
+                  <div className="app__config-help">Seconds per full loop. Lower is faster, higher is slower.</div>
+                </div>
                 <label className="app__config-row">
                   <span>Clock format</span>
                   <select

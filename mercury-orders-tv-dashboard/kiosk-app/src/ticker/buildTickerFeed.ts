@@ -31,6 +31,7 @@ export function buildTickerItems(input: {
   newOrders: {
     windowMinutes: number;
     count: number;
+    previousCount: number;
   };
 }): TickerModuleItem[] {
   const items: TickerModuleItem[] = [];

@@ -30,6 +30,14 @@ body {
   overflow: hidden;
 }
 
+.app--dashboard {
+  grid-template-rows: auto 1fr;
+}
+
+.app--dashboard.app--with-error {
+  grid-template-rows: auto auto 1fr;
+}
+
 .app__ticker {
   position: fixed;
   left: 0;
@@ -42,6 +50,8 @@ body {
   color: #fff;
   border-top: 1px solid #202020;
   z-index: 90;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .app__ticker-clock {
@@ -464,7 +474,6 @@ body {
 }
 
 .board-page {
-  grid-row: 4;
   position: relative;
   min-height: 0;
   height: 100%;
