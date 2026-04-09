@@ -9,6 +9,6 @@ export function buildCompletionTickerItem(input: {
   const safePercent = Math.max(0, Math.min(100, Math.round(input.percent)));
   return {
     id: 'completion',
-    text: `Completion ${input.dayLabel}: ${input.completed}/${input.total} complete (${safePercent}%)`,
+    text: `Completion: ${input.completed}/${input.total} complete (${safePercent}%)`,
   };
 }

@@ -5845,8 +5845,30 @@ export default function App() {
       {!isDashboardMode ? (
         <div className="app__rotation">
           <div className="app__rotation-main">
-            <div className="app__rotation-chip">
-              Page 1/1: Alerts + Active Orders
+            <div className="app__rotation-chip" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                className="app__rotation-arrow"
+                title="Previous page"
+                style={{ border: 'none', background: 'none', padding: 0, marginRight: 4, cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
+                tabIndex={0}
+                aria-label="Previous page"
+                disabled
+              >
+                <FontAwesomeIcon icon={faChevronLeft} />
+              </button>
+              <span>Page 1/1: Alerts + Active Orders</span>
+              <button
+                type="button"
+                className="app__rotation-arrow"
+                title="Next page"
+                style={{ border: 'none', background: 'none', padding: 0, marginLeft: 4, cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
+                tabIndex={0}
+                aria-label="Next page"
+                disabled
+              >
+                <FontAwesomeIcon icon={faChevronRight} />
+              </button>
             </div>
             <button
               type="button"
@@ -5857,10 +5879,14 @@ export default function App() {
               <FontAwesomeIcon icon={faGear} /> Config
             </button>
           </div>
-          <div className="app__rotation-meta app__meta">
+          <div className="app__rotation-meta app__meta" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             <span>Total Orders: {totalOrderCount}</span>
             <span>New Orders: {uncreatedTicketCount}</span>
-            <span>Updated: {lastUpdated || '...'}</span>
+            {/* <span>Updated: {lastUpdated || '...'}</span> */}
+            {/* <span className="badge badge--kpi">Completion Rate: {selectedDayOrderTotal ? Math.round((selectedDayOrderCompleted / selectedDayOrderTotal) * 100) : 0}%</span> */}
+            <span className="badge badge--kpi">In Progress: {filteredActiveOrders.length}</span>
+            <span className="badge badge--kpi">Completed: {selectedDayOrderCompleted}</span>
+            <span className="badge badge--kpi">Exceptions: {selectedDayExceptionCount}</span>
           </div>
         </div>
       ) : null}
@@ -6051,22 +6077,24 @@ export default function App() {
                 )}
               </div>
               <footer className="lane__progress">
-                <div className="lane__progress-meta">
-                  <span>Completion ({selectedDayCountLabel})</span>
-                  <span>{selectedDayOrderCompleted}/{selectedDayOrderTotal} ({selectedDayCompletionPercent}%)</span>
-                </div>
-                <div
-                  className="lane__progress-track"
-                  role="progressbar"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={selectedDayCompletionPercent}
-                  aria-label="Selected day order completion"
-                >
-                  <div
-                    className={`lane__progress-fill${selectedDayCompletionIsComplete ? ' lane__progress-fill--complete' : ''}`}
-                    style={{ width: `${selectedDayCompletionPercent}%` }}
-                  />
+                <div className="lane__progress-meta" style={{ marginBottom: 0 }}>
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div
+                      className="lane__progress-track"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={selectedDayCompletionPercent}
+                      aria-label="Selected day order completion"
+                      style={{ flex: 1 }}
+                    >
+                      <div
+                        className={`lane__progress-fill${selectedDayCompletionIsComplete ? ' lane__progress-fill--complete' : ''}`}
+                        style={{ width: `${selectedDayCompletionPercent}%` }}
+                      />
+                    </div>
+                    <span style={{ minWidth: 44, textAlign: 'right', fontSize: '1.08em', fontWeight: 800 }}>{selectedDayCompletionPercent}%</span>
+                  </div>
                 </div>
               </footer>
             </section>

@@ -19,22 +19,21 @@ body {
   background: #d8d8d8;
 }
 
+
 .app {
   height: 100vh;
   min-height: 100vh;
   padding: 16px 16px 74px;
   background: #d8d8d8;
   display: grid;
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: auto 1fr;
   gap: 10px;
   overflow: hidden;
 }
 
-.app--dashboard {
-  grid-template-rows: auto 1fr;
-}
 
-.app--dashboard.app--with-error {
+.app--dashboard.app--with-error,
+.app--with-error {
   grid-template-rows: auto auto 1fr;
 }
 
@@ -479,6 +478,7 @@ body {
   height: 100%;
   overflow: hidden;
   animation: board-page-enter 320ms ease;
+  grid-row: 2 / -1;
 }
 
 .board-page--disabled .lane {
@@ -974,34 +974,36 @@ body {
 .lane__progress {
   border-top: 1px solid #b8c0cb;
   background: #e5eaf1;
-  padding: 8px 10px 10px;
+  padding: 9px 10px 10px;
   display: grid;
-  gap: 6px;
+  gap: 7px;
 }
 
 .lane__progress-meta {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #2a3d59;
+  gap: 7px;
+  font-size: 1.01rem;
+  font-weight: 800;
+  color: #1a2d4a;
+  letter-spacing: 0.01em;
 }
 
 .lane__progress-track {
   width: 100%;
-  height: 10px;
+  height: 18px;
   border-radius: 999px;
   background: #c6cfdb;
   overflow: hidden;
+  box-shadow: 0 2px 8px 0 rgba(44, 60, 90, 0.10);
 }
 
 .lane__progress-fill {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #4b84db 0%, #2f61b1 100%);
-  transition: width 220ms ease;
+  transition: width 220ms cubic-bezier(.4,1.2,.4,1);
 }
 
 .lane__progress-fill--complete {
@@ -1624,4 +1626,19 @@ body {
   .app__ticker-copy {
     font-size: 22px;
   }
+}
+
+/* Ensure KPI badges match .app__meta span style */
+.badge--kpi {
+  font-size: 15px;
+  font-weight: 700;
+  min-height: 28px;
+  border: 1px solid #a8b0bc;
+  border-radius: 999px;
+  background: #e8ebef;
+  padding: 0 10px;
+  text-align: center;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
 }
