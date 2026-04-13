@@ -1,0 +1,18 @@
+{
+  "name": "fax-order-parser",
+  "version": "0.1.0",
+  "description": "OCR-based parser for extracting order data from faxed images (TIF)",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "parse": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "tesseract.js": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.0.0",
+    "typescript": "^5.0.0"
+  }
+}
