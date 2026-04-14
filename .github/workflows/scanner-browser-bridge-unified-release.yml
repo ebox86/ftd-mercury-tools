@@ -1,4 +1,4 @@
-name: Scanner Browser Bridge Unified Release
+name: OPOS Bridge Unified Release
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         type: string
   push:
     tags:
-      - "scanner-browser-bridge-unified-v*"
+      - "opos-bridge-unified-v*"
 
 permissions:
   contents: write
@@ -36,7 +36,7 @@ jobs:
             $version = "${{ inputs.version }}"
           } else {
             $refName = "${{ github.ref_name }}"
-            $prefix = "scanner-browser-bridge-unified-v"
+            $prefix = "opos-bridge-unified-v"
             if (-not $refName.StartsWith($prefix)) {
               throw "Tag must use prefix '$prefix'. Got: $refName"
             }
@@ -47,7 +47,7 @@ jobs:
             throw "Invalid version format: $version"
           }
 
-          $tag = "scanner-browser-bridge-unified-v$version"
+          $tag = "opos-bridge-unified-v$version"
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
           Write-Host "Version=$version"
@@ -61,12 +61,12 @@ jobs:
       - name: Validate PowerShell scripts
         run: |
           $files = @(
-            "scanner-browser-bridge/tools/build-unified-installer.ps1",
-            "scanner-browser-bridge/installer/scripts/install-opos-bridge-unified.ps1",
-            "scanner-browser-bridge/installer/scripts/uninstall-opos-bridge-unified.ps1",
-            "scanner-browser-bridge/service/install-opos-bridge-service.ps1",
-            "scanner-browser-bridge/service/install-opos-bridge-task.ps1",
-            "scanner-browser-bridge/service/migrate-script-bridge-to-service.ps1"
+            "opos-bridge/tools/build-unified-installer.ps1",
+            "opos-bridge/installer/scripts/install-opos-bridge-unified.ps1",
+            "opos-bridge/installer/scripts/uninstall-opos-bridge-unified.ps1",
+            "opos-bridge/service/install-opos-bridge-service.ps1",
+            "opos-bridge/service/install-opos-bridge-task.ps1",
+            "opos-bridge/service/migrate-script-bridge-to-service.ps1"
           )
           foreach ($file in $files) {
             $raw = Get-Content -Raw -Path $file
@@ -76,8 +76,8 @@ jobs:
 
       - name: Verify installer and project files exist
         run: |
-          if (-not (Test-Path "scanner-browser-bridge/installer/FTD.OposBridge.Unified.iss")) { throw "Missing unified installer project." }
-          if (-not (Test-Path "scanner-browser-bridge/service/FTD.OposBridge.Service/FTD.OposBridge.Service.csproj")) { throw "Missing service csproj." }
+          if (-not (Test-Path "opos-bridge/installer/FTD.OposBridge.Unified.iss")) { throw "Missing unified installer project." }
+          if (-not (Test-Path "opos-bridge/service/FTD.OposBridge.Service/FTD.OposBridge.Service.csproj")) { throw "Missing service csproj." }
 
       - name: Install Inno Setup compiler
         run: choco install innosetup --no-progress -y
@@ -85,7 +85,7 @@ jobs:
       - name: Build unified installer
         run: |
           $publisherUrl = "https://github.com/${{ github.repository }}"
-          .\scanner-browser-bridge\tools\build-unified-installer.ps1 `
+          .\opos-bridge\tools\build-unified-installer.ps1 `
             -Version "${{ steps.meta.outputs.version }}" `
             -Publisher "ebox86.com" `
             -PublisherUrl $publisherUrl
@@ -94,7 +94,7 @@ jobs:
         id: hash
         run: |
           $version = "${{ steps.meta.outputs.version }}"
-          $installer = Join-Path $PWD "scanner-browser-bridge\dist\FTD.OposBridge.Unified.Setup.$version.exe"
+          $installer = Join-Path $PWD "opos-bridge\dist\FTD.OposBridge.Unified.Setup.$version.exe"
           if (-not (Test-Path $installer)) {
             throw "Installer not found: $installer"
           }
@@ -120,7 +120,7 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: scanner-browser-bridge-unified-installer-${{ steps.meta.outputs.version }}
+          name: opos-bridge-unified-installer-${{ steps.meta.outputs.version }}
           path: |
             ${{ steps.hash.outputs.installer }}
             ${{ steps.hash.outputs.hash_file }}

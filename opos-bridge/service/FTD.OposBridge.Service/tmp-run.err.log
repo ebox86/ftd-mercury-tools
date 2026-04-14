@@ -1,0 +1,13 @@
+You must install .NET to run this application.
+
+App: C:\Users\Florist\Documents\projects\ftd-mercury-tools\opos-bridge\service\FTD.OposBridge.Service\bin\Debug\net8.0-windows\FTD.OposBridge.Service.exe
+Architecture: x86
+App host version: 8.0.25
+.NET location: Not found
+
+Learn more:
+https://aka.ms/dotnet/app-launch-failed
+
+Download the .NET runtime:
+https://aka.ms/dotnet-core-applaunch?missing_runtime=true&arch=x86&rid=win-x86&os=win10&apphost_version=8.0.25
+Failed to resolve hostfxr.dll [not found]. Error code: 0x80008083

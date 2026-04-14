@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "pi-kiosk-mercury-workflow-bridge",
   "version": "0.1.0",
   "private": true,
@@ -6,5 +6,9 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs"
+  },
+  "dependencies": {
+    "node-thermal-printer": "^4.6.0",
+    "printer": "^0.4.0"
   }
 }

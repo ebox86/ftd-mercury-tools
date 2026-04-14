@@ -1,0 +1,20 @@
+; Star POS Printer Driver Registration
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\OLEforRetail\ServiceOPOS\POSPrinter\Star TSP100 Cutter]
+"CLSID"="{CCB90101-B81E-11D2-AB74-0040054C3719}"
+"DeviceName"="Star TSP100 Cutter"
+"CheckHealthText"="Star TSP100 Cutter"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\StarMicronics\OPOS\POSPrinter\Star TSP100 Cutter]
+"DeviceName"="Star TSP100 Cutter"
+"CreateKey"=dword:00000001
+"LogicalName"="Star TSP100 Cutter"
+"PortName"="USB001"
+"ModelName"="Star TSP100 Cutter"
+"FirmwareRevision"="1.0"
+"InterfaceType"="USB"
+"PowerReporting"=dword:00000001
+"ServiceObjectDescription"="Star POSPrinter Service Object"
+"ServiceObjectVersion"="1.0"
+"DeviceCategory"=dword:00000001
