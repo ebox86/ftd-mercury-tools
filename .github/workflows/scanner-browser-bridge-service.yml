@@ -1,4 +1,4 @@
-name: Scanner Browser Bridge Service CI
+name: OPOS Bridge Service CI
 
 on:
   workflow_dispatch:
@@ -6,8 +6,8 @@ on:
     branches:
       - main
     paths:
-      - "scanner-browser-bridge/service/**"
-      - ".github/workflows/scanner-browser-bridge-service.yml"
+      - "opos-bridge/service/**"
+      - ".github/workflows/opos-bridge-service.yml"
   pull_request:
     paths:
       - "scanner-browser-bridge/service/**"
@@ -25,7 +25,7 @@ jobs:
         shell: pwsh
 
     env:
-      PROJECT: scanner-browser-bridge/service/FTD.OposBridge.Service/FTD.OposBridge.Service.csproj
+      PROJECT: opos-bridge/service/FTD.OposBridge.Service/FTD.OposBridge.Service.csproj
       PUBLISH_DIR: artifacts/service/win-x86-self-contained
       NUGET_DIR: artifacts/service/nuget
       SMOKE_PORT: 17332

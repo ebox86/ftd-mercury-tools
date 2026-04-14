@@ -1,7 +1,86 @@
-﻿import { createServer } from 'node:http';
+﻿// --- Poll for new undelivered orders and print them ---
+let lastPrintedOrderIds = new Set();
+
+async function pollAndPrintNewOrders() {
+  try {
+    const undelivered = await getLiveUndeliveredOrders();
+    const orders = undelivered?.tables?.OrderItems || [];
+    for (const order of orders) {
+      if (!lastPrintedOrderIds.has(order.ID)) {
+        await printOrderReceipt(order);
+        lastPrintedOrderIds.add(order.ID);
+      }
+    }
+    // Keep only recent IDs to avoid memory leak
+    if (lastPrintedOrderIds.size > 200) {
+      lastPrintedOrderIds = new Set(Array.from(lastPrintedOrderIds).slice(-100));
+    }
+  } catch (err) {
+    console.error('Error polling/printing orders:', err);
+  }
+}
+
+// Poll every 10 seconds
+setInterval(pollAndPrintNewOrders, 10000);
+
+import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { ThermalPrinter, printerTypes } = require('node-thermal-printer');
+import bwipjs from 'bwip-js';
+
+// Print a new order receipt with barcode
+async function printOrderReceipt(order) {
+  try {
+    // Generate barcode image as PNG buffer
+    const barcodeBuffer = await bwipjs.toBuffer({
+      bcid: 'code39',
+      text: String(order.ID),
+      scale: 3,
+      height: 10,
+      includetext: true,
+      textxalign: 'center',
+    });
+
+    // Import the printer driver using createRequire for ESM compatibility
+    const printerDriver = require('printer');
+
+    const printer = new ThermalPrinter({
+      type: printerTypes.STAR, // Star Micronics printer
+      interface: process.platform === 'win32' ? 'printer:Star TSP100 Cutter (TSP143)' : '/dev/usb/lp0',
+      driver: printerDriver,
+      options: { encoding: 'GB18030' },
+    });
+
+    printer.alignCenter();
+    printer.println('--- NEW ORDER ---');
+    printer.println(`Order ID: ${order.ID}`);
+    if (order.RECIPIENT_NAME) printer.println(`Recipient: ${order.RECIPIENT_NAME}`);
+    if (order.RECIPIENT_ADDRESS) printer.println(order.RECIPIENT_ADDRESS);
+    if (order.RECIPIENT_CITY) printer.println(order.RECIPIENT_CITY);
+    if (order.RECIPIENT_ZIP) printer.println(order.RECIPIENT_ZIP);
+    printer.newLine();
+    printer.println('Scan barcode below:');
+    printer.newLine();
+    printer.printImageBuffer(barcodeBuffer);
+    printer.cut();
+
+    const isConnected = await printer.isPrinterConnected();
+    if (!isConnected) {
+      console.error('Printer not connected');
+      return false;
+    }
+    await printer.execute();
+    console.log('Order receipt printed');
+    return true;
+  } catch (err) {
+    console.error('Failed to print order receipt:', err);
+    return false;
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -2405,6 +2484,22 @@ async function getLiveTicketSearch(params = {}) {
 }
 
 async function routeJson(req, res, url, pathname) {
+
+    // Test endpoint to print a sample order receipt
+    if (pathname === '/api/workflow/print-test-receipt') {
+      if (req.method === 'POST' || req.method === 'GET') {
+        const testOrder = {
+          ID: 'TEST12345',
+          RECIPIENT_NAME: 'Test Recipient',
+          RECIPIENT_ADDRESS: '123 Test St',
+          RECIPIENT_CITY: 'Testville',
+          RECIPIENT_ZIP: '12345',
+        };
+        const result = await printOrderReceipt(testOrder);
+        return sendJson(res, 200, { success: result });
+      }
+      return sendJson(res, 405, { error: 'Method not allowed' });
+    }
   if (pathname === '/health') {
     return sendJson(res, 200, {
       ok: true,

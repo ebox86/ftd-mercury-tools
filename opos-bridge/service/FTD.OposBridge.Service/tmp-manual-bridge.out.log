@@ -1,0 +1,32 @@
+2026-04-14 14:27:11.783 info: ScannerDriver[0] Created OPOS scanner COM object via ProgID OPOS.Scanner.
+2026-04-14 14:27:11.885 info: Microsoft.Hosting.Lifetime[14] Now listening on: http://127.0.0.1:17331
+2026-04-14 14:27:11.886 info: Microsoft.Hosting.Lifetime[0] Application started. Press Ctrl+C to shut down.
+2026-04-14 14:27:11.886 info: Microsoft.Hosting.Lifetime[0] Hosting environment: Production
+2026-04-14 14:27:11.886 info: Microsoft.Hosting.Lifetime[0] Content root path: C:\FTDTools\OposBridgeUnified\package\payload\service-runtime
+2026-04-14 14:27:12.256 info: ScannerDriver[0] OPOS scanner opened (logicalName=ZEBRA_SCANNER).
+2026-04-14 14:27:12.257 info: FTD.OposBridge.Service.BridgeRuntime[0] Bridge started (version=0.0.26-dev, mode=opos, logicalName=ZEBRA_SCANNER, port=17331, pid=37912).
+2026-04-14 14:27:12.376 info: Microsoft.AspNetCore.Hosting.Diagnostics[1] Request starting HTTP/1.1 GET http://127.0.0.1:17331/health - - -
+2026-04-14 14:27:12.482 info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0] Executing endpoint 'HTTP: GET /health'
+2026-04-14 14:27:12.491 info: Microsoft.AspNetCore.Http.Result.JsonResult[3] Writing value of type '<>f__AnonymousType1`27' as Json.
+2026-04-14 14:27:12.530 info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1] Executed endpoint 'HTTP: GET /health'
+2026-04-14 14:27:12.531 info: Microsoft.AspNetCore.Hosting.Diagnostics[2] Request finished HTTP/1.1 GET http://127.0.0.1:17331/health - 200 - application/json;+charset=utf-8 155.3444ms
+2026-04-14 14:27:12.572 info: Microsoft.AspNetCore.Hosting.Diagnostics[1] Request starting HTTP/1.1 GET http://127.0.0.1:17331/health - - -
+2026-04-14 14:27:12.574 info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0] Executing endpoint 'HTTP: GET /health'
+2026-04-14 14:27:12.575 info: Microsoft.AspNetCore.Http.Result.JsonResult[3] Writing value of type '<>f__AnonymousType1`27' as Json.
+2026-04-14 14:27:12.575 info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1] Executed endpoint 'HTTP: GET /health'
+2026-04-14 14:27:12.575 info: Microsoft.AspNetCore.Hosting.Diagnostics[2] Request finished HTTP/1.1 GET http://127.0.0.1:17331/health - 200 - application/json;+charset=utf-8 2.5572ms
+2026-04-14 14:27:13.487 info: Microsoft.AspNetCore.Hosting.Diagnostics[1] Request starting HTTP/1.1 GET http://127.0.0.1:17331/health - - -
+2026-04-14 14:27:13.488 info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0] Executing endpoint 'HTTP: GET /health'
+2026-04-14 14:27:13.488 info: Microsoft.AspNetCore.Http.Result.JsonResult[3] Writing value of type '<>f__AnonymousType1`27' as Json.
+2026-04-14 14:27:13.488 info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1] Executed endpoint 'HTTP: GET /health'
+2026-04-14 14:27:13.488 info: Microsoft.AspNetCore.Hosting.Diagnostics[2] Request finished HTTP/1.1 GET http://127.0.0.1:17331/health - 200 - application/json;+charset=utf-8 0.5987ms
+2026-04-14 14:27:14.388 info: Microsoft.AspNetCore.Hosting.Diagnostics[1] Request starting HTTP/1.1 GET http://127.0.0.1:17331/health - - -
+2026-04-14 14:27:14.388 info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0] Executing endpoint 'HTTP: GET /health'
+2026-04-14 14:27:14.388 info: Microsoft.AspNetCore.Http.Result.JsonResult[3] Writing value of type '<>f__AnonymousType1`27' as Json.
+2026-04-14 14:27:14.388 info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1] Executed endpoint 'HTTP: GET /health'
+2026-04-14 14:27:14.389 info: Microsoft.AspNetCore.Hosting.Diagnostics[2] Request finished HTTP/1.1 GET http://127.0.0.1:17331/health - 200 - application/json;+charset=utf-8 0.4163ms
+2026-04-14 14:27:14.722 info: Microsoft.AspNetCore.Hosting.Diagnostics[1] Request starting HTTP/1.1 GET http://127.0.0.1:17331/health - - -
+2026-04-14 14:27:14.722 info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0] Executing endpoint 'HTTP: GET /health'
+2026-04-14 14:27:14.722 info: Microsoft.AspNetCore.Http.Result.JsonResult[3] Writing value of type '<>f__AnonymousType1`27' as Json.
+2026-04-14 14:27:14.722 info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1] Executed endpoint 'HTTP: GET /health'
+2026-04-14 14:27:14.722 info: Microsoft.AspNetCore.Hosting.Diagnostics[2] Request finished HTTP/1.1 GET http://127.0.0.1:17331/health - 200 - application/json;+charset=utf-8 0.5439ms

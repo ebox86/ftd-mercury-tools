@@ -8,3 +8,10 @@
 /weather-xoap-shim/artifacts/
 /weather-xoap-shim/dist/
 .env
+node_modules
+rm -r node_modules
+rm package-lock.json
+npm install
+npm install printer --force
+$env:PORT="17345"
+node server.mjs
