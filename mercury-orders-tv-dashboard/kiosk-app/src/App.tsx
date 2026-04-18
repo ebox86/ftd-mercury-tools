@@ -330,8 +330,14 @@ function isCanceledOrder(card: BoardCard): boolean {
   return reason.includes('cancel') || delivery.includes('cancel') || design.includes('cancel');
 }
 
+function isRefundOrder(card: BoardCard): boolean {
+  const recipient = String(card.recipientName || '').trim();
+  if (!recipient) return false;
+  return recipient.toLowerCase().includes('refund of sale');
+}
+
 function isCompletedOrder(card: BoardCard): boolean {
-  return card.stage === 'delivered_or_exception' || isCanceledOrder(card);
+  return card.stage === 'delivered_or_exception' || isCanceledOrder(card) || isRefundOrder(card);
 }
 
 function formatMercuryDateTimeLocal(raw: Date): string {
@@ -799,6 +805,26 @@ function isPickupOrCodOrderType(orderTypeRaw: string): boolean {
   );
 }
 
+function isPickupSaleType(orderTypeRaw: string): boolean {
+  return String(orderTypeRaw || '').trim().toLowerCase() === 'pickup';
+}
+
+function isWireOrderType(orderTypeRaw: string): boolean {
+  return /\bwire\b/i.test(String(orderTypeRaw || ''));
+}
+
+function isLocalOrderType(orderTypeRaw: string): boolean {
+  return /\blocal\b/i.test(String(orderTypeRaw || ''));
+}
+
+function resolvePreferredOrderType(currentTypeRaw: string, incomingTypeRaw: string): string {
+  const currentType = String(currentTypeRaw || '').trim();
+  const incomingType = String(incomingTypeRaw || '').trim();
+  if (isLocalOrderType(incomingType) || isWireOrderType(incomingType)) return incomingType;
+  if (isLocalOrderType(currentType) || isWireOrderType(currentType)) return currentType;
+  return firstNonEmptyText(incomingType, currentType);
+}
+
 function normalizeIdLike(value: string): string {
   return String(value || '').trim().toLowerCase();
 }
@@ -1070,29 +1096,41 @@ function currentLocalDateKey(): string {
 }
 
 function classifyAudioAlertKind(isMarketplace: boolean, deliveryDateRaw: string, todayDateKey: string): AudioAlertKind | null {
-  if (isMarketplace) return 'marketplace';
   const deliveryDateKey = toDateKey(deliveryDateRaw);
+  if (isMarketplace) {
+    return deliveryDateKey && deliveryDateKey === todayDateKey ? 'marketplace' : null;
+  }
   if (deliveryDateKey && deliveryDateKey === todayDateKey) return 'today';
   return null;
 }
 
 function buildAudioAlertKindMap(pending: IntakeTicketCard[], active: BoardCard[], todayDateKey: string): Map<string, AudioAlertKind> {
   const next = new Map<string, AudioAlertKind>();
+  const marketplaceAudioIdentity = (recipientRaw: string, deliveryRaw: string, zipRaw: string): string => {
+    const recipientKey = normalizeText(recipientRaw || '');
+    const deliveryKey = toDateKey(deliveryRaw || '');
+    const zipKey = normalizeIdLike(zipRaw || '');
+    return [recipientKey, deliveryKey, zipKey].filter(Boolean).join('|');
+  };
 
   for (const ticket of pending) {
     const kind = classifyAudioAlertKind(ticket.isMarketplace, ticket.deliveryDate, todayDateKey);
     if (!kind) continue;
-    const key = normalizeIdLike(ticket.id);
+    const key = kind === 'marketplace'
+      ? marketplaceAudioIdentity(ticket.recipientName || ticket.summary, ticket.deliveryDate, ticket.destinationZip)
+      : normalizeIdLike(ticket.id);
     if (!key) continue;
-    next.set(`pending:${key}`, kind);
+    next.set(`${kind}:${key}`, kind);
   }
 
   for (const order of active) {
     const kind = classifyAudioAlertKind(order.isMarketplace, order.deliveryDate, todayDateKey);
     if (!kind) continue;
-    const key = normalizeIdLike(order.ticketId || order.userReference);
+    const key = kind === 'marketplace'
+      ? marketplaceAudioIdentity(order.recipientName, order.deliveryDate, order.deliveryZip)
+      : normalizeIdLike(order.ticketId || order.userReference);
     if (!key) continue;
-    next.set(`active:${key}`, kind);
+    next.set(`${kind}:${key}`, kind);
   }
 
   return next;
@@ -2128,6 +2166,7 @@ function mergeActiveOrderCard(target: Map<string, BoardCard>, nextCard: BoardCar
   if (nextRank > currentRank || nextHasMoreDetail || nextHasLaterDelivery || nextHasKnownDelivery || nextHasBetterStatus) {
     target.set(nextCard.ticketId, {
       ...nextCard,
+      orderType: resolvePreferredOrderType(existing.orderType, nextCard.orderType),
       // Preserve known recipient/address data when a higher-rank feed omits it.
       recipientName: firstNonEmptyText(nextCard.recipientName, existing.recipientName),
       addressLine: firstNonEmptyText(nextCard.addressLine, existing.addressLine),
@@ -2141,6 +2180,7 @@ function mergeActiveOrderCard(target: Map<string, BoardCard>, nextCard: BoardCar
   // from alternate feeds that do have them.
   const merged = {
     ...existing,
+    orderType: resolvePreferredOrderType(existing.orderType, nextCard.orderType),
     recipientName: firstNonEmptyText(existing.recipientName, nextCard.recipientName),
     addressLine: firstNonEmptyText(existing.addressLine, nextCard.addressLine),
     cityStateZip: firstNonEmptyText(existing.cityStateZip, nextCard.cityStateZip),
@@ -4865,7 +4905,10 @@ export default function App() {
           return true;
         })
         .sort(activeOrderSort);
-      const nextAudioAlertKinds = buildAudioAlertKindMap(pendingWithDistance, reconciledActiveOrders, currentLocalDateKey());
+      const localOnlyActiveOrders = reconciledActiveOrders.filter(card => (
+        isLocalOrderType(card.orderType) && !isWireOrderType(card.orderType)
+      ));
+      const nextAudioAlertKinds = buildAudioAlertKindMap(pendingWithDistance, localOnlyActiveOrders, currentLocalDateKey());
       const nextAudioAlertKeys = new Set(nextAudioAlertKinds.keys());
       if (!audioAlertSnapshotReadyRef.current) {
         alertedItemKeysRef.current = nextAudioAlertKeys;
@@ -4895,7 +4938,7 @@ export default function App() {
           }
         }
       }
-      setAllActiveOrders(reconciledActiveOrders);
+      setAllActiveOrders(localOnlyActiveOrders);
       setPendingTickets(pendingWithDistance);
       setLastUpdated(new Date().toLocaleTimeString());
       hasCompletedInitialPollRef.current = true;
@@ -6050,7 +6093,10 @@ export default function App() {
                   filteredActiveOrders.map(card => {
                     const statusPill = singleStatusPill(card);
                     const footerZip = deriveCardFooterZip(card);
-                    const displayRecipientName = formatDisplayRecipientName(card.recipientName || 'Unknown Recipient');
+                    const pickupSale = isPickupSaleType(card.orderType);
+                    const displayRecipientName = pickupSale
+                      ? 'PICKUP'
+                      : formatDisplayRecipientName(card.recipientName || 'Unknown Recipient');
                     return (
                       <article
                         key={card.ticketId}
@@ -6062,11 +6108,12 @@ export default function App() {
                             <span className={`badge badge--stage badge--state-${statusPill.theme}`}>
                               {statusPill.label}
                             </span>
+                            {pickupSale ? <span className="badge">Pickup</span> : null}
                           </div>
                         </header>
                         <div className="order-card__name">{displayRecipientName}</div>
-                        <div className="order-card__meta">{card.addressLine || 'No street address'}</div>
-                        <div className="order-card__meta">{card.cityStateZip || 'No city/state/zip'}</div>
+                        {pickupSale ? null : <div className="order-card__meta">{card.addressLine || 'No street address'}</div>}
+                        {pickupSale ? null : <div className="order-card__meta">{card.cityStateZip || 'No city/state/zip'}</div>}
                         <footer className="order-card__footer">
                           <span className="order-card__footer-item">{formatDateOnly(card.deliveryDate) || '--'}</span>
                           {footerZip ? <span className="order-card__footer-item">{footerZip}</span> : null}
