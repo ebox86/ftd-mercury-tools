@@ -54,6 +54,7 @@ import { buildTickerItems, buildTickerScrollText } from './ticker/buildTickerFee
 import { normalizeTickerModuleIds, TICKER_MODULE_DEFINITIONS } from './ticker/registry';
 import { normalizeWeatherZip, prefetchWeatherTicker } from './ticker/modules/weather';
 import type { TickerModuleId, WeatherTickerSnapshot } from './ticker/types';
+import appPackage from '../package.json';
 
 type GroupedCards = Record<StatusStage, BoardCard[]>;
 type IntakeKind = 'uncreated' | 'ask' | 'cancel' | 'message';
@@ -127,6 +128,7 @@ interface AskCandidateAttempt {
 type AudioAlertKind = 'marketplace' | 'today';
 type AlertSoundPreset = 'alarm_pulse' | 'classic_ding' | 'bright_beep' | 'custom_upload';
 type ClockFormat = '12h' | '24h';
+type DashboardPageId = 'alerts_active' | 'page2';
 interface DashboardUserConfig {
   pollMs: number;
   flashMs: number;
@@ -146,6 +148,9 @@ interface DashboardUserConfig {
   tickerScrollDurationSec: number;
   tickerWeatherZip: string;
   tickerModules: TickerModuleId[];
+  enabledPageIds: DashboardPageId[];
+  pageAutoRotateEnabled: boolean;
+  pageAutoRotateIntervalSec: number;
 }
 
 const DEFAULT_POLL_MS = 15000;
@@ -157,7 +162,9 @@ const MERCURY_FEED_STAGGER_MS = 500;
 const DEFAULT_MARKETPLACE_DINGS = 3;
 const DEFAULT_TODAY_DINGS = 1;
 const DEFAULT_DING_GAP_MS = 620;
+const DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC = 20;
 const NEW_ORDER_PULSE_WINDOW_MINUTES = 30;
+const APP_VERSION_LABEL = `v${String(appPackage.version || '0.0.0').trim() || '0.0.0'}`;
 const DASHBOARD_MODE_STORAGE_KEY = 'kiosk_dashboard_mode';
 const AUDIO_ALERTS_STORAGE_KEY = 'kiosk_audio_alerts';
 const DASHBOARD_CLIENT_CONFIG_STORAGE_KEY = 'kiosk_dashboard_client_config_v1';
@@ -183,6 +190,9 @@ const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
   tickerScrollDurationSec: 22,
   tickerWeatherZip: '15212',
   tickerModules: normalizeTickerModuleIds(undefined),
+  enabledPageIds: ['alerts_active'],
+  pageAutoRotateEnabled: false,
+  pageAutoRotateIntervalSec: DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC,
 };
 const USD_ORDER_TOTAL_FORMAT = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -976,6 +986,54 @@ function normalizeToggle(value: unknown, fallback: boolean): boolean {
   return fallback;
 }
 
+const DASHBOARD_PAGE_DEFINITIONS: Array<{ id: DashboardPageId; label: string }> = [
+  { id: 'alerts_active', label: 'Alerts + Active Orders' },
+  { id: 'page2', label: 'Page 2 (Scaffold)' },
+];
+
+function normalizeEnabledPageIds(raw: unknown): DashboardPageId[] {
+  const input = Array.isArray(raw) ? raw : [];
+  const allowed = new Set<DashboardPageId>(DASHBOARD_PAGE_DEFINITIONS.map(page => page.id));
+  const next: DashboardPageId[] = [];
+  for (const item of input) {
+    const value = String(item || '').trim() as DashboardPageId;
+    if (!allowed.has(value)) continue;
+    if (next.includes(value)) continue;
+    next.push(value);
+  }
+  return next.length ? next : ['alerts_active'];
+}
+
+function renderPagePreviewSvg(pageId: DashboardPageId) {
+  if (pageId === 'alerts_active') {
+    return (
+      <svg viewBox="0 0 120 56" role="img" aria-label="Alerts and active orders page preview">
+        <rect x="1" y="1" width="118" height="54" rx="6" fill="#f4f8ff" stroke="#9fb3d0" />
+        <rect x="8" y="8" width="50" height="40" rx="4" fill="#fff5df" stroke="#d8b679" />
+        <rect x="13" y="14" width="40" height="5" rx="2" fill="#d68c2b" />
+        <rect x="13" y="23" width="34" height="4" rx="2" fill="#c9a574" />
+        <rect x="13" y="31" width="36" height="4" rx="2" fill="#c9a574" />
+        <rect x="62" y="8" width="50" height="40" rx="4" fill="#edf4ff" stroke="#90a8ca" />
+        <rect x="67" y="14" width="40" height="5" rx="2" fill="#3d6db4" />
+        <rect x="67" y="23" width="36" height="4" rx="2" fill="#7f9fcf" />
+        <rect x="67" y="31" width="38" height="4" rx="2" fill="#7f9fcf" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 120 56" role="img" aria-label="Page 2 scaffold preview">
+      <rect x="1" y="1" width="118" height="54" rx="6" fill="#f6f8fb" stroke="#a9b5c8" />
+      <rect x="14" y="12" width="92" height="32" rx="4" fill="#ffffff" stroke="#bdc9db" strokeDasharray="3 3" />
+      <rect x="26" y="24" width="68" height="6" rx="3" fill="#c8d4e8" />
+    </svg>
+  );
+}
+
+function pageDescription(pageId: DashboardPageId): string {
+  if (pageId === 'alerts_active') return 'Alerts + Active Orders';
+  return 'Scaffold (empty)';
+}
+
 function pickServerConfigFields(raw: Partial<DashboardUserConfig> | null | undefined): Partial<DashboardUserConfig> {
   return {
     pollMs: raw?.pollMs,
@@ -992,6 +1050,9 @@ function pickServerConfigFields(raw: Partial<DashboardUserConfig> | null | undef
     customLogoDataUrl: raw?.customLogoDataUrl,
     tickerWeatherZip: raw?.tickerWeatherZip,
     tickerModules: raw?.tickerModules,
+    enabledPageIds: raw?.enabledPageIds,
+    pageAutoRotateEnabled: raw?.pageAutoRotateEnabled,
+    pageAutoRotateIntervalSec: raw?.pageAutoRotateIntervalSec,
   };
 }
 
@@ -1001,6 +1062,9 @@ function pickClientConfigFields(raw: Partial<DashboardUserConfig> | null | undef
     customSoundDataUrl: raw?.customSoundDataUrl,
     marketplaceSoundPreset: raw?.marketplaceSoundPreset,
     marketplaceCustomSoundDataUrl: raw?.marketplaceCustomSoundDataUrl,
+    enabledPageIds: raw?.enabledPageIds,
+    pageAutoRotateEnabled: raw?.pageAutoRotateEnabled,
+    pageAutoRotateIntervalSec: raw?.pageAutoRotateIntervalSec,
   };
 }
 
@@ -1032,6 +1096,14 @@ function sanitizeDashboardConfig(raw: Partial<DashboardUserConfig> | null | unde
     tickerScrollDurationSec: clampInteger(raw?.tickerScrollDurationSec, 8, 80, DEFAULT_DASHBOARD_CONFIG.tickerScrollDurationSec),
     tickerWeatherZip: normalizeWeatherZip(raw?.tickerWeatherZip),
     tickerModules: normalizeTickerModuleIds(raw?.tickerModules),
+    enabledPageIds: normalizeEnabledPageIds(raw?.enabledPageIds),
+    pageAutoRotateEnabled: normalizeToggle(raw?.pageAutoRotateEnabled, DEFAULT_DASHBOARD_CONFIG.pageAutoRotateEnabled),
+    pageAutoRotateIntervalSec: clampInteger(
+      raw?.pageAutoRotateIntervalSec,
+      5,
+      300,
+      DEFAULT_DASHBOARD_CONFIG.pageAutoRotateIntervalSec,
+    ),
   };
 }
 
@@ -1067,7 +1139,10 @@ function isDashboardConfigEqual(leftRaw: DashboardUserConfig, rightRaw: Dashboar
     && left.clockShowNanoseconds === right.clockShowNanoseconds
     && left.tickerScrollDurationSec === right.tickerScrollDurationSec
     && left.tickerWeatherZip === right.tickerWeatherZip
-    && left.tickerModules.join('|') === right.tickerModules.join('|');
+    && left.tickerModules.join('|') === right.tickerModules.join('|')
+    && left.enabledPageIds.join('|') === right.enabledPageIds.join('|')
+    && left.pageAutoRotateEnabled === right.pageAutoRotateEnabled
+    && left.pageAutoRotateIntervalSec === right.pageAutoRotateIntervalSec;
 }
 
 function initialDashboardConfig(): DashboardUserConfig {
@@ -2377,6 +2452,25 @@ function buildPendingIntakeTickets(
       deliveryDateKey: toDateKey(String(message.DELIVERY_DATE || message.MSG_DATE || '')),
       keys: messageLinkKeySet(message),
     }));
+  const latestInboundEpochByRecipientDateKey = new Map<string, number>();
+  const latestInboundHasTimeByRecipientDateKey = new Map<string, boolean>();
+  for (const message of allMessages) {
+    if (messageDirection(message) === 'out') continue;
+    const recipientNorm = normalizeText(String(message.RECIPIENT_NAME || message.SUMMARY_TEXT || ''));
+    const deliveryDateKey = toDateKey(String(message.DELIVERY_DATE || message.MSG_DATE || ''));
+    if (!recipientNorm || !deliveryDateKey) continue;
+    const epoch = toEpoch(String(message.MSG_DATE || ''));
+    if (!epoch) continue;
+    const key = `${recipientNorm}|${deliveryDateKey}`;
+    const hasTimePrecision = hasExplicitTimeComponent(String(message.MSG_DATE || ''));
+    const existing = latestInboundEpochByRecipientDateKey.get(key) || 0;
+    if (epoch > existing) {
+      latestInboundEpochByRecipientDateKey.set(key, epoch);
+      latestInboundHasTimeByRecipientDateKey.set(key, hasTimePrecision);
+    } else if (epoch === existing && hasTimePrecision) {
+      latestInboundHasTimeByRecipientDateKey.set(key, true);
+    }
+  }
   const latestAskEpochByThreadKey = new Map<string, number>();
   const latestAskHasTimeByThreadKey = new Map<string, boolean>();
   // Dedupe ASK threads only within the current intake scope.
@@ -2815,11 +2909,30 @@ function buildPendingIntakeTickets(
       }
     }
 
-    const staleReferenceRaw = msgDateRaw || deliveryDateRaw;
-    const staleEpoch = ask ? effectiveAskEpoch : toEpoch(staleReferenceRaw);
-    const staleHasTimePrecision = ask ? effectiveAskHasTimePrecision : hasExplicitTimeComponent(staleReferenceRaw);
+    // Stale tagging reflects message age (MSG_DATE), not order delivery age.
+    const staleReferenceRaw = msgDateRaw;
+    const staleEpoch = ask ? (effectiveAskEpoch || toEpoch(msgDateRaw)) : toEpoch(msgDateRaw);
+    const staleHasTimePrecision = ask
+      ? (effectiveAskHasTimePrecision || hasExplicitTimeComponent(msgDateRaw))
+      : hasExplicitTimeComponent(msgDateRaw);
     const coarseAskDateEpoch = deliveryDateSortEpoch(staleReferenceRaw);
-    const staleByPreciseTime = staleHasTimePrecision && staleEpoch > 0 && (now - staleEpoch >= askStaleMs);
+    const recipientDateKey = askRecipientNorm && askDeliveryDateKey
+      ? `${askRecipientNorm}|${askDeliveryDateKey}`
+      : '';
+    const latestInboundEpochForRecipientDate = recipientDateKey
+      ? (latestInboundEpochByRecipientDateKey.get(recipientDateKey) || 0)
+      : 0;
+    const latestInboundHasTimeForRecipientDate = recipientDateKey
+      ? Boolean(latestInboundHasTimeByRecipientDateKey.get(recipientDateKey))
+      : false;
+    const effectiveStaleEpoch = latestInboundEpochForRecipientDate > staleEpoch
+      ? latestInboundEpochForRecipientDate
+      : staleEpoch;
+    const effectiveStaleHasTimePrecision = latestInboundEpochForRecipientDate > staleEpoch
+      ? latestInboundHasTimeForRecipientDate
+      : staleHasTimePrecision;
+
+    const staleByPreciseTime = effectiveStaleHasTimePrecision && effectiveStaleEpoch > 0 && (now - effectiveStaleEpoch >= askStaleMs);
     const staleByCoarseDate = !staleHasTimePrecision && coarseAskDateEpoch > 0 && (now - coarseAskDateEpoch >= (2 * 24 * 60 * 60 * 1000));
     const staleEligibility = ask ? !askAnswered : true;
     const isStaleAsk = allowStaleAskBadge && staleEligibility && (staleByPreciseTime || staleByCoarseDate);
@@ -2953,6 +3066,7 @@ export default function App() {
   const [isAudioAlertsEnabled, setIsAudioAlertsEnabled] = useState<boolean>(() => initialAudioAlertsEnabled());
   const [isDashboardMode, setIsDashboardMode] = useState<boolean>(() => initialDashboardMode());
   const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [currentPageId, setCurrentPageId] = useState<DashboardPageId>('alerts_active');
   const [config, setConfig] = useState<DashboardUserConfig>(() => initialDashboardConfig());
   const [configDraft, setConfigDraft] = useState<DashboardUserConfig | null>(null);
   const [configWeatherZipDraft, setConfigWeatherZipDraft] = useState<string>(() => DEFAULT_DASHBOARD_CONFIG.tickerWeatherZip);
@@ -2983,6 +3097,18 @@ export default function App() {
   const alertedItemKeysRef = useRef<Set<string>>(new Set());
   const alertPlaybackQueueRef = useRef<Promise<void>>(Promise.resolve());
   const askDebugEnabled = useMemo(() => isAskDebugEnabledFromBrowser(), []);
+  const enabledPages = useMemo(() => {
+    const ids = normalizeEnabledPageIds(config.enabledPageIds);
+    const allowed = new Set(ids);
+    const pages = DASHBOARD_PAGE_DEFINITIONS.filter(page => allowed.has(page.id));
+    return pages.length ? pages : [DASHBOARD_PAGE_DEFINITIONS[0]];
+  }, [config.enabledPageIds]);
+  const currentPageIndex = useMemo(
+    () => Math.max(0, enabledPages.findIndex(page => page.id === currentPageId)),
+    [currentPageId, enabledPages],
+  );
+  const activePage = enabledPages[currentPageIndex] || enabledPages[0];
+  const hasMultiplePages = enabledPages.length > 1;
   const editingConfig = useMemo(
     () => sanitizeDashboardConfig({
       ...(configDraft || config),
@@ -3217,6 +3343,18 @@ export default function App() {
     setConfigDraft(previous => {
       const base = sanitizeDashboardConfig(previous || config);
       return sanitizeDashboardConfig({ ...base, [key]: Number.isFinite(value) ? value : base[key] });
+    });
+  }, [config]);
+  const toggleEnabledPageInDraft = useCallback((pageId: DashboardPageId, enabled: boolean) => {
+    setConfigDraft(previous => {
+      const base = sanitizeDashboardConfig(previous || config);
+      const nextEnabled = enabled
+        ? Array.from(new Set([...base.enabledPageIds, pageId]))
+        : base.enabledPageIds.filter(id => id !== pageId);
+      return sanitizeDashboardConfig({
+        ...base,
+        enabledPageIds: nextEnabled,
+      });
     });
   }, [config]);
   const resetConfigDefaults = useCallback(() => {
@@ -5023,7 +5161,8 @@ export default function App() {
           }
         }
       }
-      setAllActiveOrders(localOnlyActiveOrders);
+      // Progress/counting should use all selected-day orders, including non-local order types.
+      setAllActiveOrders(reconciledActiveOrders);
       setPendingTickets(pendingWithDistance);
       setLastUpdated(new Date().toLocaleTimeString());
       hasCompletedInitialPollRef.current = true;
@@ -5184,6 +5323,41 @@ export default function App() {
       window.clearInterval(timer);
     };
   }, [config.tickerModules, config.tickerWeatherZip]);
+
+  useEffect(() => {
+    if (!enabledPages.some(page => page.id === currentPageId)) {
+      setCurrentPageId(enabledPages[0]?.id || 'alerts_active');
+    }
+  }, [currentPageId, enabledPages]);
+
+  useEffect(() => {
+    if (!config.pageAutoRotateEnabled) return;
+    if (!hasMultiplePages) return;
+    if (isConfigOpen) return;
+
+    const intervalMs = clampInteger(
+      config.pageAutoRotateIntervalSec * 1000,
+      5000,
+      300000,
+      DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC * 1000,
+    );
+    const timer = window.setInterval(() => {
+      setCurrentPageId(previous => {
+        const currentIndex = enabledPages.findIndex(page => page.id === previous);
+        const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+        const nextIndex = (safeIndex + 1) % enabledPages.length;
+        return enabledPages[nextIndex].id;
+      });
+    }, intervalMs);
+
+    return () => window.clearInterval(timer);
+  }, [
+    config.pageAutoRotateEnabled,
+    config.pageAutoRotateIntervalSec,
+    enabledPages,
+    hasMultiplePages,
+    isConfigOpen,
+  ]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -5452,8 +5626,38 @@ export default function App() {
     }
   }, [isDashboardMode]);
 
+  const goToPreviousPage = useCallback(() => {
+    if (!hasMultiplePages) return;
+    setCurrentPageId(previous => {
+      const currentIndex = enabledPages.findIndex(page => page.id === previous);
+      const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex = (safeIndex - 1 + enabledPages.length) % enabledPages.length;
+      return enabledPages[nextIndex].id;
+    });
+  }, [enabledPages, hasMultiplePages]);
+
+  const goToNextPage = useCallback(() => {
+    if (!hasMultiplePages) return;
+    setCurrentPageId(previous => {
+      const currentIndex = enabledPages.findIndex(page => page.id === previous);
+      const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex = (safeIndex + 1) % enabledPages.length;
+      return enabledPages[nextIndex].id;
+    });
+  }, [enabledPages, hasMultiplePages]);
+
+  const togglePageAutoRotate = useCallback(() => {
+    setConfig(previous => sanitizeDashboardConfig({
+      ...previous,
+      pageAutoRotateEnabled: !previous.pageAutoRotateEnabled,
+    }));
+  }, []);
+
   return (
     <div className={`app${isDashboardMode ? ' app--dashboard' : ''}${error ? ' app--with-error' : ''}`} ref={appRef}>
+      <div className="app__version-badge" title={`Dashboard version ${APP_VERSION_LABEL}`}>
+        {APP_VERSION_LABEL}
+      </div>
       <header className="app__header">
         <div className="app__title">
           <div className="app__logo-wrap">
@@ -5501,14 +5705,14 @@ export default function App() {
         </div>
         {!isConfigOpen ? (
           <div className="app__controls app__controls--compact">
-              <label className="app__control-check">
-                <input
-                  type="checkbox"
-                  checked={includeNextDay}
-                  onChange={(event) => {
-                    setIncludeNextDay(event.target.checked);
-                  }}
-                />
+              <button
+                type="button"
+                aria-pressed={includeNextDay}
+                className={`app__control-btn app__control-btn--toggle${includeNextDay ? ' app__control-btn--toggle-active' : ''}`}
+                onClick={() => {
+                  setIncludeNextDay(previous => !previous);
+                }}
+              >
                 <span className="app__control-icon" aria-hidden="true">
                   <FontAwesomeIcon icon={faCalendarDay} />
                 </span>
@@ -5516,16 +5720,16 @@ export default function App() {
                   <span className="app__control-line">Include</span>
                   <span className="app__control-line">next day</span>
                 </span>
-              </label>
-              <label className="app__control-check">
-                <input
-                  type="checkbox"
-                  checked={showCompleted}
-                  onChange={(event) => {
-                    requestActiveOrdersRefreshSpinner();
-                    setShowCompleted(event.target.checked);
-                  }}
-                />
+              </button>
+              <button
+                type="button"
+                aria-pressed={showCompleted}
+                className={`app__control-btn app__control-btn--toggle${showCompleted ? ' app__control-btn--toggle-active' : ''}`}
+                onClick={() => {
+                  requestActiveOrdersRefreshSpinner();
+                  setShowCompleted(previous => !previous);
+                }}
+              >
                 <span className="app__control-icon" aria-hidden="true">
                   <FontAwesomeIcon icon={faCircleCheck} />
                 </span>
@@ -5533,19 +5737,21 @@ export default function App() {
                   <span className="app__control-line">Show</span>
                   <span className="app__control-line">completed</span>
                 </span>
-              </label>
-              <label className="app__control-check">
-                <input
-                  type="checkbox"
-                  checked={isAudioAlertsEnabled}
-                  onChange={(event) => {
-                    const nextEnabled = event.target.checked;
-                    setIsAudioAlertsEnabled(nextEnabled);
+              </button>
+              <button
+                type="button"
+                aria-pressed={isAudioAlertsEnabled}
+                className={`app__control-btn app__control-btn--toggle${isAudioAlertsEnabled ? ' app__control-btn--toggle-active' : ''}`}
+                onClick={() => {
+                  setIsAudioAlertsEnabled(previous => {
+                    const nextEnabled = !previous;
                     if (nextEnabled) {
                       void playAlertSound();
                     }
-                  }}
-                />
+                    return nextEnabled;
+                  });
+                }}
+              >
                 <span className="app__control-icon" aria-hidden="true">
                   <FontAwesomeIcon icon={faVolumeHigh} />
                 </span>
@@ -5553,15 +5759,15 @@ export default function App() {
                   <span className="app__control-line">Audio</span>
                   <span className="app__control-line">alerts</span>
                 </span>
-              </label>
-              <label className="app__control-check">
-                <input
-                  type="checkbox"
-                  checked={isAutoScrollEnabled}
-                  onChange={(event) => {
-                    setIsAutoScrollEnabled(event.target.checked);
-                  }}
-                />
+              </button>
+              <button
+                type="button"
+                aria-pressed={isAutoScrollEnabled}
+                className={`app__control-btn app__control-btn--toggle${isAutoScrollEnabled ? ' app__control-btn--toggle-active' : ''}`}
+                onClick={() => {
+                  setIsAutoScrollEnabled(previous => !previous);
+                }}
+              >
                 <span className="app__control-icon" aria-hidden="true">
                   <FontAwesomeIcon icon={faScroll} />
                 </span>
@@ -5569,7 +5775,7 @@ export default function App() {
                   <span className="app__control-line">Auto-scroll</span>
                   <span className="app__control-line">enabled</span>
                 </span>
-              </label>
+              </button>
               <button
                 type="button"
                 className="app__control-btn app__control-btn--primary"
@@ -5699,6 +5905,57 @@ export default function App() {
                     onChange={(event) => updateConfigNumber('dingGapMs', event.target.value)}
                   />
                 </label>
+                <label className="app__config-row">
+                  <span>Page auto-rotate interval (sec)</span>
+                  <input
+                    type="number"
+                    min={5}
+                    max={300}
+                    value={editingConfig.pageAutoRotateIntervalSec}
+                    onChange={(event) => updateConfigNumber('pageAutoRotateIntervalSec', event.target.value)}
+                  />
+                </label>
+                <label className="app__config-row app__config-toggle-row">
+                  <span>Enable page auto-rotate by default</span>
+                  <input
+                    type="checkbox"
+                    checked={editingConfig.pageAutoRotateEnabled}
+                    onChange={(event) => {
+                      setConfigDraft(previous => sanitizeDashboardConfig({
+                        ...(previous || config),
+                        pageAutoRotateEnabled: event.target.checked,
+                      }));
+                    }}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="app__config-section app__config-section--server">
+              <h3 className="app__config-section-title">Pages</h3>
+              <div className="app__config-grid">
+                <div className="app__config-row app__config-row--full">
+                  <span>Enabled dashboard pages</span>
+                  <div className="app__config-module-list">
+                    {DASHBOARD_PAGE_DEFINITIONS.map((pageDefinition, pageIndex) => {
+                      const isEnabled = editingConfig.enabledPageIds.includes(pageDefinition.id);
+                      return (
+                        <label key={pageDefinition.id} className="app__config-module-card app__config-module-card--page">
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={(event) => toggleEnabledPageInDraft(pageDefinition.id, event.target.checked)}
+                          />
+                          <span className="app__config-module-copy">
+                            <strong>{`Page ${pageIndex + 1}`}</strong>
+                            <span>{pageDescription(pageDefinition.id)}</span>
+                          </span>
+                          <span className="app__config-page-preview" aria-hidden="true">{renderPagePreviewSvg(pageDefinition.id)}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -5978,26 +6235,37 @@ export default function App() {
                 type="button"
                 className="app__rotation-arrow"
                 title="Previous page"
-                style={{ border: 'none', background: 'none', padding: 0, marginRight: 4, cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
-                tabIndex={0}
+                style={{ border: 'none', background: 'none', padding: 0, marginRight: 4, cursor: hasMultiplePages ? 'pointer' : 'default', fontSize: 16, lineHeight: 1 }}
                 aria-label="Previous page"
-                disabled
+                onClick={goToPreviousPage}
+                disabled={!hasMultiplePages}
               >
                 <FontAwesomeIcon icon={faChevronLeft} />
               </button>
-              <span>Page 1/1: Alerts + Active Orders</span>
+              <span>{`Page ${currentPageIndex + 1}/${enabledPages.length}: ${activePage?.label || 'Page'}`}</span>
               <button
                 type="button"
                 className="app__rotation-arrow"
                 title="Next page"
-                style={{ border: 'none', background: 'none', padding: 0, marginLeft: 4, cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
-                tabIndex={0}
+                style={{ border: 'none', background: 'none', padding: 0, marginLeft: 4, cursor: hasMultiplePages ? 'pointer' : 'default', fontSize: 16, lineHeight: 1 }}
                 aria-label="Next page"
-                disabled
+                onClick={goToNextPage}
+                disabled={!hasMultiplePages}
               >
                 <FontAwesomeIcon icon={faChevronRight} />
               </button>
             </div>
+            <button
+              type="button"
+              className={`app__control-btn app__control-btn--toggle${config.pageAutoRotateEnabled ? ' app__control-btn--toggle-active' : ''}`}
+              onClick={togglePageAutoRotate}
+              title="Toggle auto page rotation"
+              aria-pressed={config.pageAutoRotateEnabled}
+              disabled={!hasMultiplePages}
+            >
+              <FontAwesomeIcon icon={faScroll} />
+              {config.pageAutoRotateEnabled ? 'Auto Rotate: On' : 'Auto Rotate: Off'}
+            </button>
             <button
               type="button"
               className="app__control-btn"
@@ -6026,6 +6294,7 @@ export default function App() {
             <span className="board-loading-overlay__label">Loading board...</span>
           </div>
         ) : null}
+        {activePage?.id === 'alerts_active' ? (
         <div className="board-lanes board-lanes--two">
             <section className="lane lane--critical">
               <header className="lane__header">
@@ -6231,6 +6500,12 @@ export default function App() {
               </footer>
             </section>
           </div>
+        ) : (
+          <div className="board-page__placeholder">
+            <div className="board-page__placeholder-title">Page 2</div>
+            <div className="board-page__placeholder-copy">Scaffold page ready for future modules.</div>
+          </div>
+        )}
       </main>
         </>
       ) : null}
