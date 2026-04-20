@@ -672,6 +672,16 @@ function normalizedOrderAmount(row: unknown): string {
   return formatOrderAmount(preferred);
 }
 
+function amountToCents(raw: string): number | null {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  const numericText = text.replace(/[^0-9.-]/g, '');
+  if (!numericText || numericText === '-' || numericText === '.' || numericText === '-.') return null;
+  const numericValue = Number(numericText);
+  if (!Number.isFinite(numericValue)) return null;
+  return Math.round(numericValue * 100);
+}
+
 function compactTownZipLabel(cityStateZipRaw: string, zipRaw: string): string {
   const cityStateZip = String(cityStateZipRaw || '').trim();
   const zip = extractUsZip5(zipRaw || cityStateZip);
@@ -1540,7 +1550,7 @@ function hasExplicitTimeComponent(raw: string): boolean {
   return /\b\d{1,2}:\d{2}(?::\d{2})?\b/.test(text) || /\b\d{1,2}\s*(am|pm)\b/i.test(text);
 }
 
-function askThreadKeySet(message: MessageItem, recipientNorm = '', deliveryDateKey = ''): Set<string> {
+function askThreadKeySet(message: MessageItem, recipientNorm = '', deliveryDateKey = '', amountNorm = ''): Set<string> {
   const keys = new Set<string>();
   const rawKeys = [
     String(message.TICKET_NUM || ''),
@@ -1562,7 +1572,11 @@ function askThreadKeySet(message: MessageItem, recipientNorm = '', deliveryDateK
   }
 
   if (recipientNorm && deliveryDateKey) {
-    keys.add(normalizeIdLike(`${recipientNorm}|${deliveryDateKey}`));
+    if (amountNorm) {
+      keys.add(normalizeIdLike(`${recipientNorm}|${deliveryDateKey}|${amountNorm}`));
+    } else {
+      keys.add(normalizeIdLike(`${recipientNorm}|${deliveryDateKey}`));
+    }
   }
 
   return keys;
@@ -1919,7 +1933,7 @@ function mergeMessageFields(primary: MessageItem, secondary: MessageItem): Messa
 function messageMergeKey(message: MessageItem): string {
   const explicitId = String(message.ID || '').trim();
   if (explicitId) return explicitId;
-  return `${normalizeText(String(message.RECIPIENT_NAME || message.SUMMARY_TEXT || ''))}|${String(message.MSG_DATE || '')}|${messageTypeText(message)}`;
+  return `${normalizeText(String(message.RECIPIENT_NAME || message.SUMMARY_TEXT || ''))}|${String(message.MSG_DATE || '')}|${messageTypeText(message)}|${normalizedOrderAmount(message)}`;
 }
 
 function formatCityStateZip(city: string, state: string, zip: string): string {
@@ -2228,6 +2242,7 @@ function buildPendingIntakeTickets(
     statusLabel: string;
     destinationLabel: string;
     orderAmount: string;
+    orderAmountCents: number | null;
     deliveryEpoch: number;
     deliveryDateKey: string;
     recipientNorm: string;
@@ -2243,6 +2258,7 @@ function buildPendingIntakeTickets(
 
   const orderByKey = new Map<string, LinkedOrderInfo[]>();
   const orderByNameDate = new Map<string, LinkedOrderInfo[]>();
+  const orderByNameDateAmount = new Map<string, LinkedOrderInfo[]>();
   const orderByToken = new Map<string, LinkedOrderInfo[]>();
   const allOrderInfos: LinkedOrderInfo[] = [];
 
@@ -2264,6 +2280,18 @@ function buildPendingIntakeTickets(
     const list = orderByNameDate.get(nameDateKey);
     if (!list) {
       orderByNameDate.set(nameDateKey, [orderInfo]);
+      return;
+    }
+    if (!list.some(existing => existing.ticketId === orderInfo.ticketId)) {
+      list.push(orderInfo);
+    }
+  }
+
+  function indexNameDateAmountKey(nameDateAmountKey: string, orderInfo: LinkedOrderInfo): void {
+    if (!nameDateAmountKey) return;
+    const list = orderByNameDateAmount.get(nameDateAmountKey);
+    if (!list) {
+      orderByNameDateAmount.set(nameDateAmountKey, [orderInfo]);
       return;
     }
     if (!list.some(existing => existing.ticketId === orderInfo.ticketId)) {
@@ -2303,6 +2331,7 @@ function buildPendingIntakeTickets(
       statusLabel: String(order.STAGE_LABEL || '').trim(),
       destinationLabel,
       orderAmount: String(order.ORDER_AMOUNT || '').trim(),
+      orderAmountCents: amountToCents(String(order.ORDER_AMOUNT || '').trim()),
       deliveryEpoch: toEpoch(deliveryRaw),
       deliveryDateKey,
       recipientNorm,
@@ -2321,6 +2350,9 @@ function buildPendingIntakeTickets(
 
     if (recipientNorm && deliveryDateKey) {
       indexNameDateKey(`${recipientNorm}|${deliveryDateKey}`, info);
+      if (info.orderAmount) {
+        indexNameDateAmountKey(`${recipientNorm}|${deliveryDateKey}|${info.orderAmount}`, info);
+      }
     }
     for (const token of recipientTokens) {
       indexToken(token, info);
@@ -2361,7 +2393,8 @@ function buildPendingIntakeTickets(
     if (!askEpoch) continue;
     const askRecipientNorm = normalizeText(recipient || summary);
     const askDeliveryDateKey = toDateKey(deliveryDateRaw || msgDateRaw);
-    const threadKeys = askThreadKeySet(message, askRecipientNorm, askDeliveryDateKey);
+    const askAmountNorm = normalizedOrderAmount(message);
+    const threadKeys = askThreadKeySet(message, askRecipientNorm, askDeliveryDateKey, askAmountNorm);
     const hasTimePrecision = hasExplicitTimeComponent(msgDateRaw);
     for (const key of threadKeys) {
       if (!key) continue;
@@ -2380,6 +2413,7 @@ function buildPendingIntakeTickets(
     recipientNorm: string,
     recipientTokens: string[],
     referenceEpoch: number,
+    messageAmountCents: number | null,
     baseScore: number,
   ): { info: LinkedOrderInfo; score: number; deltaDays: number } | null {
     if (!candidates.length) return null;
@@ -2387,9 +2421,19 @@ function buildPendingIntakeTickets(
       const recipientScore = recipientSimilarityScore(recipientNorm, recipientTokens, info.recipientNorm, info.recipientTokens);
       const dateScore = dateSimilarityScore(referenceEpoch, info.deliveryEpoch);
       const orderIdScore = info.orderNumber ? 18 : -36;
+      let amountScore = 0;
+      if (messageAmountCents !== null && info.orderAmountCents !== null) {
+        const deltaCents = Math.abs(messageAmountCents - info.orderAmountCents);
+        if (deltaCents === 0) amountScore = 24;
+        else if (deltaCents <= 100) amountScore = 10;
+        else if (deltaCents <= 500) amountScore = -8;
+        else amountScore = -20;
+      } else if (messageAmountCents !== null && info.orderAmountCents === null) {
+        amountScore = -8;
+      }
       return {
         info,
-        score: baseScore + orderIdScore + recipientScore + dateScore.score,
+        score: baseScore + orderIdScore + recipientScore + dateScore.score + amountScore,
         deltaDays: dateScore.deltaDays,
       };
     });
@@ -2417,6 +2461,7 @@ function buildPendingIntakeTickets(
     const recipientTokens = tokenizeRecipient(`${recipient} ${summary}`);
     const referenceEpoch = toEpoch(deliveryDateRaw || msgDateRaw);
     const referenceDateKey = toDateKey(deliveryDateRaw || msgDateRaw);
+    const messageAmountCents = amountToCents(normalizedOrderAmount(message));
 
     let bestFromIds: { info: LinkedOrderInfo; score: number; strategy: string; deltaDays: number } | null = null;
 
@@ -2435,7 +2480,7 @@ function buildPendingIntakeTickets(
         continue;
       }
 
-      const best = selectBestCandidate(byKey, recipientNorm, recipientTokens, referenceEpoch, candidate.rank);
+      const best = selectBestCandidate(byKey, recipientNorm, recipientTokens, referenceEpoch, messageAmountCents, candidate.rank);
       if (!best) {
         attempts.push({
           candidate: candidate.value,
@@ -2530,7 +2575,15 @@ function buildPendingIntakeTickets(
 
       fallbackScored.push({
         info: candidate,
-        score: base + recipientScore + dateScore.score + (candidate.orderNumber ? 14 : -24),
+        score: base
+          + recipientScore
+          + dateScore.score
+          + (candidate.orderNumber ? 14 : -24)
+          + (
+            messageAmountCents !== null && candidate.orderAmountCents !== null
+              ? (Math.abs(messageAmountCents - candidate.orderAmountCents) === 0 ? 24 : -12)
+              : 0
+          ),
         strategy,
         deltaDays: dateScore.deltaDays,
       });
@@ -2594,6 +2647,8 @@ function buildPendingIntakeTickets(
     const msgType = messageTypeText(message);
     const messageType = classifyIncomingMessageType(message);
     const notes = String(message.MSG_NOTES || '').trim();
+    const messageAmount = normalizedOrderAmount(message);
+    const messageAmountCents = amountToCents(messageAmount);
     const ask = messageType.key === 'ask';
     const isCancel = messageType.key === 'cancel';
     const requiresAttention = String(message.REQUIRES_ATTENTION || '').trim() === '1';
@@ -2631,8 +2686,37 @@ function buildPendingIntakeTickets(
         const nameNorm = normalizeText(recipient || summary);
         const deliveryKey = toDateKey(deliveryDateRaw || msgDateRaw);
         if (nameNorm && deliveryKey) {
+          if (messageAmount) {
+            const byNameDateAmount = orderByNameDateAmount.get(`${nameNorm}|${deliveryKey}|${messageAmount}`) || [];
+            linkedOrder = byNameDateAmount.find(entry => Boolean(entry.orderNumber)) || byNameDateAmount[0] || null;
+          }
+        }
+      }
+
+      if (!linkedOrder) {
+        const nameNorm = normalizeText(recipient || summary);
+        const deliveryKey = toDateKey(deliveryDateRaw || msgDateRaw);
+        if (nameNorm && deliveryKey) {
           const byNameDate = orderByNameDate.get(`${nameNorm}|${deliveryKey}`) || [];
-          linkedOrder = byNameDate.find(entry => Boolean(entry.orderNumber)) || byNameDate[0] || null;
+          if (byNameDate.length <= 1) {
+            linkedOrder = byNameDate.find(entry => Boolean(entry.orderNumber)) || byNameDate[0] || null;
+          } else if (messageAmountCents !== null) {
+            const amountSorted = byNameDate
+              .filter(entry => entry.orderAmountCents !== null)
+              .map(entry => ({
+                entry,
+                deltaCents: Math.abs(messageAmountCents - (entry.orderAmountCents as number)),
+              }))
+              .sort((a, b) => {
+                if (a.deltaCents !== b.deltaCents) return a.deltaCents - b.deltaCents;
+                if (a.entry.orderNumber !== b.entry.orderNumber) return (b.entry.orderNumber ? 1 : 0) - (a.entry.orderNumber ? 1 : 0);
+                return a.entry.ticketId.localeCompare(b.entry.ticketId);
+              });
+            const winner = amountSorted[0];
+            if (winner && winner.deltaCents <= 100) {
+              linkedOrder = winner.entry;
+            }
+          }
         }
       }
     }
@@ -2695,7 +2779,8 @@ function buildPendingIntakeTickets(
     const askHasTimePrecision = hasExplicitTimeComponent(msgDateRaw);
     const askRecipientNorm = normalizeText(recipient || summary);
     const askDeliveryDateKey = toDateKey(deliveryDateRaw || msgDateRaw);
-    const askThreadKeys = ask ? askThreadKeySet(message, askRecipientNorm, askDeliveryDateKey) : new Set<string>();
+    const askThreadAmountNorm = ask ? normalizedOrderAmount(message) : '';
+    const askThreadKeys = ask ? askThreadKeySet(message, askRecipientNorm, askDeliveryDateKey, askThreadAmountNorm) : new Set<string>();
     let effectiveAskEpoch = askEpoch;
     let effectiveAskHasTimePrecision = askHasTimePrecision;
     if (ask) {
@@ -2782,7 +2867,7 @@ function buildPendingIntakeTickets(
     );
     const orderAmount = firstNonEmptyText(
       resolvedLinkedOrder?.orderAmount || '',
-      normalizedOrderAmount(message),
+      messageAmount,
     );
 
     pending.push({
