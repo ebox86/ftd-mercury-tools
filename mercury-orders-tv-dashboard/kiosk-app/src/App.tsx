@@ -2309,6 +2309,7 @@ function buildPendingIntakeTickets(
   options?: {
     flashMs?: number;
     askStaleMs?: number;
+    activeOrderLookupKeys?: Set<string>;
   },
 ): IntakeTicketCard[] {
   interface LinkedOrderInfo {
@@ -2442,6 +2443,7 @@ function buildPendingIntakeTickets(
     72 * 60 * 60 * 1000,
     DEFAULT_ASK_STALE_HOURS * 60 * 60 * 1000,
   );
+  const activeOrderLookupKeys = options?.activeOrderLookupKeys || new Set<string>();
   const firstObservation = seenTicketIds.size === 0;
   const pending: IntakeTicketCard[] = [];
   const outboundMessages = allMessages
@@ -2841,7 +2843,11 @@ function buildPendingIntakeTickets(
       || messageType.key === 'con'
       || (messageType.key === 'other' && messageType.label !== 'ORD')
       || messageType.key === 'unknown';
-    if (resolvedLinkedOrder && !shouldKeepLinkedCard) {
+    const linkedOrderVisibleInActive = Boolean(resolvedLinkedOrder) && (
+      activeOrderLookupKeys.has(normalizeIdLike(resolvedLinkedOrder?.ticketId || ''))
+      || activeOrderLookupKeys.has(normalizeIdLike(resolvedLinkedOrder?.orderNumber || ''))
+    );
+    if (resolvedLinkedOrder && linkedOrderVisibleInActive && !shouldKeepLinkedCard) {
       continue;
     }
 
@@ -4984,6 +4990,15 @@ export default function App() {
       }
 
       const orderReferencePool = Array.from(referenceById.values());
+      const activeOrderLookupKeys = new Set<string>();
+      for (const card of activeByTicket.values()) {
+        const ticketKey = normalizeIdLike(card.ticketId);
+        const userRefKey = normalizeIdLike(card.userReference);
+        const userRefHeadKey = normalizeIdLike(String(card.userReference || '').split('/')[0] || '');
+        if (ticketKey) activeOrderLookupKeys.add(ticketKey);
+        if (userRefKey) activeOrderLookupKeys.add(userRefKey);
+        if (userRefHeadKey) activeOrderLookupKeys.add(userRefHeadKey);
+      }
 
       const pending = buildPendingIntakeTickets(
         displayMessageRows,
@@ -4995,6 +5010,7 @@ export default function App() {
         {
           flashMs: config.flashMs,
           askStaleMs,
+          activeOrderLookupKeys,
         },
       );
       const pendingWithStatus = pending.map(ticket => {
