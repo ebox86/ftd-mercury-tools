@@ -1,0 +1,173 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  background: #f0f2f5;
+  color: #222;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Header ── */
+.header {
+  background: #1a3a5c;
+  color: #fff;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.header-title { font-size: 15px; font-weight: 600; letter-spacing: .3px; }
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.badge-running  { background: #2ecc71; color: #fff; }
+.badge-stopped  { background: #e74c3c; color: #fff; }
+.badge-unknown  { background: #95a5a6; color: #fff; }
+
+/* ── Tab bar ── */
+.tab-bar {
+  display: flex;
+  background: #e4e8ed;
+  border-bottom: 2px solid #c9cdd3;
+  flex-shrink: 0;
+}
+.tab-btn {
+  flex: 1;
+  padding: 9px 16px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  color: #555;
+  font-weight: 500;
+  transition: background .15s, color .15s;
+}
+.tab-btn:hover { background: #d5dae0; }
+.tab-btn.active { background: #fff; color: #1a3a5c; border-bottom: 2px solid #1a3a5c; font-weight: 600; }
+
+/* ── Tab panels ── */
+.tab-panel {
+  display: none;
+  padding: 18px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+.tab-panel.active { display: block; }
+
+/* ── Form groups ── */
+.form-group { margin-bottom: 16px; }
+.form-group label {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 500;
+  color: #333;
+  font-size: 13px;
+}
+.form-group input, .form-group select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #c0c5cc;
+  border-radius: 4px;
+  font-size: 14px;
+  background: #fff;
+  color: #222;
+  transition: border-color .15s;
+}
+.form-group input:focus, .form-group select:focus {
+  outline: none;
+  border-color: #1a3a5c;
+  box-shadow: 0 0 0 2px rgba(26,58,92,.15);
+}
+.hint { font-size: 12px; color: #777; margin-top: 4px; }
+
+.row { display: flex; gap: 6px; align-items: center; }
+.row input { flex: 1; }
+
+details summary { cursor: pointer; color: #1a3a5c; font-size: 12px; user-select: none; }
+details summary:hover { text-decoration: underline; }
+
+/* ── Log tab ── */
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.log-count { font-size: 12px; color: #666; }
+
+.table-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 220px);
+  border: 1px solid #d0d5db;
+  border-radius: 4px;
+  background: #fff;
+}
+#log-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+#log-table thead { background: #1a3a5c; color: #fff; position: sticky; top: 0; }
+#log-table th { padding: 7px 10px; text-align: left; font-weight: 600; }
+#log-table td { padding: 6px 10px; border-bottom: 1px solid #eef0f3; }
+#log-table tr:nth-child(even) td { background: #f8f9fa; }
+#log-table tr:hover td { background: #eef4fb; }
+.empty-row { text-align: center; color: #aaa; padding: 20px !important; }
+.email-ok  { color: #27ae60; font-weight: 600; }
+.email-err { color: #e74c3c; font-weight: 600; }
+
+/* ── Footer ── */
+.footer {
+  background: #fff;
+  border-top: 1px solid #d0d5db;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.svc-controls { display: flex; gap: 8px; }
+
+button {
+  padding: 7px 16px;
+  border: 1px solid #c0c5cc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  background: #f0f2f5;
+  color: #333;
+  transition: background .15s;
+}
+button:hover { background: #e0e4e8; }
+.btn-primary {
+  background: #1a3a5c;
+  color: #fff;
+  border-color: #1a3a5c;
+  font-weight: 600;
+}
+.btn-primary:hover { background: #143050; }
+.btn-small { padding: 5px 10px; font-size: 12px; }
+
+/* ── Toast ── */
+.toast {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #333;
+  color: #fff;
+  padding: 8px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  z-index: 999;
+  transition: opacity .3s;
+}
+.toast.hidden { display: none; }
+.toast.error { background: #c0392b; }

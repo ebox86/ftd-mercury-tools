@@ -1,0 +1,35 @@
+{
+  "name": "fax-parser-config",
+  "version": "0.2.0",
+  "description": "Configuration UI for FTD Fax Order Parser",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
+  },
+  "build": {
+    "appId": "com.ftd.fax-parser-config",
+    "productName": "FTD Fax Parser Config",
+    "win": {
+      "target": "dir",
+      "icon": "assets/fax-parser.ico"
+    },
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "renderer/**/*",
+      "assets/**/*"
+    ]
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "typescript": "^5.0.0"
+  }
+}

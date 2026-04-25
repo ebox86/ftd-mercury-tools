@@ -1,0 +1,23 @@
+{
+  "name": "fax-order-parser",
+  "version": "0.2.0",
+  "description": "OCR-based parser for extracting order data from faxed images (TIF/PDF) with WOI email dispatch",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "parse": "ts-node src/index.ts",
+    "service": "ts-node src/service.ts"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "mupdf": "^1.3.0",
+    "nodemailer": "^6.9.0",
+    "tesseract.js": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/nodemailer": "^6.4.0",
+    "ts-node": "^10.0.0",
+    "typescript": "^5.0.0"
+  }
+}

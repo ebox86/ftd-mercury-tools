@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <title>FTD Fax Order Parser — Configuration</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div class="header">
+    <span class="header-title">FTD Fax Order Parser</span>
+    <span id="service-badge" class="badge badge-unknown">Service: checking…</span>
+  </div>
+
+  <!-- Tab bar -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="monitor">Monitor</button>
+    <button class="tab-btn"        data-tab="email">Email</button>
+    <button class="tab-btn"        data-tab="log">Order Log</button>
+  </div>
+
+  <!-- ── Monitor tab ── -->
+  <div id="tab-monitor" class="tab-panel active">
+    <div class="form-group">
+      <label for="watchFolder">Incoming Fax Folder</label>
+      <div class="row">
+        <input type="text" id="watchFolder" />
+        <button id="btn-open-folder" class="btn-small" title="Open folder in Explorer">📂</button>
+      </div>
+      <p class="hint">Files placed in this folder will be scanned automatically.</p>
+    </div>
+
+    <div class="form-group">
+      <label for="pollInterval">Poll Interval (seconds)</label>
+      <input type="number" id="pollInterval" min="1" max="3600" style="width:100px" />
+    </div>
+
+    <div class="form-group">
+      <label for="fileFormat">Incoming File Format</label>
+      <select id="fileFormat">
+        <option value="PDF">PDF</option>
+        <option value="TIF">TIF / TIFF</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="processedSubfolder">Processed Subfolder Name</label>
+      <input type="text" id="processedSubfolder" style="width:220px" />
+      <p class="hint">Processed files are moved to this subfolder inside the watch folder.</p>
+    </div>
+  </div>
+
+  <!-- ── Email tab ── -->
+  <div id="tab-email" class="tab-panel">
+    <div class="form-group">
+      <label for="senderAddress">Sender Email Address</label>
+      <input type="email" id="senderAddress" />
+    </div>
+
+    <div class="form-group">
+      <label for="senderPassword">Sender Password / App Password</label>
+      <input type="password" id="senderPassword" autocomplete="current-password" />
+      <p class="hint">For Gmail, use an <em>App Password</em> (2-step verification required).</p>
+    </div>
+
+    <div class="form-group">
+      <label for="recipientAddress">Recipient Email Address (WOI inbox)</label>
+      <input type="email" id="recipientAddress" />
+    </div>
+
+    <div class="form-group">
+      <label for="subjectLine">Email Subject Line</label>
+      <input type="text" id="subjectLine" />
+      <p class="hint">Must match the subject configured in Mercury Administration → WOI.</p>
+    </div>
+
+    <details>
+      <summary>Advanced SMTP Settings</summary>
+      <div class="form-group" style="margin-top:10px">
+        <label for="smtpHost">SMTP Host</label>
+        <input type="text" id="smtpHost" />
+      </div>
+      <div class="form-group">
+        <label for="smtpPort">SMTP Port</label>
+        <input type="number" id="smtpPort" min="1" max="65535" style="width:100px" />
+      </div>
+    </details>
+  </div>
+
+  <!-- ── Log tab ── -->
+  <div id="tab-log" class="tab-panel">
+    <div class="log-toolbar">
+      <button id="btn-refresh-log" class="btn-small">↺ Refresh</button>
+      <span id="log-count" class="log-count"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="log-table">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>File</th>
+            <th>Order #</th>
+            <th>Customer</th>
+            <th>Delivery</th>
+            <th>Email</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody id="log-body">
+          <tr><td colspan="7" class="empty-row">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Footer buttons -->
+  <div class="footer">
+    <div class="svc-controls">
+      <button id="btn-svc-start">▶ Start Service</button>
+      <button id="btn-svc-stop">■ Stop Service</button>
+    </div>
+    <div>
+      <button id="btn-save" class="btn-primary">Save Settings</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="renderer.js" defer></script>
+</body>
+</html>

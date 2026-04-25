@@ -8,6 +8,11 @@
 /weather-xoap-shim/artifacts/
 /weather-xoap-shim/dist/
 .env
+node_modules/
+artifacts/
+dist/
+bin/
+obj/
 dist/
 dist-*/FTD.Mercury.Dashboard.ServiceHost.*
 dist-*/FTD.OposBridge.Service.*

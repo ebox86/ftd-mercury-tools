@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+.env
+.DS_Store
+coverage/
+*.test.js
+*.spec.js
+.idea/
+.vscode/
+*.bak
+*.tmp
+*.swp
+test/
