@@ -107,7 +107,7 @@ export function formatWoiEmail(fields: FaxOrderFields): string {
     `Bill Fax Area Code: `,
     `Bill Fax Prefix: `,
     `Bill Fax Number: `,
-    `Recipient Name: ${recipient.name || fields.customerName ?? ''}`,
+    `Recipient Name: ${recipient.name || (fields.customerName ?? '')}`,`
     `Recipient Address1: ${recipient.address1}`,
     `Recipient Address2: ${recipient.address2}`,
     `Recipient City: ${recipient.city}`,
