@@ -8,3 +8,8 @@
 /weather-xoap-shim/artifacts/
 /weather-xoap-shim/dist/
 .env
+node_modules/
+artifacts/
+dist/
+bin/
+obj/

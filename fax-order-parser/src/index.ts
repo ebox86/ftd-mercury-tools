@@ -1,4 +1,5 @@
 import { createWorker } from 'tesseract.js';
+import * as fs from 'fs';
 import * as path from 'path';
 
 export interface FaxOrderFields {
@@ -24,7 +25,7 @@ export interface FaxOrderFields {
 }
 
 // Regex-based parser for extracting fields from OCR text
-function parseOrderFields(ocrText: string): FaxOrderFields {
+export function parseOrderFields(ocrText: string): FaxOrderFields {
   const getMatch = (regex: RegExp) => {
     const m = ocrText.match(regex);
     return m ? m[1].trim() : undefined;
@@ -120,6 +121,55 @@ function parseOrderFields(ocrText: string): FaxOrderFields {
   };
 }
 
+/** Convert a PDF file into per-page PNG Buffers using mupdf (WASM, no native deps). */
+export async function pdfToImageBuffers(pdfPath: string): Promise<Buffer[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mupdf = await import('mupdf') as any;
+  const data: Buffer = fs.readFileSync(pdfPath);
+  const doc = mupdf.Document.openDocument(data, 'application/pdf');
+  const pageCount: number = doc.countPages();
+  const buffers: Buffer[] = [];
+
+  for (let i = 0; i < pageCount; i++) {
+    const page = doc.loadPage(i);
+    // Scale 2× for better OCR resolution
+    const matrix = [2, 0, 0, 2, 0, 0];
+    const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false, true);
+    buffers.push(Buffer.from(pixmap.asPNG() as Uint8Array));
+    pixmap.destroy();
+    page.destroy();
+  }
+
+  doc.destroy();
+  return buffers;
+}
+
+/**
+ * Run OCR on a TIFF or PDF file and return the extracted text.
+ * For PDF files, all pages are concatenated with a blank line separator.
+ */
+export async function runOcr(filePath: string): Promise<string> {
+  const ext = path.extname(filePath).toLowerCase();
+  const worker = await createWorker('eng');
+
+  try {
+    if (ext === '.pdf') {
+      const imageBuffers = await pdfToImageBuffers(filePath);
+      const textParts: string[] = [];
+      for (const buf of imageBuffers) {
+        const { data: { text } } = await worker.recognize(buf);
+        textParts.push(text);
+      }
+      return textParts.join('\n\n');
+    } else {
+      const { data: { text } } = await worker.recognize(filePath);
+      return text;
+    }
+  } finally {
+    await worker.terminate();
+  }
+}
+
 async function main() {
   const imagePath = process.argv[2];
   if (!imagePath) {
@@ -127,20 +177,20 @@ async function main() {
     process.exit(1);
   }
 
-  const worker = await createWorker('eng');
   console.log(`Running OCR on: ${imagePath}`);
-  const { data: { text } } = await worker.recognize(imagePath);
-  await worker.terminate();
+  const text = await runOcr(imagePath);
 
   console.log('--- OCR Output ---');
   console.log(text);
 
   const fields = parseOrderFields(text);
-  console.log('\n--- Parsed Fields (stub) ---');
+  console.log('\n--- Parsed Fields ---');
   console.log(fields);
 }
 
-main().catch(err => {
-  console.error('Error:', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(err => {
+    console.error('Error:', err);
+    process.exit(1);
+  });
+}
