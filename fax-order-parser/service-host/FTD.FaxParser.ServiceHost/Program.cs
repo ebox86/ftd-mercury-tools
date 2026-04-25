@@ -1,7 +1,7 @@
 using FTD.FaxParser.ServiceHost;
 using Microsoft.Extensions.Hosting.WindowsServices;
 
-var options = HostOptions.FromArgs(args);
+var options = FTD.FaxParser.ServiceHost.HostOptions.FromArgs(args);
 
 // Handle service management commands (install / uninstall / start / stop / status)
 var exitCode = await ServiceCommandHandler.TryHandleAsync(options, CancellationToken.None);
