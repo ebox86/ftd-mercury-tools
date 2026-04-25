@@ -571,7 +571,15 @@ internal sealed class MainForm : Form
         UseShellExecute        = false,
         CreateNoWindow         = true,
       })!;
+      var stdout = proc.StandardOutput.ReadToEnd();
+      var stderr = proc.StandardError.ReadToEnd();
       proc.WaitForExit(15_000);
+
+      if (proc.ExitCode != 0)
+      {
+        var detail = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
+        SetFooterStatus($"sc {command} failed (code {proc.ExitCode}): {detail.Trim()}", isError: true);
+      }
     }
     catch (Exception ex)
     {
@@ -580,7 +588,6 @@ internal sealed class MainForm : Form
     }
     finally
     {
-      // Brief wait for Windows to settle before querying state
       System.Threading.Thread.Sleep(800);
       RefreshServiceStatus();
     }

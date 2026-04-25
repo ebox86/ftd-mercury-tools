@@ -9,5 +9,6 @@
     <RootNamespace>FTD.FaxParser.ConfigApp</RootNamespace>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 </Project>
