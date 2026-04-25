@@ -92,9 +92,11 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
   Flags: runhidden waituntilterminated
 
 ; Offer to open the config app immediately after install
+; shellexec flag required: FaxParserConfig.exe has requireAdministrator manifest;
+; ShellExecuteEx handles UAC correctly whereas CreateProcess cannot de-elevate to it.
 Filename: "{app}\config-app\FaxParserConfig.exe"; \
   Description: "Open Fax Order Parser Configuration now"; \
-  Flags: nowait postinstall skipifsilent
+  Flags: nowait postinstall skipifsilent shellexec
 
 [UninstallRun]
 ; Stop and remove the Windows service before files are deleted
