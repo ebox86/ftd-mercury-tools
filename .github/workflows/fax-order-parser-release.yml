@@ -79,7 +79,7 @@ jobs:
           }
 
       - name: Install Inno Setup compiler
-        run: choco install innosetup --no-progress -y
+        run: choco upgrade innosetup --no-progress -y
 
       - name: Download bundled Node.js runtime
         id: tooling

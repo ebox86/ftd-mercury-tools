@@ -59,8 +59,10 @@ Copy-Item -Path (Join-Path $NodeRuntimeDir "*") -Destination $stageRuntime -Recu
 
 Write-Host "Building Node.js service (TypeScript)..."
 Push-Location $projectRoot
-npm ci
+npm install
+if ($LASTEXITCODE -ne 0) { Pop-Location; throw "npm install failed (exit code $LASTEXITCODE)." }
 npm run build
+if ($LASTEXITCODE -ne 0) { Pop-Location; throw "TypeScript build failed (exit code $LASTEXITCODE)." }
 Pop-Location
 
 # Copy compiled service.js and its runtime dependencies
