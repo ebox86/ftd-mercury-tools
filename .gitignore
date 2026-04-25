@@ -13,3 +13,11 @@ artifacts/
 dist/
 bin/
 obj/
+dist/
+dist-*/FTD.Mercury.Dashboard.ServiceHost.*
+dist-*/FTD.OposBridge.Service.*
+dist-*/FTD.OposBridge.Unified.*
+artifacts/
+node_modules/
+opos-bridge/dist/
+opos-bridge/service/

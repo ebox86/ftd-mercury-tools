@@ -31,6 +31,23 @@ body {
   overflow: hidden;
 }
 
+.app__version-badge {
+  position: fixed;
+  right: 8px;
+  top: 8px;
+  z-index: 120;
+  font-size: 10px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.68);
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  padding: 2px 4px;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  user-select: none;
+}
+
 
 .app--dashboard.app--with-error,
 .app--with-error {
@@ -360,6 +377,24 @@ body {
   color: #fff;
 }
 
+.app__control-btn--toggle {
+  border-color: #a8b0bc;
+  background: #edf1f6;
+  color: #14253d;
+}
+
+.app__control-btn--toggle:hover {
+  border-color: #7c8796;
+  background: #e5ebf3;
+}
+
+.app__control-btn--toggle-active {
+  border-color: #1f3d64;
+  background: #e1e9f7;
+  color: #112945;
+  box-shadow: inset 0 0 0 1px rgba(31, 61, 100, 0.2);
+}
+
 .app__control-btn:hover {
   filter: brightness(0.98);
 }
@@ -459,6 +494,14 @@ body {
   color: #3a4658;
 }
 
+.app__rotation-arrow {
+  color: inherit;
+}
+
+.app__rotation-arrow:disabled {
+  opacity: 0.4;
+}
+
 .app__error {
   padding: 8px 10px;
   border: 1px solid #ef4444;
@@ -479,6 +522,30 @@ body {
   overflow: hidden;
   animation: board-page-enter 320ms ease;
   grid-row: 2 / -1;
+}
+
+.board-page__placeholder {
+  height: 100%;
+  border: 1px dashed #9eaac0;
+  border-radius: 12px;
+  background: #eff4fb;
+  color: #1b3150;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.board-page__placeholder-title {
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.board-page__placeholder-copy {
+  font-size: 14px;
+  opacity: 0.84;
 }
 
 .board-page--disabled .lane {
@@ -757,6 +824,11 @@ body {
   width: 100%;
 }
 
+.app__config-module-card--page {
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+}
+
 .app__config-module-card input {
   margin: 2px 0 0;
   align-self: flex-start;
@@ -768,6 +840,23 @@ body {
   gap: 2px;
   text-align: left;
   justify-items: start;
+}
+
+.app__config-page-preview {
+  width: 120px;
+  height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.app__config-page-preview svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .app__config-toggle-row {

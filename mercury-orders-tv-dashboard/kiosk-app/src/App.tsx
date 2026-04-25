@@ -54,6 +54,7 @@ import { buildTickerItems, buildTickerScrollText } from './ticker/buildTickerFee
 import { normalizeTickerModuleIds, TICKER_MODULE_DEFINITIONS } from './ticker/registry';
 import { normalizeWeatherZip, prefetchWeatherTicker } from './ticker/modules/weather';
 import type { TickerModuleId, WeatherTickerSnapshot } from './ticker/types';
+import appPackage from '../package.json';
 
 type GroupedCards = Record<StatusStage, BoardCard[]>;
 type IntakeKind = 'uncreated' | 'ask' | 'cancel' | 'message';
@@ -127,6 +128,7 @@ interface AskCandidateAttempt {
 type AudioAlertKind = 'marketplace' | 'today';
 type AlertSoundPreset = 'alarm_pulse' | 'classic_ding' | 'bright_beep' | 'custom_upload';
 type ClockFormat = '12h' | '24h';
+type DashboardPageId = 'alerts_active' | 'page2';
 interface DashboardUserConfig {
   pollMs: number;
   flashMs: number;
@@ -146,6 +148,9 @@ interface DashboardUserConfig {
   tickerScrollDurationSec: number;
   tickerWeatherZip: string;
   tickerModules: TickerModuleId[];
+  enabledPageIds: DashboardPageId[];
+  pageAutoRotateEnabled: boolean;
+  pageAutoRotateIntervalSec: number;
 }
 
 const DEFAULT_POLL_MS = 15000;
@@ -157,7 +162,9 @@ const MERCURY_FEED_STAGGER_MS = 500;
 const DEFAULT_MARKETPLACE_DINGS = 3;
 const DEFAULT_TODAY_DINGS = 1;
 const DEFAULT_DING_GAP_MS = 620;
+const DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC = 20;
 const NEW_ORDER_PULSE_WINDOW_MINUTES = 30;
+const APP_VERSION_LABEL = `v${String(appPackage.version || '0.0.0').trim() || '0.0.0'}`;
 const DASHBOARD_MODE_STORAGE_KEY = 'kiosk_dashboard_mode';
 const AUDIO_ALERTS_STORAGE_KEY = 'kiosk_audio_alerts';
 const DASHBOARD_CLIENT_CONFIG_STORAGE_KEY = 'kiosk_dashboard_client_config_v1';
@@ -183,6 +190,9 @@ const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
   tickerScrollDurationSec: 22,
   tickerWeatherZip: '15212',
   tickerModules: normalizeTickerModuleIds(undefined),
+  enabledPageIds: ['alerts_active'],
+  pageAutoRotateEnabled: false,
+  pageAutoRotateIntervalSec: DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC,
 };
 const USD_ORDER_TOTAL_FORMAT = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -330,8 +340,14 @@ function isCanceledOrder(card: BoardCard): boolean {
   return reason.includes('cancel') || delivery.includes('cancel') || design.includes('cancel');
 }
 
+function isRefundOrder(card: BoardCard): boolean {
+  const recipient = String(card.recipientName || '').trim();
+  if (!recipient) return false;
+  return recipient.toLowerCase().includes('refund of sale');
+}
+
 function isCompletedOrder(card: BoardCard): boolean {
-  return card.stage === 'delivered_or_exception' || isCanceledOrder(card);
+  return card.stage === 'delivered_or_exception' || isCanceledOrder(card) || isRefundOrder(card);
 }
 
 function formatMercuryDateTimeLocal(raw: Date): string {
@@ -666,6 +682,16 @@ function normalizedOrderAmount(row: unknown): string {
   return formatOrderAmount(preferred);
 }
 
+function amountToCents(raw: string): number | null {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  const numericText = text.replace(/[^0-9.-]/g, '');
+  if (!numericText || numericText === '-' || numericText === '.' || numericText === '-.') return null;
+  const numericValue = Number(numericText);
+  if (!Number.isFinite(numericValue)) return null;
+  return Math.round(numericValue * 100);
+}
+
 function compactTownZipLabel(cityStateZipRaw: string, zipRaw: string): string {
   const cityStateZip = String(cityStateZipRaw || '').trim();
   const zip = extractUsZip5(zipRaw || cityStateZip);
@@ -797,6 +823,26 @@ function isPickupOrCodOrderType(orderTypeRaw: string): boolean {
     hasPickupKeyword(orderType)
     || orderType.toLowerCase().includes('cod')
   );
+}
+
+function isPickupSaleType(orderTypeRaw: string): boolean {
+  return String(orderTypeRaw || '').trim().toLowerCase() === 'pickup';
+}
+
+function isWireOrderType(orderTypeRaw: string): boolean {
+  return /\bwire\b/i.test(String(orderTypeRaw || ''));
+}
+
+function isLocalOrderType(orderTypeRaw: string): boolean {
+  return /\blocal\b/i.test(String(orderTypeRaw || ''));
+}
+
+function resolvePreferredOrderType(currentTypeRaw: string, incomingTypeRaw: string): string {
+  const currentType = String(currentTypeRaw || '').trim();
+  const incomingType = String(incomingTypeRaw || '').trim();
+  if (isLocalOrderType(incomingType) || isWireOrderType(incomingType)) return incomingType;
+  if (isLocalOrderType(currentType) || isWireOrderType(currentType)) return currentType;
+  return firstNonEmptyText(incomingType, currentType);
 }
 
 function normalizeIdLike(value: string): string {
@@ -940,6 +986,54 @@ function normalizeToggle(value: unknown, fallback: boolean): boolean {
   return fallback;
 }
 
+const DASHBOARD_PAGE_DEFINITIONS: Array<{ id: DashboardPageId; label: string }> = [
+  { id: 'alerts_active', label: 'Alerts + Active Orders' },
+  { id: 'page2', label: 'Page 2 (Scaffold)' },
+];
+
+function normalizeEnabledPageIds(raw: unknown): DashboardPageId[] {
+  const input = Array.isArray(raw) ? raw : [];
+  const allowed = new Set<DashboardPageId>(DASHBOARD_PAGE_DEFINITIONS.map(page => page.id));
+  const next: DashboardPageId[] = [];
+  for (const item of input) {
+    const value = String(item || '').trim() as DashboardPageId;
+    if (!allowed.has(value)) continue;
+    if (next.includes(value)) continue;
+    next.push(value);
+  }
+  return next.length ? next : ['alerts_active'];
+}
+
+function renderPagePreviewSvg(pageId: DashboardPageId) {
+  if (pageId === 'alerts_active') {
+    return (
+      <svg viewBox="0 0 120 56" role="img" aria-label="Alerts and active orders page preview">
+        <rect x="1" y="1" width="118" height="54" rx="6" fill="#f4f8ff" stroke="#9fb3d0" />
+        <rect x="8" y="8" width="50" height="40" rx="4" fill="#fff5df" stroke="#d8b679" />
+        <rect x="13" y="14" width="40" height="5" rx="2" fill="#d68c2b" />
+        <rect x="13" y="23" width="34" height="4" rx="2" fill="#c9a574" />
+        <rect x="13" y="31" width="36" height="4" rx="2" fill="#c9a574" />
+        <rect x="62" y="8" width="50" height="40" rx="4" fill="#edf4ff" stroke="#90a8ca" />
+        <rect x="67" y="14" width="40" height="5" rx="2" fill="#3d6db4" />
+        <rect x="67" y="23" width="36" height="4" rx="2" fill="#7f9fcf" />
+        <rect x="67" y="31" width="38" height="4" rx="2" fill="#7f9fcf" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 120 56" role="img" aria-label="Page 2 scaffold preview">
+      <rect x="1" y="1" width="118" height="54" rx="6" fill="#f6f8fb" stroke="#a9b5c8" />
+      <rect x="14" y="12" width="92" height="32" rx="4" fill="#ffffff" stroke="#bdc9db" strokeDasharray="3 3" />
+      <rect x="26" y="24" width="68" height="6" rx="3" fill="#c8d4e8" />
+    </svg>
+  );
+}
+
+function pageDescription(pageId: DashboardPageId): string {
+  if (pageId === 'alerts_active') return 'Alerts + Active Orders';
+  return 'Scaffold (empty)';
+}
+
 function pickServerConfigFields(raw: Partial<DashboardUserConfig> | null | undefined): Partial<DashboardUserConfig> {
   return {
     pollMs: raw?.pollMs,
@@ -956,6 +1050,9 @@ function pickServerConfigFields(raw: Partial<DashboardUserConfig> | null | undef
     customLogoDataUrl: raw?.customLogoDataUrl,
     tickerWeatherZip: raw?.tickerWeatherZip,
     tickerModules: raw?.tickerModules,
+    enabledPageIds: raw?.enabledPageIds,
+    pageAutoRotateEnabled: raw?.pageAutoRotateEnabled,
+    pageAutoRotateIntervalSec: raw?.pageAutoRotateIntervalSec,
   };
 }
 
@@ -965,6 +1062,9 @@ function pickClientConfigFields(raw: Partial<DashboardUserConfig> | null | undef
     customSoundDataUrl: raw?.customSoundDataUrl,
     marketplaceSoundPreset: raw?.marketplaceSoundPreset,
     marketplaceCustomSoundDataUrl: raw?.marketplaceCustomSoundDataUrl,
+    enabledPageIds: raw?.enabledPageIds,
+    pageAutoRotateEnabled: raw?.pageAutoRotateEnabled,
+    pageAutoRotateIntervalSec: raw?.pageAutoRotateIntervalSec,
   };
 }
 
@@ -996,6 +1096,14 @@ function sanitizeDashboardConfig(raw: Partial<DashboardUserConfig> | null | unde
     tickerScrollDurationSec: clampInteger(raw?.tickerScrollDurationSec, 8, 80, DEFAULT_DASHBOARD_CONFIG.tickerScrollDurationSec),
     tickerWeatherZip: normalizeWeatherZip(raw?.tickerWeatherZip),
     tickerModules: normalizeTickerModuleIds(raw?.tickerModules),
+    enabledPageIds: normalizeEnabledPageIds(raw?.enabledPageIds),
+    pageAutoRotateEnabled: normalizeToggle(raw?.pageAutoRotateEnabled, DEFAULT_DASHBOARD_CONFIG.pageAutoRotateEnabled),
+    pageAutoRotateIntervalSec: clampInteger(
+      raw?.pageAutoRotateIntervalSec,
+      5,
+      300,
+      DEFAULT_DASHBOARD_CONFIG.pageAutoRotateIntervalSec,
+    ),
   };
 }
 
@@ -1031,7 +1139,10 @@ function isDashboardConfigEqual(leftRaw: DashboardUserConfig, rightRaw: Dashboar
     && left.clockShowNanoseconds === right.clockShowNanoseconds
     && left.tickerScrollDurationSec === right.tickerScrollDurationSec
     && left.tickerWeatherZip === right.tickerWeatherZip
-    && left.tickerModules.join('|') === right.tickerModules.join('|');
+    && left.tickerModules.join('|') === right.tickerModules.join('|')
+    && left.enabledPageIds.join('|') === right.enabledPageIds.join('|')
+    && left.pageAutoRotateEnabled === right.pageAutoRotateEnabled
+    && left.pageAutoRotateIntervalSec === right.pageAutoRotateIntervalSec;
 }
 
 function initialDashboardConfig(): DashboardUserConfig {
@@ -1070,29 +1181,41 @@ function currentLocalDateKey(): string {
 }
 
 function classifyAudioAlertKind(isMarketplace: boolean, deliveryDateRaw: string, todayDateKey: string): AudioAlertKind | null {
-  if (isMarketplace) return 'marketplace';
   const deliveryDateKey = toDateKey(deliveryDateRaw);
+  if (isMarketplace) {
+    return deliveryDateKey && deliveryDateKey === todayDateKey ? 'marketplace' : null;
+  }
   if (deliveryDateKey && deliveryDateKey === todayDateKey) return 'today';
   return null;
 }
 
 function buildAudioAlertKindMap(pending: IntakeTicketCard[], active: BoardCard[], todayDateKey: string): Map<string, AudioAlertKind> {
   const next = new Map<string, AudioAlertKind>();
+  const marketplaceAudioIdentity = (recipientRaw: string, deliveryRaw: string, zipRaw: string): string => {
+    const recipientKey = normalizeText(recipientRaw || '');
+    const deliveryKey = toDateKey(deliveryRaw || '');
+    const zipKey = normalizeIdLike(zipRaw || '');
+    return [recipientKey, deliveryKey, zipKey].filter(Boolean).join('|');
+  };
 
   for (const ticket of pending) {
     const kind = classifyAudioAlertKind(ticket.isMarketplace, ticket.deliveryDate, todayDateKey);
     if (!kind) continue;
-    const key = normalizeIdLike(ticket.id);
+    const key = kind === 'marketplace'
+      ? marketplaceAudioIdentity(ticket.recipientName || ticket.summary, ticket.deliveryDate, ticket.destinationZip)
+      : normalizeIdLike(ticket.id);
     if (!key) continue;
-    next.set(`pending:${key}`, kind);
+    next.set(`${kind}:${key}`, kind);
   }
 
   for (const order of active) {
     const kind = classifyAudioAlertKind(order.isMarketplace, order.deliveryDate, todayDateKey);
     if (!kind) continue;
-    const key = normalizeIdLike(order.ticketId || order.userReference);
+    const key = kind === 'marketplace'
+      ? marketplaceAudioIdentity(order.recipientName, order.deliveryDate, order.deliveryZip)
+      : normalizeIdLike(order.ticketId || order.userReference);
     if (!key) continue;
-    next.set(`active:${key}`, kind);
+    next.set(`${kind}:${key}`, kind);
   }
 
   return next;
@@ -1502,7 +1625,7 @@ function hasExplicitTimeComponent(raw: string): boolean {
   return /\b\d{1,2}:\d{2}(?::\d{2})?\b/.test(text) || /\b\d{1,2}\s*(am|pm)\b/i.test(text);
 }
 
-function askThreadKeySet(message: MessageItem, recipientNorm = '', deliveryDateKey = ''): Set<string> {
+function askThreadKeySet(message: MessageItem, recipientNorm = '', deliveryDateKey = '', amountNorm = ''): Set<string> {
   const keys = new Set<string>();
   const rawKeys = [
     String(message.TICKET_NUM || ''),
@@ -1524,7 +1647,11 @@ function askThreadKeySet(message: MessageItem, recipientNorm = '', deliveryDateK
   }
 
   if (recipientNorm && deliveryDateKey) {
-    keys.add(normalizeIdLike(`${recipientNorm}|${deliveryDateKey}`));
+    if (amountNorm) {
+      keys.add(normalizeIdLike(`${recipientNorm}|${deliveryDateKey}|${amountNorm}`));
+    } else {
+      keys.add(normalizeIdLike(`${recipientNorm}|${deliveryDateKey}`));
+    }
   }
 
   return keys;
@@ -1881,7 +2008,7 @@ function mergeMessageFields(primary: MessageItem, secondary: MessageItem): Messa
 function messageMergeKey(message: MessageItem): string {
   const explicitId = String(message.ID || '').trim();
   if (explicitId) return explicitId;
-  return `${normalizeText(String(message.RECIPIENT_NAME || message.SUMMARY_TEXT || ''))}|${String(message.MSG_DATE || '')}|${messageTypeText(message)}`;
+  return `${normalizeText(String(message.RECIPIENT_NAME || message.SUMMARY_TEXT || ''))}|${String(message.MSG_DATE || '')}|${messageTypeText(message)}|${normalizedOrderAmount(message)}`;
 }
 
 function formatCityStateZip(city: string, state: string, zip: string): string {
@@ -2128,6 +2255,7 @@ function mergeActiveOrderCard(target: Map<string, BoardCard>, nextCard: BoardCar
   if (nextRank > currentRank || nextHasMoreDetail || nextHasLaterDelivery || nextHasKnownDelivery || nextHasBetterStatus) {
     target.set(nextCard.ticketId, {
       ...nextCard,
+      orderType: resolvePreferredOrderType(existing.orderType, nextCard.orderType),
       // Preserve known recipient/address data when a higher-rank feed omits it.
       recipientName: firstNonEmptyText(nextCard.recipientName, existing.recipientName),
       addressLine: firstNonEmptyText(nextCard.addressLine, existing.addressLine),
@@ -2141,6 +2269,7 @@ function mergeActiveOrderCard(target: Map<string, BoardCard>, nextCard: BoardCar
   // from alternate feeds that do have them.
   const merged = {
     ...existing,
+    orderType: resolvePreferredOrderType(existing.orderType, nextCard.orderType),
     recipientName: firstNonEmptyText(existing.recipientName, nextCard.recipientName),
     addressLine: firstNonEmptyText(existing.addressLine, nextCard.addressLine),
     cityStateZip: firstNonEmptyText(existing.cityStateZip, nextCard.cityStateZip),
@@ -2180,6 +2309,7 @@ function buildPendingIntakeTickets(
   options?: {
     flashMs?: number;
     askStaleMs?: number;
+    activeOrderLookupKeys?: Set<string>;
   },
 ): IntakeTicketCard[] {
   interface LinkedOrderInfo {
@@ -2188,6 +2318,7 @@ function buildPendingIntakeTickets(
     statusLabel: string;
     destinationLabel: string;
     orderAmount: string;
+    orderAmountCents: number | null;
     deliveryEpoch: number;
     deliveryDateKey: string;
     recipientNorm: string;
@@ -2203,6 +2334,7 @@ function buildPendingIntakeTickets(
 
   const orderByKey = new Map<string, LinkedOrderInfo[]>();
   const orderByNameDate = new Map<string, LinkedOrderInfo[]>();
+  const orderByNameDateAmount = new Map<string, LinkedOrderInfo[]>();
   const orderByToken = new Map<string, LinkedOrderInfo[]>();
   const allOrderInfos: LinkedOrderInfo[] = [];
 
@@ -2224,6 +2356,18 @@ function buildPendingIntakeTickets(
     const list = orderByNameDate.get(nameDateKey);
     if (!list) {
       orderByNameDate.set(nameDateKey, [orderInfo]);
+      return;
+    }
+    if (!list.some(existing => existing.ticketId === orderInfo.ticketId)) {
+      list.push(orderInfo);
+    }
+  }
+
+  function indexNameDateAmountKey(nameDateAmountKey: string, orderInfo: LinkedOrderInfo): void {
+    if (!nameDateAmountKey) return;
+    const list = orderByNameDateAmount.get(nameDateAmountKey);
+    if (!list) {
+      orderByNameDateAmount.set(nameDateAmountKey, [orderInfo]);
       return;
     }
     if (!list.some(existing => existing.ticketId === orderInfo.ticketId)) {
@@ -2263,6 +2407,7 @@ function buildPendingIntakeTickets(
       statusLabel: String(order.STAGE_LABEL || '').trim(),
       destinationLabel,
       orderAmount: String(order.ORDER_AMOUNT || '').trim(),
+      orderAmountCents: amountToCents(String(order.ORDER_AMOUNT || '').trim()),
       deliveryEpoch: toEpoch(deliveryRaw),
       deliveryDateKey,
       recipientNorm,
@@ -2281,6 +2426,9 @@ function buildPendingIntakeTickets(
 
     if (recipientNorm && deliveryDateKey) {
       indexNameDateKey(`${recipientNorm}|${deliveryDateKey}`, info);
+      if (info.orderAmount) {
+        indexNameDateAmountKey(`${recipientNorm}|${deliveryDateKey}|${info.orderAmount}`, info);
+      }
     }
     for (const token of recipientTokens) {
       indexToken(token, info);
@@ -2295,6 +2443,7 @@ function buildPendingIntakeTickets(
     72 * 60 * 60 * 1000,
     DEFAULT_ASK_STALE_HOURS * 60 * 60 * 1000,
   );
+  const activeOrderLookupKeys = options?.activeOrderLookupKeys || new Set<string>();
   const firstObservation = seenTicketIds.size === 0;
   const pending: IntakeTicketCard[] = [];
   const outboundMessages = allMessages
@@ -2305,6 +2454,25 @@ function buildPendingIntakeTickets(
       deliveryDateKey: toDateKey(String(message.DELIVERY_DATE || message.MSG_DATE || '')),
       keys: messageLinkKeySet(message),
     }));
+  const latestInboundEpochByRecipientDateKey = new Map<string, number>();
+  const latestInboundHasTimeByRecipientDateKey = new Map<string, boolean>();
+  for (const message of allMessages) {
+    if (messageDirection(message) === 'out') continue;
+    const recipientNorm = normalizeText(String(message.RECIPIENT_NAME || message.SUMMARY_TEXT || ''));
+    const deliveryDateKey = toDateKey(String(message.DELIVERY_DATE || message.MSG_DATE || ''));
+    if (!recipientNorm || !deliveryDateKey) continue;
+    const epoch = toEpoch(String(message.MSG_DATE || ''));
+    if (!epoch) continue;
+    const key = `${recipientNorm}|${deliveryDateKey}`;
+    const hasTimePrecision = hasExplicitTimeComponent(String(message.MSG_DATE || ''));
+    const existing = latestInboundEpochByRecipientDateKey.get(key) || 0;
+    if (epoch > existing) {
+      latestInboundEpochByRecipientDateKey.set(key, epoch);
+      latestInboundHasTimeByRecipientDateKey.set(key, hasTimePrecision);
+    } else if (epoch === existing && hasTimePrecision) {
+      latestInboundHasTimeByRecipientDateKey.set(key, true);
+    }
+  }
   const latestAskEpochByThreadKey = new Map<string, number>();
   const latestAskHasTimeByThreadKey = new Map<string, boolean>();
   // Dedupe ASK threads only within the current intake scope.
@@ -2321,7 +2489,8 @@ function buildPendingIntakeTickets(
     if (!askEpoch) continue;
     const askRecipientNorm = normalizeText(recipient || summary);
     const askDeliveryDateKey = toDateKey(deliveryDateRaw || msgDateRaw);
-    const threadKeys = askThreadKeySet(message, askRecipientNorm, askDeliveryDateKey);
+    const askAmountNorm = normalizedOrderAmount(message);
+    const threadKeys = askThreadKeySet(message, askRecipientNorm, askDeliveryDateKey, askAmountNorm);
     const hasTimePrecision = hasExplicitTimeComponent(msgDateRaw);
     for (const key of threadKeys) {
       if (!key) continue;
@@ -2340,6 +2509,7 @@ function buildPendingIntakeTickets(
     recipientNorm: string,
     recipientTokens: string[],
     referenceEpoch: number,
+    messageAmountCents: number | null,
     baseScore: number,
   ): { info: LinkedOrderInfo; score: number; deltaDays: number } | null {
     if (!candidates.length) return null;
@@ -2347,9 +2517,19 @@ function buildPendingIntakeTickets(
       const recipientScore = recipientSimilarityScore(recipientNorm, recipientTokens, info.recipientNorm, info.recipientTokens);
       const dateScore = dateSimilarityScore(referenceEpoch, info.deliveryEpoch);
       const orderIdScore = info.orderNumber ? 18 : -36;
+      let amountScore = 0;
+      if (messageAmountCents !== null && info.orderAmountCents !== null) {
+        const deltaCents = Math.abs(messageAmountCents - info.orderAmountCents);
+        if (deltaCents === 0) amountScore = 24;
+        else if (deltaCents <= 100) amountScore = 10;
+        else if (deltaCents <= 500) amountScore = -8;
+        else amountScore = -20;
+      } else if (messageAmountCents !== null && info.orderAmountCents === null) {
+        amountScore = -8;
+      }
       return {
         info,
-        score: baseScore + orderIdScore + recipientScore + dateScore.score,
+        score: baseScore + orderIdScore + recipientScore + dateScore.score + amountScore,
         deltaDays: dateScore.deltaDays,
       };
     });
@@ -2377,6 +2557,7 @@ function buildPendingIntakeTickets(
     const recipientTokens = tokenizeRecipient(`${recipient} ${summary}`);
     const referenceEpoch = toEpoch(deliveryDateRaw || msgDateRaw);
     const referenceDateKey = toDateKey(deliveryDateRaw || msgDateRaw);
+    const messageAmountCents = amountToCents(normalizedOrderAmount(message));
 
     let bestFromIds: { info: LinkedOrderInfo; score: number; strategy: string; deltaDays: number } | null = null;
 
@@ -2395,7 +2576,7 @@ function buildPendingIntakeTickets(
         continue;
       }
 
-      const best = selectBestCandidate(byKey, recipientNorm, recipientTokens, referenceEpoch, candidate.rank);
+      const best = selectBestCandidate(byKey, recipientNorm, recipientTokens, referenceEpoch, messageAmountCents, candidate.rank);
       if (!best) {
         attempts.push({
           candidate: candidate.value,
@@ -2490,7 +2671,15 @@ function buildPendingIntakeTickets(
 
       fallbackScored.push({
         info: candidate,
-        score: base + recipientScore + dateScore.score + (candidate.orderNumber ? 14 : -24),
+        score: base
+          + recipientScore
+          + dateScore.score
+          + (candidate.orderNumber ? 14 : -24)
+          + (
+            messageAmountCents !== null && candidate.orderAmountCents !== null
+              ? (Math.abs(messageAmountCents - candidate.orderAmountCents) === 0 ? 24 : -12)
+              : 0
+          ),
         strategy,
         deltaDays: dateScore.deltaDays,
       });
@@ -2554,6 +2743,8 @@ function buildPendingIntakeTickets(
     const msgType = messageTypeText(message);
     const messageType = classifyIncomingMessageType(message);
     const notes = String(message.MSG_NOTES || '').trim();
+    const messageAmount = normalizedOrderAmount(message);
+    const messageAmountCents = amountToCents(messageAmount);
     const ask = messageType.key === 'ask';
     const isCancel = messageType.key === 'cancel';
     const requiresAttention = String(message.REQUIRES_ATTENTION || '').trim() === '1';
@@ -2591,8 +2782,37 @@ function buildPendingIntakeTickets(
         const nameNorm = normalizeText(recipient || summary);
         const deliveryKey = toDateKey(deliveryDateRaw || msgDateRaw);
         if (nameNorm && deliveryKey) {
+          if (messageAmount) {
+            const byNameDateAmount = orderByNameDateAmount.get(`${nameNorm}|${deliveryKey}|${messageAmount}`) || [];
+            linkedOrder = byNameDateAmount.find(entry => Boolean(entry.orderNumber)) || byNameDateAmount[0] || null;
+          }
+        }
+      }
+
+      if (!linkedOrder) {
+        const nameNorm = normalizeText(recipient || summary);
+        const deliveryKey = toDateKey(deliveryDateRaw || msgDateRaw);
+        if (nameNorm && deliveryKey) {
           const byNameDate = orderByNameDate.get(`${nameNorm}|${deliveryKey}`) || [];
-          linkedOrder = byNameDate.find(entry => Boolean(entry.orderNumber)) || byNameDate[0] || null;
+          if (byNameDate.length <= 1) {
+            linkedOrder = byNameDate.find(entry => Boolean(entry.orderNumber)) || byNameDate[0] || null;
+          } else if (messageAmountCents !== null) {
+            const amountSorted = byNameDate
+              .filter(entry => entry.orderAmountCents !== null)
+              .map(entry => ({
+                entry,
+                deltaCents: Math.abs(messageAmountCents - (entry.orderAmountCents as number)),
+              }))
+              .sort((a, b) => {
+                if (a.deltaCents !== b.deltaCents) return a.deltaCents - b.deltaCents;
+                if (a.entry.orderNumber !== b.entry.orderNumber) return (b.entry.orderNumber ? 1 : 0) - (a.entry.orderNumber ? 1 : 0);
+                return a.entry.ticketId.localeCompare(b.entry.ticketId);
+              });
+            const winner = amountSorted[0];
+            if (winner && winner.deltaCents <= 100) {
+              linkedOrder = winner.entry;
+            }
+          }
         }
       }
     }
@@ -2623,7 +2843,11 @@ function buildPendingIntakeTickets(
       || messageType.key === 'con'
       || (messageType.key === 'other' && messageType.label !== 'ORD')
       || messageType.key === 'unknown';
-    if (resolvedLinkedOrder && !shouldKeepLinkedCard) {
+    const linkedOrderVisibleInActive = Boolean(resolvedLinkedOrder) && (
+      activeOrderLookupKeys.has(normalizeIdLike(resolvedLinkedOrder?.ticketId || ''))
+      || activeOrderLookupKeys.has(normalizeIdLike(resolvedLinkedOrder?.orderNumber || ''))
+    );
+    if (resolvedLinkedOrder && linkedOrderVisibleInActive && !shouldKeepLinkedCard) {
       continue;
     }
 
@@ -2655,7 +2879,8 @@ function buildPendingIntakeTickets(
     const askHasTimePrecision = hasExplicitTimeComponent(msgDateRaw);
     const askRecipientNorm = normalizeText(recipient || summary);
     const askDeliveryDateKey = toDateKey(deliveryDateRaw || msgDateRaw);
-    const askThreadKeys = ask ? askThreadKeySet(message, askRecipientNorm, askDeliveryDateKey) : new Set<string>();
+    const askThreadAmountNorm = ask ? normalizedOrderAmount(message) : '';
+    const askThreadKeys = ask ? askThreadKeySet(message, askRecipientNorm, askDeliveryDateKey, askThreadAmountNorm) : new Set<string>();
     let effectiveAskEpoch = askEpoch;
     let effectiveAskHasTimePrecision = askHasTimePrecision;
     if (ask) {
@@ -2690,11 +2915,30 @@ function buildPendingIntakeTickets(
       }
     }
 
-    const staleReferenceRaw = msgDateRaw || deliveryDateRaw;
-    const staleEpoch = ask ? effectiveAskEpoch : toEpoch(staleReferenceRaw);
-    const staleHasTimePrecision = ask ? effectiveAskHasTimePrecision : hasExplicitTimeComponent(staleReferenceRaw);
+    // Stale tagging reflects message age (MSG_DATE), not order delivery age.
+    const staleReferenceRaw = msgDateRaw;
+    const staleEpoch = ask ? (effectiveAskEpoch || toEpoch(msgDateRaw)) : toEpoch(msgDateRaw);
+    const staleHasTimePrecision = ask
+      ? (effectiveAskHasTimePrecision || hasExplicitTimeComponent(msgDateRaw))
+      : hasExplicitTimeComponent(msgDateRaw);
     const coarseAskDateEpoch = deliveryDateSortEpoch(staleReferenceRaw);
-    const staleByPreciseTime = staleHasTimePrecision && staleEpoch > 0 && (now - staleEpoch >= askStaleMs);
+    const recipientDateKey = askRecipientNorm && askDeliveryDateKey
+      ? `${askRecipientNorm}|${askDeliveryDateKey}`
+      : '';
+    const latestInboundEpochForRecipientDate = recipientDateKey
+      ? (latestInboundEpochByRecipientDateKey.get(recipientDateKey) || 0)
+      : 0;
+    const latestInboundHasTimeForRecipientDate = recipientDateKey
+      ? Boolean(latestInboundHasTimeByRecipientDateKey.get(recipientDateKey))
+      : false;
+    const effectiveStaleEpoch = latestInboundEpochForRecipientDate > staleEpoch
+      ? latestInboundEpochForRecipientDate
+      : staleEpoch;
+    const effectiveStaleHasTimePrecision = latestInboundEpochForRecipientDate > staleEpoch
+      ? latestInboundHasTimeForRecipientDate
+      : staleHasTimePrecision;
+
+    const staleByPreciseTime = effectiveStaleHasTimePrecision && effectiveStaleEpoch > 0 && (now - effectiveStaleEpoch >= askStaleMs);
     const staleByCoarseDate = !staleHasTimePrecision && coarseAskDateEpoch > 0 && (now - coarseAskDateEpoch >= (2 * 24 * 60 * 60 * 1000));
     const staleEligibility = ask ? !askAnswered : true;
     const isStaleAsk = allowStaleAskBadge && staleEligibility && (staleByPreciseTime || staleByCoarseDate);
@@ -2742,7 +2986,7 @@ function buildPendingIntakeTickets(
     );
     const orderAmount = firstNonEmptyText(
       resolvedLinkedOrder?.orderAmount || '',
-      normalizedOrderAmount(message),
+      messageAmount,
     );
 
     pending.push({
@@ -2828,6 +3072,7 @@ export default function App() {
   const [isAudioAlertsEnabled, setIsAudioAlertsEnabled] = useState<boolean>(() => initialAudioAlertsEnabled());
   const [isDashboardMode, setIsDashboardMode] = useState<boolean>(() => initialDashboardMode());
   const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [currentPageId, setCurrentPageId] = useState<DashboardPageId>('alerts_active');
   const [config, setConfig] = useState<DashboardUserConfig>(() => initialDashboardConfig());
   const [configDraft, setConfigDraft] = useState<DashboardUserConfig | null>(null);
   const [configWeatherZipDraft, setConfigWeatherZipDraft] = useState<string>(() => DEFAULT_DASHBOARD_CONFIG.tickerWeatherZip);
@@ -2858,6 +3103,18 @@ export default function App() {
   const alertedItemKeysRef = useRef<Set<string>>(new Set());
   const alertPlaybackQueueRef = useRef<Promise<void>>(Promise.resolve());
   const askDebugEnabled = useMemo(() => isAskDebugEnabledFromBrowser(), []);
+  const enabledPages = useMemo(() => {
+    const ids = normalizeEnabledPageIds(config.enabledPageIds);
+    const allowed = new Set(ids);
+    const pages = DASHBOARD_PAGE_DEFINITIONS.filter(page => allowed.has(page.id));
+    return pages.length ? pages : [DASHBOARD_PAGE_DEFINITIONS[0]];
+  }, [config.enabledPageIds]);
+  const currentPageIndex = useMemo(
+    () => Math.max(0, enabledPages.findIndex(page => page.id === currentPageId)),
+    [currentPageId, enabledPages],
+  );
+  const activePage = enabledPages[currentPageIndex] || enabledPages[0];
+  const hasMultiplePages = enabledPages.length > 1;
   const editingConfig = useMemo(
     () => sanitizeDashboardConfig({
       ...(configDraft || config),
@@ -3092,6 +3349,18 @@ export default function App() {
     setConfigDraft(previous => {
       const base = sanitizeDashboardConfig(previous || config);
       return sanitizeDashboardConfig({ ...base, [key]: Number.isFinite(value) ? value : base[key] });
+    });
+  }, [config]);
+  const toggleEnabledPageInDraft = useCallback((pageId: DashboardPageId, enabled: boolean) => {
+    setConfigDraft(previous => {
+      const base = sanitizeDashboardConfig(previous || config);
+      const nextEnabled = enabled
+        ? Array.from(new Set([...base.enabledPageIds, pageId]))
+        : base.enabledPageIds.filter(id => id !== pageId);
+      return sanitizeDashboardConfig({
+        ...base,
+        enabledPageIds: nextEnabled,
+      });
     });
   }, [config]);
   const resetConfigDefaults = useCallback(() => {
@@ -4721,6 +4990,15 @@ export default function App() {
       }
 
       const orderReferencePool = Array.from(referenceById.values());
+      const activeOrderLookupKeys = new Set<string>();
+      for (const card of activeByTicket.values()) {
+        const ticketKey = normalizeIdLike(card.ticketId);
+        const userRefKey = normalizeIdLike(card.userReference);
+        const userRefHeadKey = normalizeIdLike(String(card.userReference || '').split('/')[0] || '');
+        if (ticketKey) activeOrderLookupKeys.add(ticketKey);
+        if (userRefKey) activeOrderLookupKeys.add(userRefKey);
+        if (userRefHeadKey) activeOrderLookupKeys.add(userRefHeadKey);
+      }
 
       const pending = buildPendingIntakeTickets(
         displayMessageRows,
@@ -4732,6 +5010,7 @@ export default function App() {
         {
           flashMs: config.flashMs,
           askStaleMs,
+          activeOrderLookupKeys,
         },
       );
       const pendingWithStatus = pending.map(ticket => {
@@ -4865,7 +5144,10 @@ export default function App() {
           return true;
         })
         .sort(activeOrderSort);
-      const nextAudioAlertKinds = buildAudioAlertKindMap(pendingWithDistance, reconciledActiveOrders, currentLocalDateKey());
+      const localOnlyActiveOrders = reconciledActiveOrders.filter(card => (
+        isLocalOrderType(card.orderType) && !isWireOrderType(card.orderType)
+      ));
+      const nextAudioAlertKinds = buildAudioAlertKindMap(pendingWithDistance, localOnlyActiveOrders, currentLocalDateKey());
       const nextAudioAlertKeys = new Set(nextAudioAlertKinds.keys());
       if (!audioAlertSnapshotReadyRef.current) {
         alertedItemKeysRef.current = nextAudioAlertKeys;
@@ -4895,6 +5177,7 @@ export default function App() {
           }
         }
       }
+      // Progress/counting should use all selected-day orders, including non-local order types.
       setAllActiveOrders(reconciledActiveOrders);
       setPendingTickets(pendingWithDistance);
       setLastUpdated(new Date().toLocaleTimeString());
@@ -5056,6 +5339,41 @@ export default function App() {
       window.clearInterval(timer);
     };
   }, [config.tickerModules, config.tickerWeatherZip]);
+
+  useEffect(() => {
+    if (!enabledPages.some(page => page.id === currentPageId)) {
+      setCurrentPageId(enabledPages[0]?.id || 'alerts_active');
+    }
+  }, [currentPageId, enabledPages]);
+
+  useEffect(() => {
+    if (!config.pageAutoRotateEnabled) return;
+    if (!hasMultiplePages) return;
+    if (isConfigOpen) return;
+
+    const intervalMs = clampInteger(
+      config.pageAutoRotateIntervalSec * 1000,
+      5000,
+      300000,
+      DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC * 1000,
+    );
+    const timer = window.setInterval(() => {
+      setCurrentPageId(previous => {
+        const currentIndex = enabledPages.findIndex(page => page.id === previous);
+        const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+        const nextIndex = (safeIndex + 1) % enabledPages.length;
+        return enabledPages[nextIndex].id;
+      });
+    }, intervalMs);
+
+    return () => window.clearInterval(timer);
+  }, [
+    config.pageAutoRotateEnabled,
+    config.pageAutoRotateIntervalSec,
+    enabledPages,
+    hasMultiplePages,
+    isConfigOpen,
+  ]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -5324,8 +5642,38 @@ export default function App() {
     }
   }, [isDashboardMode]);
 
+  const goToPreviousPage = useCallback(() => {
+    if (!hasMultiplePages) return;
+    setCurrentPageId(previous => {
+      const currentIndex = enabledPages.findIndex(page => page.id === previous);
+      const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex = (safeIndex - 1 + enabledPages.length) % enabledPages.length;
+      return enabledPages[nextIndex].id;
+    });
+  }, [enabledPages, hasMultiplePages]);
+
+  const goToNextPage = useCallback(() => {
+    if (!hasMultiplePages) return;
+    setCurrentPageId(previous => {
+      const currentIndex = enabledPages.findIndex(page => page.id === previous);
+      const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex = (safeIndex + 1) % enabledPages.length;
+      return enabledPages[nextIndex].id;
+    });
+  }, [enabledPages, hasMultiplePages]);
+
+  const togglePageAutoRotate = useCallback(() => {
+    setConfig(previous => sanitizeDashboardConfig({
+      ...previous,
+      pageAutoRotateEnabled: !previous.pageAutoRotateEnabled,
+    }));
+  }, []);
+
   return (
     <div className={`app${isDashboardMode ? ' app--dashboard' : ''}${error ? ' app--with-error' : ''}`} ref={appRef}>
+      <div className="app__version-badge" title={`Dashboard version ${APP_VERSION_LABEL}`}>
+        {APP_VERSION_LABEL}
+      </div>
       <header className="app__header">
         <div className="app__title">
           <div className="app__logo-wrap">
@@ -5373,14 +5721,14 @@ export default function App() {
         </div>
         {!isConfigOpen ? (
           <div className="app__controls app__controls--compact">
-              <label className="app__control-check">
-                <input
-                  type="checkbox"
-                  checked={includeNextDay}
-                  onChange={(event) => {
-                    setIncludeNextDay(event.target.checked);
-                  }}
-                />
+              <button
+                type="button"
+                aria-pressed={includeNextDay}
+                className={`app__control-btn app__control-btn--toggle${includeNextDay ? ' app__control-btn--toggle-active' : ''}`}
+                onClick={() => {
+                  setIncludeNextDay(previous => !previous);
+                }}
+              >
                 <span className="app__control-icon" aria-hidden="true">
                   <FontAwesomeIcon icon={faCalendarDay} />
                 </span>
@@ -5388,16 +5736,16 @@ export default function App() {
                   <span className="app__control-line">Include</span>
                   <span className="app__control-line">next day</span>
                 </span>
-              </label>
-              <label className="app__control-check">
-                <input
-                  type="checkbox"
-                  checked={showCompleted}
-                  onChange={(event) => {
-                    requestActiveOrdersRefreshSpinner();
-                    setShowCompleted(event.target.checked);
-                  }}
-                />
+              </button>
+              <button
+                type="button"
+                aria-pressed={showCompleted}
+                className={`app__control-btn app__control-btn--toggle${showCompleted ? ' app__control-btn--toggle-active' : ''}`}
+                onClick={() => {
+                  requestActiveOrdersRefreshSpinner();
+                  setShowCompleted(previous => !previous);
+                }}
+              >
                 <span className="app__control-icon" aria-hidden="true">
                   <FontAwesomeIcon icon={faCircleCheck} />
                 </span>
@@ -5405,19 +5753,21 @@ export default function App() {
                   <span className="app__control-line">Show</span>
                   <span className="app__control-line">completed</span>
                 </span>
-              </label>
-              <label className="app__control-check">
-                <input
-                  type="checkbox"
-                  checked={isAudioAlertsEnabled}
-                  onChange={(event) => {
-                    const nextEnabled = event.target.checked;
-                    setIsAudioAlertsEnabled(nextEnabled);
+              </button>
+              <button
+                type="button"
+                aria-pressed={isAudioAlertsEnabled}
+                className={`app__control-btn app__control-btn--toggle${isAudioAlertsEnabled ? ' app__control-btn--toggle-active' : ''}`}
+                onClick={() => {
+                  setIsAudioAlertsEnabled(previous => {
+                    const nextEnabled = !previous;
                     if (nextEnabled) {
                       void playAlertSound();
                     }
-                  }}
-                />
+                    return nextEnabled;
+                  });
+                }}
+              >
                 <span className="app__control-icon" aria-hidden="true">
                   <FontAwesomeIcon icon={faVolumeHigh} />
                 </span>
@@ -5425,15 +5775,15 @@ export default function App() {
                   <span className="app__control-line">Audio</span>
                   <span className="app__control-line">alerts</span>
                 </span>
-              </label>
-              <label className="app__control-check">
-                <input
-                  type="checkbox"
-                  checked={isAutoScrollEnabled}
-                  onChange={(event) => {
-                    setIsAutoScrollEnabled(event.target.checked);
-                  }}
-                />
+              </button>
+              <button
+                type="button"
+                aria-pressed={isAutoScrollEnabled}
+                className={`app__control-btn app__control-btn--toggle${isAutoScrollEnabled ? ' app__control-btn--toggle-active' : ''}`}
+                onClick={() => {
+                  setIsAutoScrollEnabled(previous => !previous);
+                }}
+              >
                 <span className="app__control-icon" aria-hidden="true">
                   <FontAwesomeIcon icon={faScroll} />
                 </span>
@@ -5441,7 +5791,7 @@ export default function App() {
                   <span className="app__control-line">Auto-scroll</span>
                   <span className="app__control-line">enabled</span>
                 </span>
-              </label>
+              </button>
               <button
                 type="button"
                 className="app__control-btn app__control-btn--primary"
@@ -5571,6 +5921,57 @@ export default function App() {
                     onChange={(event) => updateConfigNumber('dingGapMs', event.target.value)}
                   />
                 </label>
+                <label className="app__config-row">
+                  <span>Page auto-rotate interval (sec)</span>
+                  <input
+                    type="number"
+                    min={5}
+                    max={300}
+                    value={editingConfig.pageAutoRotateIntervalSec}
+                    onChange={(event) => updateConfigNumber('pageAutoRotateIntervalSec', event.target.value)}
+                  />
+                </label>
+                <label className="app__config-row app__config-toggle-row">
+                  <span>Enable page auto-rotate by default</span>
+                  <input
+                    type="checkbox"
+                    checked={editingConfig.pageAutoRotateEnabled}
+                    onChange={(event) => {
+                      setConfigDraft(previous => sanitizeDashboardConfig({
+                        ...(previous || config),
+                        pageAutoRotateEnabled: event.target.checked,
+                      }));
+                    }}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="app__config-section app__config-section--server">
+              <h3 className="app__config-section-title">Pages</h3>
+              <div className="app__config-grid">
+                <div className="app__config-row app__config-row--full">
+                  <span>Enabled dashboard pages</span>
+                  <div className="app__config-module-list">
+                    {DASHBOARD_PAGE_DEFINITIONS.map((pageDefinition, pageIndex) => {
+                      const isEnabled = editingConfig.enabledPageIds.includes(pageDefinition.id);
+                      return (
+                        <label key={pageDefinition.id} className="app__config-module-card app__config-module-card--page">
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={(event) => toggleEnabledPageInDraft(pageDefinition.id, event.target.checked)}
+                          />
+                          <span className="app__config-module-copy">
+                            <strong>{`Page ${pageIndex + 1}`}</strong>
+                            <span>{pageDescription(pageDefinition.id)}</span>
+                          </span>
+                          <span className="app__config-page-preview" aria-hidden="true">{renderPagePreviewSvg(pageDefinition.id)}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -5850,26 +6251,37 @@ export default function App() {
                 type="button"
                 className="app__rotation-arrow"
                 title="Previous page"
-                style={{ border: 'none', background: 'none', padding: 0, marginRight: 4, cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
-                tabIndex={0}
+                style={{ border: 'none', background: 'none', padding: 0, marginRight: 4, cursor: hasMultiplePages ? 'pointer' : 'default', fontSize: 16, lineHeight: 1 }}
                 aria-label="Previous page"
-                disabled
+                onClick={goToPreviousPage}
+                disabled={!hasMultiplePages}
               >
                 <FontAwesomeIcon icon={faChevronLeft} />
               </button>
-              <span>Page 1/1: Alerts + Active Orders</span>
+              <span>{`Page ${currentPageIndex + 1}/${enabledPages.length}: ${activePage?.label || 'Page'}`}</span>
               <button
                 type="button"
                 className="app__rotation-arrow"
                 title="Next page"
-                style={{ border: 'none', background: 'none', padding: 0, marginLeft: 4, cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
-                tabIndex={0}
+                style={{ border: 'none', background: 'none', padding: 0, marginLeft: 4, cursor: hasMultiplePages ? 'pointer' : 'default', fontSize: 16, lineHeight: 1 }}
                 aria-label="Next page"
-                disabled
+                onClick={goToNextPage}
+                disabled={!hasMultiplePages}
               >
                 <FontAwesomeIcon icon={faChevronRight} />
               </button>
             </div>
+            <button
+              type="button"
+              className={`app__control-btn app__control-btn--toggle${config.pageAutoRotateEnabled ? ' app__control-btn--toggle-active' : ''}`}
+              onClick={togglePageAutoRotate}
+              title="Toggle auto page rotation"
+              aria-pressed={config.pageAutoRotateEnabled}
+              disabled={!hasMultiplePages}
+            >
+              <FontAwesomeIcon icon={faScroll} />
+              {config.pageAutoRotateEnabled ? 'Auto Rotate: On' : 'Auto Rotate: Off'}
+            </button>
             <button
               type="button"
               className="app__control-btn"
@@ -5898,6 +6310,7 @@ export default function App() {
             <span className="board-loading-overlay__label">Loading board...</span>
           </div>
         ) : null}
+        {activePage?.id === 'alerts_active' ? (
         <div className="board-lanes board-lanes--two">
             <section className="lane lane--critical">
               <header className="lane__header">
@@ -6050,7 +6463,10 @@ export default function App() {
                   filteredActiveOrders.map(card => {
                     const statusPill = singleStatusPill(card);
                     const footerZip = deriveCardFooterZip(card);
-                    const displayRecipientName = formatDisplayRecipientName(card.recipientName || 'Unknown Recipient');
+                    const pickupSale = isPickupSaleType(card.orderType);
+                    const displayRecipientName = pickupSale
+                      ? 'PICKUP'
+                      : formatDisplayRecipientName(card.recipientName || 'Unknown Recipient');
                     return (
                       <article
                         key={card.ticketId}
@@ -6062,11 +6478,12 @@ export default function App() {
                             <span className={`badge badge--stage badge--state-${statusPill.theme}`}>
                               {statusPill.label}
                             </span>
+                            {pickupSale ? <span className="badge">Pickup</span> : null}
                           </div>
                         </header>
                         <div className="order-card__name">{displayRecipientName}</div>
-                        <div className="order-card__meta">{card.addressLine || 'No street address'}</div>
-                        <div className="order-card__meta">{card.cityStateZip || 'No city/state/zip'}</div>
+                        {pickupSale ? null : <div className="order-card__meta">{card.addressLine || 'No street address'}</div>}
+                        {pickupSale ? null : <div className="order-card__meta">{card.cityStateZip || 'No city/state/zip'}</div>}
                         <footer className="order-card__footer">
                           <span className="order-card__footer-item">{formatDateOnly(card.deliveryDate) || '--'}</span>
                           {footerZip ? <span className="order-card__footer-item">{footerZip}</span> : null}
@@ -6099,6 +6516,12 @@ export default function App() {
               </footer>
             </section>
           </div>
+        ) : (
+          <div className="board-page__placeholder">
+            <div className="board-page__placeholder-title">Page 2</div>
+            <div className="board-page__placeholder-copy">Scaffold page ready for future modules.</div>
+          </div>
+        )}
       </main>
         </>
       ) : null}
