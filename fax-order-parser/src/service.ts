@@ -36,7 +36,7 @@ async function processFile(filePath: string): Promise<void> {
     console.warn(`[FaxParser] ${error}`);
   } else {
     try {
-      await sendWoiEmail(fields, config.email);
+      await sendWoiEmail(fields, config.email, config.fieldMap);
       emailSent = true;
       console.log(`[FaxParser] Email sent to ${config.email.recipientAddress}`);
     } catch (err: unknown) {
@@ -50,7 +50,14 @@ async function processFile(filePath: string): Promise<void> {
   if (!fs.existsSync(processedDir)) {
     fs.mkdirSync(processedDir, { recursive: true });
   }
-  const dest = path.join(processedDir, fileName);
+  // Avoid collision if the destination already exists (e.g. file was re-queued)
+  let dest = path.join(processedDir, fileName);
+  if (fs.existsSync(dest)) {
+    const ext  = path.extname(fileName);
+    const base = path.basename(fileName, ext);
+    const ts   = Date.now();
+    dest = path.join(processedDir, `${base}_${ts}${ext}`);
+  }
   fs.renameSync(filePath, dest);
   console.log(`[FaxParser] Moved to: ${dest}`);
 
@@ -136,7 +143,45 @@ async function startWatcher(): Promise<void> {
   process.on('SIGINT', shutdown);
 }
 
-startWatcher().catch(err => {
-  console.error('[FaxParser] Fatal error:', err);
-  process.exit(1);
-});
+// One-shot mode: invoked by the config app to manually process a specific file.
+// Usage: node service.js --process-file=<path>
+const processFileArg = process.argv.slice(2).find((a: string) => a.startsWith('--process-file='));
+
+// Extract-only mode: runs OCR + field extraction, prints JSON to stdout, no email / no file move.
+// Usage: node service.js --extract-only=<path>
+const extractOnlyArg = process.argv.slice(2).find((a: string) => a.startsWith('--extract-only='));
+
+if (extractOnlyArg) {
+  const filePath = extractOnlyArg.slice('--extract-only='.length);
+  (async () => {
+    const ocrText = await runOcr(filePath);
+    const fields = parseOrderFields(ocrText);
+    // Write a JSON envelope with both raw OCR and parsed fields so the config
+    // app can show a "Raw OCR" debug tab alongside the field mapping.
+    process.stdout.write(JSON.stringify({ rawText: ocrText, fields }, null, 2) + '\n');
+    process.exit(0);
+  })().catch((err: unknown) => {
+    process.stderr.write('[FaxParser] extract-only failed: ' + (err instanceof Error ? err.message : String(err)) + '\n');
+    process.exit(1);
+  });
+} else if (processFileArg) {
+  const filePath = processFileArg.slice('--process-file='.length);
+  if (!fs.existsSync(filePath)) {
+    console.log('[FaxParser] File already handled (not found at original path), skipping.');
+    process.exit(0);
+  }
+  processFile(filePath)
+    .then(() => {
+      console.log('[FaxParser] Done.');
+      process.exit(0);
+    })
+    .catch((err: unknown) => {
+      console.error('[FaxParser] Failed:', err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    });
+} else {
+  startWatcher().catch((err: unknown) => {
+    console.error('[FaxParser] Fatal error:', err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
+}
