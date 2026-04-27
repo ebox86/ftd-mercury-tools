@@ -32,10 +32,11 @@ if (-not (Test-Path (Join-Path $NodeRuntimeDir "node.exe"))) {
 }
 
 # Check InnoSetup
+$isccViaPath = Get-Command ISCC.exe -ErrorAction SilentlyContinue
 $isccCandidates = @(
   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-  "C:\Program Files\Inno Setup 6\ISCC.exe",
-  (Get-Command ISCC.exe -ErrorAction SilentlyContinue)?.Source
+  "C:\Program Files\Inno Setup 6\ISCC.exe"
+  if ($isccViaPath) { $isccViaPath.Source }
 ) | Where-Object { $_ -and (Test-Path $_) }
 if (-not $isccCandidates) { throw "Inno Setup 6 (ISCC.exe) not found. Install from https://jrsoftware.org/isdl.php" }
 $iscc = $isccCandidates[0]

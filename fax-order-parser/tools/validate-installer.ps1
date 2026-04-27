@@ -10,14 +10,15 @@ $scriptRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot  = Split-Path -Parent $scriptRoot
 $installerIss = Join-Path $projectRoot "installer\FTD.FaxOrderParser.iss"
 
+$isccViaPath = Get-Command ISCC.exe -ErrorAction SilentlyContinue
 $isccCandidates = @(
   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-  "C:\Program Files\Inno Setup 6\ISCC.exe",
-  (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
+  "C:\Program Files\Inno Setup 6\ISCC.exe"
+  if ($isccViaPath) { $isccViaPath.Source }
 ) | Where-Object { $_ -and (Test-Path $_) }
 
 if (-not $isccCandidates) {
-  Write-Warning "Inno Setup 6 not found locally — skipping .iss syntax check."
+  Write-Warning "Inno Setup 6 not found locally - skipping .iss syntax check."
   exit 0
 }
 $iscc = $isccCandidates[0]
@@ -31,7 +32,10 @@ $tmpDist  = Join-Path ([System.IO.Path]::GetTempPath()) "iss-validate-dist-$([Sy
 
 try {
   foreach ($sub in @("runtime","service","service-runtime","config-app")) {
-    New-Item -ItemType Directory -Path (Join-Path $tmpStage $sub) -Force | Out-Null
+    $subDir = Join-Path $tmpStage $sub
+    New-Item -ItemType Directory -Path $subDir -Force | Out-Null
+    # ISCC requires at least one matching file for wildcard [Files] entries
+    [System.IO.File]::WriteAllBytes((Join-Path $subDir "placeholder.tmp"), [byte[]]@())
   }
 
   # Stub required files so ISCC can resolve them during parsing
