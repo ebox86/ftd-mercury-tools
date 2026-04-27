@@ -81,6 +81,9 @@ jobs:
       - name: Install Inno Setup compiler
         run: choco upgrade innosetup --no-progress -y
 
+      - name: Validate Inno Setup script syntax
+        run: .\fax-order-parser\tools\validate-installer.ps1
+
       - name: Download bundled Node.js runtime
         id: tooling
         run: |

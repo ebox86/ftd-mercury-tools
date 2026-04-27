@@ -142,6 +142,6 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssInstFiles then
+  if CurStep = ssInstall then
     StopExistingServiceAndApp();
 end;
