@@ -1,6 +1,7 @@
 import * as nodemailer from 'nodemailer';
+import * as crypto from 'crypto';
 import { FaxOrderFields } from './index';
-import { EmailConfig, DEFAULT_FIELD_MAP } from './config';
+import { EmailConfig, DEFAULT_FIELD_MAP, WoiEncryptionAlgorithm } from './config';
 
 // ── OCR field resolution ───────────────────────────────────────────────────────
 
@@ -22,6 +23,24 @@ const SOURCE_TO_KEY: Record<string, keyof FaxOrderFields> = {
   'Total Payable':       'totalPayable',
   'Vendor Name':         'vendorName',
 };
+
+/**
+ * WOI fields that must have an OCR value for Mercury to accept the order.
+ * If any are missing after OCR (and no manual override fills them), the file
+ * is quarantined in the pending queue for human review.
+ */
+export const REQUIRED_WOI_FIELDS = ['Bill Name', 'Recipient Name', 'Product Code 1'] as const;
+
+/** Returns the names of required WOI fields that have no resolved OCR value. */
+export function getMissingRequiredFields(
+  fields: FaxOrderFields,
+  fieldMap: Record<string, string>,
+): string[] {
+  return (REQUIRED_WOI_FIELDS as readonly string[]).filter(woiField => {
+    const val = resolveField(woiField, fields, fieldMap);
+    return !val || val.trim() === '';
+  });
+}
 
 function resolveField(
   woiField: string,
@@ -55,11 +74,31 @@ interface ParsedAddress { address1: string; address2: string; city: string; stat
 function parseAddress(addr: string | undefined): ParsedAddress {
   const empty: ParsedAddress = { address1: '', address2: '', city: '', state: '', zip: '' };
   if (!addr) return empty;
-  // "123 Main St, Anytown, IL 60515" or "123 Main St, Anytown IL 60515"
-  const m = addr.match(/^(.+?),\s*(.+?),?\s*([A-Z]{2})\s*(\d{5}(?:-\d{4})?)\s*$/i);
-  if (m) {
-    return { address1: m[1].trim(), address2: '', city: m[2].trim(), state: m[3].toUpperCase(), zip: m[4] };
+
+  // Pattern 1: standard "123 Main St, Anytown, IL 60515" or "123 Main St, Anytown IL 60515"
+  const mComma = addr.match(/^(.+?),\s*(.+?),?\s*([A-Z]{2})\s*(\d{5}(?:-\d{4})?)\s*$/i);
+  if (mComma) {
+    return { address1: mComma[1].trim(), address2: '', city: mComma[2].trim(), state: mComma[3].toUpperCase(), zip: mComma[4] };
   }
+
+  // Pattern 2: OCR period instead of comma between street and city.
+  // "2615 Carriage House Drive. Allison Park, PA 15101"
+  // Extract state+zip from the end, then split the remainder at its last separator.
+  const mEnd = addr.match(/^(.+?)[.,]\s*([A-Za-z]{2})\s*(\d{5}(?:-\d{4})?)\s*$/i);
+  if (mEnd) {
+    const streetCity = mEnd[1];
+    const splitAt = Math.max(streetCity.lastIndexOf('.'), streetCity.lastIndexOf(','));
+    if (splitAt > 0) {
+      return {
+        address1: streetCity.slice(0, splitAt).trim(),
+        address2: '',
+        city: streetCity.slice(splitAt + 1).trim(),
+        state: mEnd[2].toUpperCase(),
+        zip: mEnd[3],
+      };
+    }
+  }
+
   // Best-effort fallback
   return { address1: addr.trim(), address2: '', city: '', state: '', zip: '' };
 }
@@ -140,11 +179,63 @@ function parseRecipient(location: string | undefined): ParsedRecipient {
  */
 function sanitizeWoiText(value: string, maxLength: number): string {
   return value
+    .replace(/\/n/g, ' ')        // strip OCR "/n" artifact (misread newline)
     .replace(/[#$%^&]/g, '')     // remove spec-prohibited chars
     .replace(/[\r\n]+/g, ' ')    // flatten multi-line to single line
     .replace(/\s{2,}/g, ' ')     // collapse multiple spaces
     .trim()
     .slice(0, maxLength);
+}
+
+/**
+ * Heuristic: returns true when a string looks like OCR noise rather than real text.
+ * A description is considered garbage when fewer than 40% of its tokens are
+ * purely alphabetic words of 4+ characters.
+ */
+function isGarbageText(text: string): boolean {
+  const words = text.trim().split(/\s+/);
+  if (words.length === 0) return true;
+  const goodWords = words.filter(w => /^[A-Za-z]{4,}$/.test(w));
+  return goodWords.length / words.length < 0.4;
+}
+
+// ── WOI body encryption ───────────────────────────────────────────────────────
+
+interface CipherSpec {
+  nodeName: string;
+  keyLength: number;
+  ivLength: number;
+}
+
+const CIPHER_SPECS: Record<Exclude<WoiEncryptionAlgorithm, 'None'>, CipherSpec> = {
+  DES:       { nodeName: 'des-cbc',      keyLength: 8,  ivLength: 8 },
+  RC2:       { nodeName: 'rc2-cbc',      keyLength: 16, ivLength: 8 },
+  Rijndael:  { nodeName: 'aes-256-cbc',  keyLength: 32, ivLength: 16 },
+  TripleDES: { nodeName: 'des-ede3-cbc', keyLength: 24, ivLength: 8 },
+};
+
+function deriveWoiCipherBytes(password: string, length: number): Buffer {
+  return Buffer.from(password.padEnd(length, '*').slice(0, length), 'ascii');
+}
+
+export function encryptWoiBody(
+  body: string,
+  algorithm: WoiEncryptionAlgorithm,
+  password: string,
+): string {
+  if (algorithm === 'None' || !password) {
+    return body;
+  }
+
+  const spec = CIPHER_SPECS[algorithm];
+  const key = deriveWoiCipherBytes(password, spec.keyLength);
+  const iv = deriveWoiCipherBytes(password, spec.ivLength);
+  const cipher = crypto.createCipheriv(spec.nodeName, key, iv);
+  cipher.setAutoPadding(true);
+  return Buffer.concat([
+    cipher.update(Buffer.from(body, 'ascii')),
+    cipher.final(),
+  ]).toString('base64');
 }
 
 // ── WOI email body formatter ───────────────────────────────────────────────────
@@ -166,8 +257,11 @@ export function formatWoiEmail(
   const delivInstr  = sanitizeWoiText(resolveField('Delivery Instructions', fields, fieldMap), 250);
   const addlInfo    = sanitizeWoiText(resolveField('Additional Information', fields, fieldMap), 1000);
   const prodCode    = sanitizeWoiText(resolveField('Product Code 1', fields, fieldMap), 10);
-  const rawDesc     = fields.productDescription ?? prodCode;
-  const prodDesc    = sanitizeWoiText(rawDesc, 350) || prodCode;  // spec: if no desc, use code
+  const rawDesc     = fields.productDescription ?? '';
+  // Spec: if description field is unused or looks like OCR garbage, use the product code in both fields
+  const prodDesc    = (rawDesc && !isGarbageText(rawDesc))
+    ? sanitizeWoiText(rawDesc, 350) || prodCode
+    : prodCode;
 
   const lines = [
     `Bill Name: ${billName}`,
@@ -206,6 +300,12 @@ export function formatWoiEmail(
     `Delivery (Day): ${delDate.day}`,
     `Delivery (Year): ${delDate.year}`,
     `Card Message: ${cardMsg}`,
+    `CC Cardholder: `,
+    `CC Company: `,
+    `CC Number: `,
+    `CC Expiration (Month): `,
+    `CC Expiration (Year): `,
+    `CC CVV Code: `,
     `Occasion Code: ${occasionCode}`,
     `Product Code1: ${prodCode}`,
     `Product Description1: ${prodDesc}`,
@@ -219,15 +319,11 @@ export function formatWoiEmail(
     `Discount Amount: `,
     `Total Order Amount: ${fields.totalPayable ?? ''}`,
     `Additional Information: ${addlInfo}`,
-    `CC Cardholder: `,
-    `CC Company: `,
-    `CC Number: `,
-    `CC Expiration (Month): `,
-    `CC Expiration (Year): `,
-    `CC CVV Code: `,
   ];
 
-  return lines.join('\n');
+  // Trim trailing whitespace from every line — prevents quoted-printable encoding
+  // of trailing spaces as =20, which Mercury's WOI parser may not decode.
+  return lines.map(l => l.trimEnd()).join('\r\n');
 }
 
 // ── Email sender ───────────────────────────────────────────────────────────────
@@ -236,7 +332,11 @@ export async function sendWoiEmail(
   emailConfig: EmailConfig,
   fieldMap: Record<string, string> = DEFAULT_FIELD_MAP,
 ): Promise<void> {
-  const body = formatWoiEmail(fields, fieldMap);
+  const plainBody = formatWoiEmail(fields, fieldMap);
+  const encryption = emailConfig.woiEncryption;
+  const body = encryption
+    ? encryptWoiBody(plainBody, encryption.algorithm, encryption.password)
+    : plainBody;
 
   const transport = nodemailer.createTransport({
     host: emailConfig.smtpHost,
@@ -248,10 +348,26 @@ export async function sendWoiEmail(
     },
   });
 
+  // Build a raw 7-bit email to avoid quoted-printable encoding.
+  // Mercury's WOI parser does key: value line parsing on the raw body;
+  // QP-encoded trailing spaces (=20) and soft line-breaks (=\n) in the
+  // card message break that parsing.
+  const rawMessage = [
+    `From: <${emailConfig.senderAddress}>`,
+    `To: <${emailConfig.recipientAddress}>`,
+    `Subject: ${emailConfig.subjectLine}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/plain; charset=us-ascii`,
+    `Content-Transfer-Encoding: 7bit`,
+    ``,
+    body,
+  ].join('\r\n');
+
   await transport.sendMail({
-    from: emailConfig.senderAddress,
-    to: emailConfig.recipientAddress,
-    subject: emailConfig.subjectLine,
-    text: body,
+    envelope: {
+      from: emailConfig.senderAddress,
+      to:   emailConfig.recipientAddress,
+    },
+    raw: rawMessage,
   });
 }

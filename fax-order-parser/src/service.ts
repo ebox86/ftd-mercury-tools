@@ -12,12 +12,21 @@ import * as path from 'path';
 import chokidar from 'chokidar';
 import { loadConfig } from './config';
 import { appendLogEntry } from './logger';
-import { sendWoiEmail } from './email-sender';
-import { runOcr, parseOrderFields } from './index';
+import { sendWoiEmail, getMissingRequiredFields } from './email-sender';
+import { runOcr, parseOrderFields, FaxOrderFields } from './index';
 
 // ── File processor ─────────────────────────────────────────────────────────────
 
-async function processFile(filePath: string): Promise<void> {
+/**
+ * Path of the hold-sidecar JSON file that marks a fax as quarantined.
+ * The sidecar is written when OCR cannot fill required WOI fields so the
+ * file stays in the pending queue until a human reviews it via the config app.
+ */
+function holdSidecarPath(filePath: string): string {
+  return filePath + '.hold.json';
+}
+
+async function processFile(filePath: string, fieldOverrides?: Partial<FaxOrderFields>): Promise<void> {
   const config = loadConfig();
   const fileName = path.basename(filePath);
 
@@ -25,6 +34,36 @@ async function processFile(filePath: string): Promise<void> {
 
   const ocrText = await runOcr(filePath);
   const fields = parseOrderFields(ocrText);
+
+  if (fieldOverrides && Object.keys(fieldOverrides).length > 0) {
+    Object.assign(fields, fieldOverrides);
+    console.log('[FaxParser] Applied manual field overrides from config app.');
+  }
+
+  // ── Required-field gate ────────────────────────────────────────────────────
+  // If any WOI required fields are still empty, quarantine the file in-place
+  // so it stays visible in the config-app pending queue for manual review.
+  // A .hold.json sidecar is written so the watcher skips the file on restart.
+  const missing = getMissingRequiredFields(fields, config.fieldMap);
+  if (missing.length > 0) {
+    const sidecar = holdSidecarPath(filePath);
+    const detail  = missing.join(', ');
+    console.warn(`[FaxParser] HOLD ${fileName}: required WOI fields missing after OCR: ${detail}`);
+    console.warn(`[FaxParser] File left in pending queue -- use the config app Preview button to fill in missing values.`);
+    try {
+      fs.writeFileSync(sidecar, JSON.stringify({ missing, timestamp: new Date().toISOString() }), 'utf-8');
+    } catch { /* non-fatal */ }
+    appendLogEntry({
+      timestamp: new Date().toISOString(),
+      fileName,
+      orderNumber: fields.orderNumber,
+      customerName: fields.customerName,
+      deliveryDate: fields.deliveryDate,
+      emailSent: false,
+      error: `HOLD: required fields missing: ${detail}`,
+    });
+    return;
+  }
 
   console.log('[FaxParser] Parsed order #', fields.orderNumber ?? '(unknown)');
 
@@ -58,6 +97,9 @@ async function processFile(filePath: string): Promise<void> {
     const ts   = Date.now();
     dest = path.join(processedDir, `${base}_${ts}${ext}`);
   }
+  // Remove hold sidecar (if any) now that the order is complete
+  try { fs.unlinkSync(holdSidecarPath(filePath)); } catch { /* not held, ignore */ }
+
   fs.renameSync(filePath, dest);
   console.log(`[FaxParser] Moved to: ${dest}`);
 
@@ -109,6 +151,12 @@ async function startWatcher(): Promise<void> {
     const fileExt = path.extname(filePath).toLowerCase();
     if (fileExt !== ext) return;
     if (inFlight.has(filePath)) return;
+
+    // Skip files quarantined for manual review (sidecar written by processFile)
+    if (fs.existsSync(holdSidecarPath(filePath))) {
+      console.log(`[FaxParser] Skipping held file: ${path.basename(filePath)} (open config app to review)`);
+      return;
+    }
 
     inFlight.add(filePath);
 
@@ -170,7 +218,21 @@ if (extractOnlyArg) {
     console.log('[FaxParser] File already handled (not found at original path), skipping.');
     process.exit(0);
   }
-  processFile(filePath)
+
+  // Load any manual field overrides written by the config app preview dialog
+  let fieldOverrides: Partial<FaxOrderFields> | undefined;
+  const fieldOverridesArg = process.argv.slice(2).find((a: string) => a.startsWith('--field-overrides-file='));
+  if (fieldOverridesArg) {
+    const overridesPath = fieldOverridesArg.slice('--field-overrides-file='.length);
+    try {
+      const raw = fs.readFileSync(overridesPath, 'utf-8');
+      fieldOverrides = JSON.parse(raw) as Partial<FaxOrderFields>;
+    } catch (err: unknown) {
+      console.error('[FaxParser] Warning: failed to load field overrides:', err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  processFile(filePath, fieldOverrides)
     .then(() => {
       console.log('[FaxParser] Done.');
       process.exit(0);

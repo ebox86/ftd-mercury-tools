@@ -8,6 +8,14 @@ export interface EmailConfig {
   smtpHost: string;
   smtpPort: number;
   subjectLine: string;
+  woiEncryption: WoiEncryptionConfig;
+}
+
+export type WoiEncryptionAlgorithm = 'None' | 'DES' | 'RC2' | 'Rijndael' | 'TripleDES';
+
+export interface WoiEncryptionConfig {
+  algorithm: WoiEncryptionAlgorithm;
+  password: string;
 }
 
 export interface FaxParserConfig {
@@ -72,6 +80,10 @@ export const DEFAULT_CONFIG: FaxParserConfig = {
     smtpHost: 'smtp.gmail.com',
     smtpPort: 587,
     subjectLine: 'Online Order',
+    woiEncryption: {
+      algorithm: 'None',
+      password: '',
+    },
   },
   fieldMap: { ...DEFAULT_FIELD_MAP },
 };
@@ -90,6 +102,10 @@ export function loadConfig(): FaxParserConfig {
       email: {
         ...DEFAULT_CONFIG.email,
         ...(parsed.email ?? {}),
+        woiEncryption: {
+          ...DEFAULT_CONFIG.email.woiEncryption,
+          ...(parsed.email?.woiEncryption ?? {}),
+        },
       },
       fieldMap: {
         ...DEFAULT_FIELD_MAP,

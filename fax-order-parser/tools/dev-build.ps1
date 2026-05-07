@@ -256,6 +256,18 @@ if ($iscc) {
     Start-Sleep -Seconds 2
   }
 
+  # Kill the config app if running -- it locks FaxParserConfig.exe regardless of admin
+  $cfgProc = Get-Process -Name "FaxParserConfig" -ErrorAction SilentlyContinue
+  if ($cfgProc) {
+    if (-not $isAdmin) {
+      Write-Error "FaxParserConfig.exe is running (PID $($cfgProc.Id)) and requires an elevated process to stop it. Close the config app manually or re-run this script from an elevated (Administrator) PowerShell."
+      exit 1
+    }
+    Write-Host "Closing config app (PID $($cfgProc.Id))..."
+    $cfgProc | Stop-Process -Force
+    Start-Sleep -Seconds 1
+  }
+
   # Copy stage -> install dir (mirrors InnoSetup [Files] layout)
   $map = @{
     $stageRuntime        = Join-Path $installDir "runtime"

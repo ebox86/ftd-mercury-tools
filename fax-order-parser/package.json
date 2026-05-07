@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "parse": "ts-node src/index.ts",
-    "service": "ts-node src/service.ts"
+    "service": "ts-node src/service.ts",
+    "send:woi-test": "ts-node src/send-woi-test-email.ts"
   },
   "dependencies": {
     "chokidar": "^3.6.0",

@@ -65,6 +65,17 @@ internal sealed class MainForm : Form
 
   private DataGridView   _fieldMapGrid         = null!;
 
+  // ── Pending files / Process Selected ─────────────────────────────────────────
+  private Button         _processSelectedBtn   = null!;
+  private readonly ToolTip _toolTip            = new ToolTip();
+  private readonly HashSet<string> _heldFiles  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+  // WOI fields that must have a non-"(none)" OCR source mapped for a valid Mercury order
+  private static readonly string[] RequiredWoiMappingFields =
+  [
+    "Bill Name", "Recipient Name", "Product Code 1",
+  ];
+
   private static readonly string[] OcrSourceOptions =
   [
     "(none)", "Customer Name", "For the Passing Of", "Delivery Location",
@@ -108,6 +119,7 @@ internal sealed class MainForm : Form
     {
       LoadConfig();
       RefreshServiceStatus();
+      UpdateProcessSelectedState();
     };
   }
 
@@ -352,7 +364,7 @@ internal sealed class MainForm : Form
       Location  = new Point(120, 10),
     };
 
-    var processPendingBtn = new Button
+    _processSelectedBtn = new Button
     {
       Text      = "▶  Process Selected",
       Width     = 134,
@@ -361,8 +373,8 @@ internal sealed class MainForm : Form
       FlatStyle = FlatStyle.System,
     };
     pendingHeader.Layout += (_, _) =>
-      processPendingBtn.Location = new Point(pendingHeader.ClientSize.Width - processPendingBtn.Width - 4, 4);
-    processPendingBtn.Click += (_, _) => ProcessSelectedFiles();
+      _processSelectedBtn.Location = new Point(pendingHeader.ClientSize.Width - _processSelectedBtn.Width - 4, 4);
+    _processSelectedBtn.Click += (_, _) => ProcessSelectedFiles();
 
     var previewBtn = new Button
     {
@@ -373,7 +385,7 @@ internal sealed class MainForm : Form
       FlatStyle = FlatStyle.System,
     };
     pendingHeader.Layout += (_, _) =>
-      previewBtn.Location = new Point(pendingHeader.ClientSize.Width - processPendingBtn.Width - previewBtn.Width - 14, 4);
+      previewBtn.Location = new Point(pendingHeader.ClientSize.Width - _processSelectedBtn.Width - previewBtn.Width - 14, 4);
     previewBtn.Click += (_, _) => PreviewFileFields();
 
     var scanBtn = new Button
@@ -385,18 +397,45 @@ internal sealed class MainForm : Form
       FlatStyle = FlatStyle.System,
     };
     pendingHeader.Layout += (_, _) =>
-      scanBtn.Location = new Point(pendingHeader.ClientSize.Width - processPendingBtn.Width - previewBtn.Width - scanBtn.Width - 20, 4);
+      scanBtn.Location = new Point(pendingHeader.ClientSize.Width - _processSelectedBtn.Width - previewBtn.Width - scanBtn.Width - 20, 4);
     scanBtn.Click += (_, _) => ScanPendingFiles();
 
-    pendingHeader.Controls.AddRange(new Control[] { pendingTitle, _pendingCountLabel, scanBtn, previewBtn, processPendingBtn });
+    pendingHeader.Controls.AddRange(new Control[] { pendingTitle, _pendingCountLabel, scanBtn, previewBtn, _processSelectedBtn });
 
     _pendingFilesList = new ListBox
     {
       Dock          = DockStyle.Fill,
       SelectionMode = SelectionMode.MultiExtended,
+      DrawMode      = DrawMode.OwnerDrawFixed,
+      ItemHeight    = 20,
       Font          = new Font("Segoe UI", 8.5f),
       BorderStyle   = BorderStyle.None,
       BackColor     = Color.White,
+    };
+
+    _pendingFilesList.DrawItem += (_, e) =>
+    {
+      if (e.Index < 0) return;
+      var itemPath = (string)_pendingFilesList.Items[e.Index];
+      var isHeld   = _heldFiles.Contains(itemPath);
+      var selected = (e.State & DrawItemState.Selected) != 0;
+
+      var bg = isHeld   ? Color.FromArgb(255, 243, 205)
+             : selected ? SystemColors.Highlight
+             : (e.Index % 2 == 0 ? Color.White : Color.FromArgb(248, 249, 250));
+      var fg = isHeld   ? Color.FromArgb(160, 80, 0)
+             : selected ? SystemColors.HighlightText
+             : Color.FromArgb(30, 30, 30);
+
+      using var bgBrush = new SolidBrush(bg);
+      e.Graphics.FillRectangle(bgBrush, e.Bounds);
+
+      var display = isHeld
+        ? $"\u26a0 HOLD: {Path.GetFileName(itemPath)}"
+        : Path.GetFileName(itemPath);
+      var font = isHeld ? new Font(e.Font!, FontStyle.Bold) : e.Font!;
+      TextRenderer.DrawText(e.Graphics, display, font, e.Bounds, fg,
+        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
     };
 
     // Z-order: pendingHeader docks Top first, then _pendingFilesList fills remainder
@@ -701,6 +740,8 @@ internal sealed class MainForm : Form
     }
     cfg.Save(ConfigPath);
     SetFooterStatus("Field mappings saved.", false);
+    UpdateProcessSelectedState();
+    AppendConfigLog("Field mappings saved.");
   }
 
   // ── Footer ────────────────────────────────────────────────────────────────────
@@ -815,11 +856,15 @@ internal sealed class MainForm : Form
 
   private void SaveConfig()
   {
+    AppConfig? prev = null;
+    try { prev = AppConfig.Load(ConfigPath); } catch { }
+    var newFormat = _fileFormatCombo.SelectedIndex == 1 ? "TIF" : "PDF";
+
     var cfg = new AppConfig
     {
       WatchFolder         = _watchFolderBox.Text.Trim(),
       PollIntervalSeconds = (int)_pollIntervalSpinner.Value,
-      FileFormat          = _fileFormatCombo.SelectedIndex == 1 ? "TIF" : "PDF",
+      FileFormat          = newFormat,
       ProcessedSubfolder  = _processedSubfolderBox.Text.Trim().TrimEnd('\\').TrimEnd('/'),
       Email = new EmailConfig
       {
@@ -829,17 +874,23 @@ internal sealed class MainForm : Form
         SubjectLine      = _subjectLineBox.Text.Trim(),
         SmtpHost         = _smtpHostBox.Text.Trim(),
         SmtpPort         = (int)_smtpPortSpinner.Value,
+        WoiEncryption    = prev?.Email.WoiEncryption ?? new WoiEncryptionConfig(),
       },
     };
 
     try
     {
       cfg.Save(ConfigPath);
-      SetFooterStatus("✓  Settings saved.", isError: false);
+      SetFooterStatus("\u2713  Settings saved.", isError: false);
+
+      if (prev is not null && prev.FileFormat != newFormat)
+        AppendConfigLog($"File format changed: {prev.FileFormat} -> {newFormat}");
+
+      AppendConfigLog($"Settings saved. Format: {newFormat}, Poll: {cfg.PollIntervalSeconds}s, Watch: {cfg.WatchFolder}");
     }
     catch (Exception ex)
     {
-      SetFooterStatus($"⚠  Failed to save: {ex.Message}", isError: true);
+      SetFooterStatus($"\u26a0  Failed to save: {ex.Message}", isError: true);
     }
   }
 
@@ -960,6 +1011,8 @@ internal sealed class MainForm : Form
 
     var processedPath = Path.Combine(folder, processed) + Path.DirectorySeparatorChar;
 
+    _heldFiles.Clear();
+
     var files = patterns
       .SelectMany(p => Directory.GetFiles(folder, p, SearchOption.TopDirectoryOnly))
       .Where(f => !f.StartsWith(processedPath, StringComparison.OrdinalIgnoreCase))
@@ -967,11 +1020,18 @@ internal sealed class MainForm : Form
       .ToList();
 
     foreach (var f in files)
+    {
+      if (File.Exists(f + ".hold.json")) _heldFiles.Add(f);
       _pendingFilesList.Items.Add(f);
+    }
 
+    var heldCount    = _heldFiles.Count;
+    var pendingCount = files.Count - heldCount;
     _pendingCountLabel.Text = files.Count == 0
       ? "(none)"
-      : $"{files.Count} file{(files.Count != 1 ? "s" : "")} waiting";
+      : heldCount > 0
+        ? $"{pendingCount} waiting, {heldCount} held (review required)"
+        : $"{files.Count} file{(files.Count != 1 ? "s" : "")} waiting";
   }
 
   private void PreviewFileFields()
@@ -1045,7 +1105,7 @@ internal sealed class MainForm : Form
           fields[prop.Name] = prop.Value.ValueKind == System.Text.Json.JsonValueKind.Null
             ? null : prop.Value.GetString();
 
-      ShowFieldPreviewDialog(Path.GetFileName(selected), fields, rawText);
+      ShowFieldPreviewDialog(Path.GetFileName(selected), selected, fields, rawText);
       SetFooterStatus(string.Empty, isError: false);
     }
     catch (Exception ex)
@@ -1054,37 +1114,41 @@ internal sealed class MainForm : Form
     }
   }
 
-  private static void ShowFieldPreviewDialog(string fileName, Dictionary<string, string?> fields, string rawText)
+  private void ShowFieldPreviewDialog(string fileName, string filePath, Dictionary<string, string?> fields, string rawText)
   {
-    // WOI field name → internal JSON key mapping
-    var woiMap = new (string WoiLabel, string JsonKey)[]
+    // OCR JSON key → WOI display label + required-for-Mercury flag
+    var woiMap = new (string WoiLabel, string JsonKey, bool Required)[]
     {
-      ("Bill Name",              "customerName"),
-      ("Bill Address1",          "customerAddress"),
-      ("Bill Phone",             "customerPhone"),
-      ("Recipient Name",         "deliveryLocation"),
-      ("Delivery Date",          "deliveryDate"),
-      ("Delivery Time",          "deliveryTime"),
-      ("Card Message",           "cardMessage"),
-      ("Product Code / Item #",  "productItemNumber"),
-      ("Product Description",    "productDescription"),
-      ("Product Price",          "productPrice"),
-      ("Delivery Charge",        "deliveryCharge"),
-      ("Total Payable",          "totalPayable"),
-      ("Order Number",           "orderNumber"),
-      ("Order Placed Date",      "orderPlacedDate"),
-      ("Vendor Name",            "vendorName"),
-      ("Vendor Tel",             "vendorTel"),
-      ("Vendor Fax",             "vendorFax"),
-      ("Vendor SMS",             "vendorSms"),
-      ("For the Passing Of",     "forThePassingOf"),
+      ("Bill Name",              "customerName",       true),
+      ("Bill Address",           "customerAddress",    false),
+      ("Bill Phone",             "customerPhone",      false),
+      ("For the Passing Of",     "forThePassingOf",    true),
+      ("Delivery Location",      "deliveryLocation",   false),
+      ("Delivery Date",          "deliveryDate",       true),
+      ("Delivery Time",          "deliveryTime",       false),
+      ("Card Message",           "cardMessage",        false),
+      ("Product Code / Item #",  "productItemNumber",  true),
+      ("Product Description",    "productDescription", false),
+      ("Product Price",          "productPrice",       false),
+      ("Delivery Charge",        "deliveryCharge",     false),
+      ("Total Payable",          "totalPayable",       false),
+      ("Order Number",           "orderNumber",        false),
+      ("Order Placed Date",      "orderPlacedDate",    false),
+      ("Vendor Name",            "vendorName",         false),
+      ("Vendor Tel",             "vendorTel",          false),
+      ("Vendor Fax",             "vendorFax",          false),
+      ("Vendor SMS",             "vendorSms",          false),
     };
+
+    var hasEmptyRequired = woiMap
+      .Where(m => m.Required)
+      .Any(m => string.IsNullOrWhiteSpace(fields.GetValueOrDefault(m.JsonKey)));
 
     var dlg = new Form
     {
       Text            = $"Extracted Fields \u2014 {fileName}",
-      Size            = new Size(660, 600),
-      MinimumSize     = new Size(500, 420),
+      Size            = new Size(680, 640),
+      MinimumSize     = new Size(500, 460),
       StartPosition   = FormStartPosition.CenterParent,
       FormBorderStyle = FormBorderStyle.Sizable,
       BackColor       = Color.White,
@@ -1093,20 +1157,22 @@ internal sealed class MainForm : Form
 
     var infoBar = new Label
     {
-      Text      = $"OCR extraction results for: {fileName}  \u2014  values shown are what will be sent to Mercury WOI.",
+      Text      = hasEmptyRequired
+        ? "One or more required fields are empty (highlighted in red). Edit values below, then click \"Process with These Values\"."
+        : $"OCR results for: {fileName}  \u2014  edit any value below before processing.",
       Dock      = DockStyle.Top,
-      Height    = 36,
-      Padding   = new Padding(10, 10, 10, 0),
+      Height    = 40,
+      Padding   = new Padding(10, 11, 10, 0),
       Font      = new Font("Segoe UI", 8.5f, FontStyle.Italic),
-      ForeColor = Color.FromArgb(100, 80, 0),
-      BackColor = Color.FromArgb(255, 251, 220),
+      ForeColor = hasEmptyRequired ? Color.FromArgb(180, 30, 30) : Color.FromArgb(100, 80, 0),
+      BackColor = hasEmptyRequired ? Color.FromArgb(255, 235, 235) : Color.FromArgb(255, 251, 220),
     };
 
     // ── Fields tab ────────────────────────────────────────────────────────────
     var grid = new DataGridView
     {
       Dock                    = DockStyle.Fill,
-      ReadOnly                = true,
+      ReadOnly                = false,
       AllowUserToAddRows      = false,
       AllowUserToDeleteRows   = false,
       AllowUserToResizeRows   = false,
@@ -1118,6 +1184,7 @@ internal sealed class MainForm : Form
       Font                    = new Font("Segoe UI", 9f),
       GridColor               = Color.FromArgb(224, 228, 232),
       CellBorderStyle         = DataGridViewCellBorderStyle.SingleHorizontal,
+      EditMode                = DataGridViewEditMode.EditOnEnter,
     };
     grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(26, 58, 92);
     grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
@@ -1125,15 +1192,44 @@ internal sealed class MainForm : Form
     grid.EnableHeadersVisualStyles               = false;
     grid.ColumnHeadersHeight                     = 28;
     grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
-    grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "WOI Field",       Name = "Field",  FillWeight = 36 });
-    grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Extracted Value", Name = "Value",  FillWeight = 64 });
+    grid.Columns.Add(new DataGridViewTextBoxColumn
+    {
+      HeaderText = "WOI Field",
+      Name       = "Field",
+      FillWeight = 34,
+      ReadOnly   = true,
+    });
+    grid.Columns.Add(new DataGridViewTextBoxColumn
+    {
+      HeaderText = "Extracted Value (editable)",
+      Name       = "Value",
+      FillWeight = 66,
+    });
+    // Hidden column carries the JSON key so we can build an overrides dict on save
+    grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "JsonKey", Visible = false });
 
-    foreach (var (label, key) in woiMap)
+    foreach (var (label, key, required) in woiMap)
     {
       fields.TryGetValue(key, out var val);
-      var rowIndex = grid.Rows.Add(label, val ?? string.Empty);
-      if (string.IsNullOrWhiteSpace(val))
-        grid.Rows[rowIndex].DefaultCellStyle.ForeColor = Color.Silver;
+      var rowIndex = grid.Rows.Add(label, val ?? string.Empty, key);
+      var row      = grid.Rows[rowIndex];
+
+      // WOI label cell: always read-only, styled as a header
+      row.Cells["Field"].Style.BackColor = Color.FromArgb(240, 242, 245);
+      row.Cells["Field"].Style.ForeColor = Color.FromArgb(60, 60, 60);
+      row.Cells["Field"].Style.Font      = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+
+      if (required && string.IsNullOrWhiteSpace(val))
+      {
+        // Required and empty — highlight both cells
+        row.Cells["Field"].Style.BackColor  = Color.FromArgb(255, 200, 200);
+        row.Cells["Field"].Style.ForeColor  = Color.Firebrick;
+        row.Cells["Value"].Style.BackColor  = Color.FromArgb(255, 230, 230);
+      }
+      else if (string.IsNullOrWhiteSpace(val))
+      {
+        row.Cells["Value"].Style.ForeColor = Color.Silver;
+      }
     }
 
     var fieldsPage = new TabPage("Mapped Fields");
@@ -1160,27 +1256,94 @@ internal sealed class MainForm : Form
     tabs.TabPages.Add(fieldsPage);
     tabs.TabPages.Add(rawPage);
 
+    // ── Button panel ──────────────────────────────────────────────────────────
+    string? overridesFilePath = null;
+
+    var processBtn = new Button
+    {
+      Text      = "Process with These Values",
+      Width     = 186,
+      Height    = 28,
+      FlatStyle = FlatStyle.System,
+      Font      = new Font("Segoe UI", 9f, FontStyle.Bold),
+    };
+    processBtn.Click += (_, _) =>
+    {
+      // Collect current (possibly edited) grid values
+      var overrides = new Dictionary<string, string?>();
+      foreach (DataGridViewRow r in grid.Rows)
+      {
+        if (r.IsNewRow) continue;
+        var jsonKey = r.Cells["JsonKey"].Value?.ToString();
+        var val     = r.Cells["Value"].Value?.ToString();
+        if (!string.IsNullOrEmpty(jsonKey))
+          overrides[jsonKey] = val;
+      }
+
+      // Validate that required fields are now filled
+      var stillEmpty = woiMap
+        .Where(m => m.Required && string.IsNullOrWhiteSpace(overrides.GetValueOrDefault(m.JsonKey)))
+        .Select(m => m.WoiLabel)
+        .ToList();
+      if (stillEmpty.Count > 0)
+      {
+        MessageBox.Show(
+          $"The following required WOI fields are still empty:\n\n{string.Join("\n", stillEmpty.Select(f => "  \u2022 " + f))}\n\nPlease fill in these values before processing.",
+          "Required Fields Missing",
+          MessageBoxButtons.OK,
+          MessageBoxIcon.Warning);
+        return;
+      }
+
+      try
+      {
+        var tmp = Path.ChangeExtension(Path.GetTempFileName(), ".json");
+        File.WriteAllText(tmp, System.Text.Json.JsonSerializer.Serialize(overrides));
+        overridesFilePath = tmp;
+      }
+      catch (Exception ex)
+      {
+        MessageBox.Show($"Failed to write field overrides: {ex.Message}", "Error",
+          MessageBoxButtons.OK, MessageBoxIcon.Error);
+        return;
+      }
+
+      dlg.DialogResult = DialogResult.OK;
+      dlg.Close();
+    };
+
     var closeBtn = new Button
     {
       Text      = "Close",
       Width     = 80,
       Height    = 28,
-      Anchor    = AnchorStyles.Bottom | AnchorStyles.Right,
       FlatStyle = FlatStyle.System,
     };
     closeBtn.Click += (_, _) => dlg.Close();
 
-    var btnPanel = new Panel { Dock = DockStyle.Bottom, Height = 40, BackColor = Color.White };
+    var btnPanel = new Panel { Dock = DockStyle.Bottom, Height = 44, BackColor = Color.White };
+    btnPanel.Paint += (_, e) =>
+      e.Graphics.DrawLine(new Pen(Color.FromArgb(208, 213, 219)), 0, 0, btnPanel.Width, 0);
     btnPanel.Controls.Add(closeBtn);
+    btnPanel.Controls.Add(processBtn);
     btnPanel.Layout += (_, _) =>
-      closeBtn.Location = new Point(btnPanel.ClientSize.Width - closeBtn.Width - 10, 6);
+    {
+      closeBtn.Location   = new Point(btnPanel.ClientSize.Width - closeBtn.Width - 10, 8);
+      processBtn.Location = new Point(btnPanel.ClientSize.Width - closeBtn.Width - processBtn.Width - 20, 8);
+    };
 
-    // Fill control (tabs) must be added first; header/footer dock before it fills
+    // Fill control added first so header/footer dock correctly
     dlg.Controls.Add(tabs);
     dlg.Controls.Add(infoBar);
     dlg.Controls.Add(btnPanel);
     dlg.ShowDialog();
     dlg.Dispose();
+
+    if (overridesFilePath is not null)
+    {
+      ProcessFileWithOverrides(filePath, overridesFilePath);
+      try { File.Delete(overridesFilePath); } catch { /* non-fatal */ }
+    }
   }
 
   private void ProcessSelectedFiles()
@@ -1338,6 +1501,101 @@ internal sealed class MainForm : Form
       System.Threading.Thread.Sleep(800);
       RefreshServiceStatus();
     }
+  }
+
+  // ── Field mapping validation ──────────────────────────────────────────────────
+
+  private void UpdateProcessSelectedState()
+  {
+    AppConfig? cfg = null;
+    try { cfg = AppConfig.Load(ConfigPath); } catch { }
+
+    var missing = RequiredWoiMappingFields
+      .Where(f => cfg is null ||
+                  !cfg.FieldMap.TryGetValue(f, out var src) ||
+                  src == "(none)")
+      .ToList();
+
+    _processSelectedBtn.Enabled = missing.Count == 0;
+    _toolTip.SetToolTip(_processSelectedBtn,
+      missing.Count > 0
+        ? $"Disabled: required WOI fields have no OCR source mapped:\n{string.Join(", ", missing)}\n\nOpen the Field Map tab to fix."
+        : string.Empty);
+  }
+
+  // ── Config change log ─────────────────────────────────────────────────────────
+
+  private void AppendConfigLog(string message)
+  {
+    try
+    {
+      Directory.CreateDirectory(ServiceLogDir);
+      File.AppendAllText(OutLogPath,
+        $"[Config {DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
+    }
+    catch { /* non-fatal — do not crash the app over a log write */ }
+  }
+
+  // ── Process file with manual field overrides ──────────────────────────────────
+
+  private void ProcessFileWithOverrides(string filePath, string overridesFilePath)
+  {
+    if (!File.Exists(NodeExePath))
+    {
+      SetFooterStatus($"node.exe not found: {NodeExePath}", isError: true);
+      return;
+    }
+    if (!File.Exists(ServiceScript))
+    {
+      SetFooterStatus($"service.js not found: {ServiceScript}", isError: true);
+      return;
+    }
+    if (!File.Exists(filePath))
+    {
+      SetFooterStatus($"File no longer exists: {Path.GetFileName(filePath)}", isError: true);
+      return;
+    }
+
+    SetFooterStatus($"Processing {Path.GetFileName(filePath)} with edited values\u2026", isError: false);
+    Application.DoEvents();
+
+    try
+    {
+      var psi = new ProcessStartInfo(NodeExePath)
+      {
+        UseShellExecute        = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError  = true,
+        CreateNoWindow         = true,
+        WorkingDirectory       = Path.GetDirectoryName(ServiceScript)!,
+      };
+      psi.ArgumentList.Add(ServiceScript);
+      psi.ArgumentList.Add($"--process-file={filePath}");
+      psi.ArgumentList.Add($"--field-overrides-file={overridesFilePath}");
+
+      using var proc = Process.Start(psi)!;
+      var stdout = proc.StandardOutput.ReadToEnd();
+      var stderr = proc.StandardError.ReadToEnd();
+      proc.WaitForExit(120_000);
+
+      if (proc.ExitCode == 0)
+      {
+        SetFooterStatus($"\u2713 Processed {Path.GetFileName(filePath)} successfully.", isError: false);
+      }
+      else
+      {
+        var errText   = (stderr.Trim().Length > 0 ? stderr : stdout).Trim();
+        var firstLine = errText.Split('\n').FirstOrDefault(l => l.Trim().Length > 0) ?? "unknown error";
+        SetFooterStatus($"Failed: {firstLine}", isError: true);
+      }
+    }
+    catch (Exception ex)
+    {
+      SetFooterStatus($"Error: {ex.Message}", isError: true);
+    }
+
+    ScanPendingFiles();
+    LoadLog();
   }
 
   // ── Footer status message ─────────────────────────────────────────────────────

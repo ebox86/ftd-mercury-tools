@@ -82,22 +82,40 @@ export function parseOrderFields(ocrText: string): FaxOrderFields {
     // Clean up leading/trailing whitespace and join lines
     cardMessage = cardMsgMatch[1].replace(/^\s+|\s+$/g, '').replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ');
   }
-  const totalPayable = getMatch(/Total payable to you \$([\d.]+)/i);
+  // Total payable: try the FTD-standard phrase first, then progressively looser fallbacks
+  const totalPayable =
+    getMatch(/Total payable to you\s*\$\s*([\d.]+)/i) ??
+    getMatch(/Total payable[:\s]+\$?\s*([\d.]+)/i) ??
+    getMatch(/Grand total[:\s]+\$?\s*([\d.]+)/i) ??
+    getMatch(/Total[:\s]+\$?\s*([\d.]+)/i);
 
   // Delivery details: parse address, times, and date from the delivery line
   let deliveryLocation, deliveryTime, deliveryDate;
   // Extract the full delivery block, allowing for line wraps in OCR output
   const deliveryBlockMatch = ocrText.match(/Delivery:([\s\S]+?)(?:\n\n|$)/i);
   if (deliveryBlockMatch) {
-    // Join lines and normalize spaces
-    const deliveryBlock = deliveryBlockMatch[1].replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    // Join lines and normalize spaces.
+    // Then strip financial/legal boilerplate that OCR concatenates when the fax
+    // has no blank line between the delivery address and the financial summary.
+    const rawDelivery = deliveryBlockMatch[1].replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    const finStopIdx  = rawDelivery.search(/\bTotal payable\b|\bSales tax\b|\bRetail price\b|\bAdminist/i);
+    const deliveryBlock = finStopIdx > 0
+      ? rawDelivery.slice(0, finStopIdx).replace(/[,. ]+$/, '')
+      : rawDelivery;
+
     // Extract date and times from the end of the block
-    const timeDateMatch = deliveryBlock.match(/from\s*([\d:]+\s*[APM]{2})(?:\s*to\s*([\d:]+\s*[APM]{2}))?\s*on\s*([A-Za-z]+ \d{1,2}, \d{4})/i);
+    const timeDateMatch = deliveryBlock.match(/from\s*([\d:]+\s*[APM]{2})(?:\s*to\s*([\d:]+\s*[APM]{2}))?\s*on\s*([A-Za-z]+ \d{1,2},? \d{4})/i);
     if (timeDateMatch) {
       deliveryDate = timeDateMatch[3].trim();
       if (timeDateMatch[1]) {
         deliveryTime = `before ${timeDateMatch[1].trim()}`;
       }
+    } else {
+      // Fallback: any "Month D, YYYY" or "MM/DD/YYYY" anywhere in the delivery block
+      const dateLong  = deliveryBlock.match(/\b([A-Za-z]+ \d{1,2},?\s*\d{4})\b/);
+      const dateShort = deliveryBlock.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/);
+      if (dateLong)  deliveryDate = dateLong[1].replace(/,\s*(\d{4})/, ', $1').trim();
+      else if (dateShort) deliveryDate = dateShort[1];
     }
     // Extract location (before 'from')
     const locMatch = deliveryBlock.match(/^(.*) from [\d:]+\s*[APM]{2}(?: to [\d:]+\s*[APM]{2})? on [A-Za-z]+ \d{1,2}, \d{4}/i);
