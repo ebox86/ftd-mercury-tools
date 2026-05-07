@@ -31,35 +31,46 @@ export function parseOrderFields(ocrText: string): FaxOrderFields {
     return m ? m[1].trim() : undefined;
   };
 
-  // Extract fields using regex patterns
-  const orderNumber = getMatch(/Order Number\s*([\w-]+)/i);
-  const orderPlacedDate = getMatch(/Placed: ([^\n]+)/i);
-  const vendorName = getMatch(/Routed to: ([^\n]+)/i);
-  const vendorTel = getMatch(/Vendor Tel: ([^\n]+)/i);
-  const vendorFax = getMatch(/Faxed to: ([^\n]+)/i);
-  const vendorSms = getMatch(/SMS Text Message: ([^\n]+)/i);
-  const customerName = getMatch(/Ordered by: ([^\n]+)/i);
+  // orderNumber: capture the whole line after the label, then strip the
+  // " - Item X of X" suffix that FTD appends on the same line.
+  const rawOrderLine = getMatch(/Order Number[:\s]+([^\n]+)/i);
+  const orderNumber = rawOrderLine ? rawOrderLine.replace(/\s+-\s+.*$/, '').trim() : undefined;
+  const orderPlacedDate = getMatch(/Placed[:\s]+([^\n]+)/i);
+  const vendorName = getMatch(/Routed to[:\s]+([^\n]+)/i);
+  const vendorTel = getMatch(/(?:Vendor Tel|Tel)[:\s]+([^\n]+)/i);
+  const vendorFax = getMatch(/Faxed to[:\s]+([^\n]+)/i);
+  const vendorSms = getMatch(/SMS Text Message[:\s]+([^\n]+)/i);
+  // customerName: OCR sometimes wraps the last name onto the next line.
+  // Capture up to two non-blank lines after "Ordered by:".
+  let customerName: string | undefined;
+  const cnMatch = ocrText.match(/Ordered by[:\s]+([^\n]+)(?:\n([^\n]+))?/i);
+  if (cnMatch) {
+    const line1 = cnMatch[1].trim();
+    const line2 = cnMatch[2]?.trim() ?? '';
+    // Only append line2 if it looks like a continuation (no colon = not a new label)
+    customerName = (line2 && !line2.includes(':')) ? `${line1} ${line2}` : line1;
+  }
   const customerPhone = getMatch(/Telephone: ([^\n]+)/i);
   const customerAddress = getMatch(/Address: ([^\n]+)/i);
   const productItemNumber = getMatch(/Item # ([\w\d]+)/i);
-  const productPrice = getMatch(/Item # [\w\d]+ \$[\d.]+\*?\s*\$([\d.]+)/i);
+  // Retail price is the CFS/shop price (second $ on the Item line).
+  // OCR renders the asterisk as % sometimes, so allow any non-digit between the two prices.
+  const productPrice = getMatch(/Item # [\w\d]+ \$[\d.]+[^\d\s]?\s*\$([\d.]+)/i);
   const deliveryCharge = getMatch(/Delivery Charge\s*\$([\d.]+)/i);
   // Product description: robustly extract the bouquet name after the item and delivery charge lines
   let productDescription: string | undefined = undefined;
-  // Look for lines containing "Bouquet" after "Delivery Charge"
+  // Product description: first clean title line immediately after the Delivery Charge row.
+  // Works for any product name ("Designer's Choice Bouquet", "Peaceful White Tribute", etc.).
   const prodDescParts = ocrText.split(/Delivery Charge[^\n]*\n/);
   if (prodDescParts.length > 1) {
-    // Take up to the next blank line or 3 lines after Delivery Charge
-    const lines = prodDescParts[1].split(/\n/).map(l => l.trim()).filter(Boolean);
-    let bouquetLines: string[] = [];
-    for (let i = 0; i < Math.min(lines.length, 4); i++) {
-      bouquetLines.push(lines[i]);
-      if (/Bouquet/i.test(lines[i])) break;
-    }
-    const bouquetText = bouquetLines.join(' ');
-    const bouquetMatch = bouquetText.match(/([A-Za-z0-9'\- ]*Bouquet)/i);
-    if (bouquetMatch) {
-      productDescription = bouquetMatch[1].replace(/\s+/g, ' ').trim();
+    const lines = prodDescParts[1].split(/\n/).map((l: string) => l.trim()).filter(Boolean);
+    const titleLine = lines.find((l: string) => /^[A-Z][A-Za-z0-9' -]{3,}$/.test(l));
+    if (titleLine) {
+      // Stop at a product-type keyword to avoid capturing OCR garbage that follows
+      const stopMatch = titleLine.match(/^(.+?(?:Bouquet|Tribute|Arrangement|Wreath|Basket|Display|Spray|Centerpiece|Planter|Plant|Vase|Collection|Garden))/i);
+      productDescription = stopMatch ? stopMatch[1].trim() : titleLine;
+    } else if (lines.length > 0) {
+      productDescription = lines[0].replace(/[^A-Za-z0-9' -]/g, ' ').replace(/\s+/g, ' ').trim();
     }
   }
   // Delivery details will be parsed below
@@ -71,23 +82,40 @@ export function parseOrderFields(ocrText: string): FaxOrderFields {
     // Clean up leading/trailing whitespace and join lines
     cardMessage = cardMsgMatch[1].replace(/^\s+|\s+$/g, '').replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ');
   }
-  const totalPayable = getMatch(/Total payable to you \$([\d.]+)/i);
+  // Total payable: try the FTD-standard phrase first, then progressively looser fallbacks
+  const totalPayable =
+    getMatch(/Total payable to you\s*\$\s*([\d.]+)/i) ??
+    getMatch(/Total payable[:\s]+\$?\s*([\d.]+)/i) ??
+    getMatch(/Grand total[:\s]+\$?\s*([\d.]+)/i) ??
+    getMatch(/Total[:\s]+\$?\s*([\d.]+)/i);
 
   // Delivery details: parse address, times, and date from the delivery line
   let deliveryLocation, deliveryTime, deliveryDate;
   // Extract the full delivery block, allowing for line wraps in OCR output
   const deliveryBlockMatch = ocrText.match(/Delivery:([\s\S]+?)(?:\n\n|$)/i);
   if (deliveryBlockMatch) {
-    // Join lines and normalize spaces
-    const deliveryBlock = deliveryBlockMatch[1].replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-    console.log('DEBUG: Delivery block:', deliveryBlock);
+    // Join lines and normalize spaces.
+    // Then strip financial/legal boilerplate that OCR concatenates when the fax
+    // has no blank line between the delivery address and the financial summary.
+    const rawDelivery = deliveryBlockMatch[1].replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    const finStopIdx  = rawDelivery.search(/\bTotal payable\b|\bSales tax\b|\bRetail price\b|\bAdminist/i);
+    const deliveryBlock = finStopIdx > 0
+      ? rawDelivery.slice(0, finStopIdx).replace(/[,. ]+$/, '')
+      : rawDelivery;
+
     // Extract date and times from the end of the block
-    const timeDateMatch = deliveryBlock.match(/from\s*([\d:]+\s*[APM]{2})(?:\s*to\s*([\d:]+\s*[APM]{2}))?\s*on\s*([A-Za-z]+ \d{1,2}, \d{4})/i);
+    const timeDateMatch = deliveryBlock.match(/from\s*([\d:]+\s*[APM]{2})(?:\s*to\s*([\d:]+\s*[APM]{2}))?\s*on\s*([A-Za-z]+ \d{1,2},? \d{4})/i);
     if (timeDateMatch) {
       deliveryDate = timeDateMatch[3].trim();
       if (timeDateMatch[1]) {
         deliveryTime = `before ${timeDateMatch[1].trim()}`;
       }
+    } else {
+      // Fallback: any "Month D, YYYY" or "MM/DD/YYYY" anywhere in the delivery block
+      const dateLong  = deliveryBlock.match(/\b([A-Za-z]+ \d{1,2},?\s*\d{4})\b/);
+      const dateShort = deliveryBlock.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/);
+      if (dateLong)  deliveryDate = dateLong[1].replace(/,\s*(\d{4})/, ', $1').trim();
+      else if (dateShort) deliveryDate = dateShort[1];
     }
     // Extract location (before 'from')
     const locMatch = deliveryBlock.match(/^(.*) from [\d:]+\s*[APM]{2}(?: to [\d:]+\s*[APM]{2})? on [A-Za-z]+ \d{1,2}, \d{4}/i);
@@ -95,6 +123,16 @@ export function parseOrderFields(ocrText: string): FaxOrderFields {
       deliveryLocation = locMatch[1].replace(/^For the /i, '').replace(/,$/, '').trim();
     } else {
       deliveryLocation = deliveryBlock;
+    }
+  }
+
+  // Fallback: if customerName is a single word (no last name in "Ordered by:"),
+  // search the card message for a signature line containing "FirstName LastName".
+  if (customerName && !customerName.includes(' ') && cardMessage) {
+    const escaped = customerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const sigMatch = cardMessage.match(new RegExp(`\\b${escaped}\\s+([A-Za-z][A-Za-z'-]+)\\b`, 'i'));
+    if (sigMatch) {
+      customerName = `${customerName} ${sigMatch[1]}`;
     }
   }
 

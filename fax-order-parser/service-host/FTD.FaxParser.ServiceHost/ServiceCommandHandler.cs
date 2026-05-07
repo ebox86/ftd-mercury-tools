@@ -224,17 +224,19 @@ internal static class ServiceCommandHandler
 
   private static string BuildBinPath(string exePath, HostOptions options)
   {
-    // The service binary path is the EXE running without any command flags.
-    // We pass node-exe, script-path, working-dir, log-dir so the service
-    // starts correctly even after reboot.
+    // Build a command-line string sc.exe stores as the service binPath.
+    // Paths are wrapped with escaped inner quotes (\" instead of ") so that
+    // when Esc() adds the outer "…" wrapper the result is valid:
+    //   "\"C:\path\exe.exe\" --node-exe=\"C:\path\node.exe\" …"
+    // sc.exe stores the inner value; SCM later calls CreateProcess with it.
     var parts = new List<string>
     {
-      $"\"{exePath}\"",
-      $"--node-exe=\"{options.NodeExePath}\"",
-      $"--script-path=\"{options.ScriptPath}\"",
-      $"--working-dir=\"{options.WorkingDirectory}\"",
-      $"--log-dir=\"{options.LogDirectory}\"",
-      $"--service-name=\"{options.ServiceName}\"",
+      $"\\\"{exePath}\\\"",
+      $"--node-exe=\\\"{options.NodeExePath}\\\"",
+      $"--script-path=\\\"{options.ScriptPath}\\\"",
+      $"--working-dir=\\\"{options.WorkingDirectory}\\\"",
+      $"--log-dir=\\\"{options.LogDirectory}\\\"",
+      $"--service-name=\\\"{options.ServiceName}\\\"",
     };
     return string.Join(" ", parts);
   }

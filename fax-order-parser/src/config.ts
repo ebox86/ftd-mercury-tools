@@ -8,6 +8,14 @@ export interface EmailConfig {
   smtpHost: string;
   smtpPort: number;
   subjectLine: string;
+  woiEncryption: WoiEncryptionConfig;
+}
+
+export type WoiEncryptionAlgorithm = 'None' | 'DES' | 'RC2' | 'Rijndael' | 'TripleDES';
+
+export interface WoiEncryptionConfig {
+  algorithm: WoiEncryptionAlgorithm;
+  password: string;
 }
 
 export interface FaxParserConfig {
@@ -16,7 +24,38 @@ export interface FaxParserConfig {
   fileFormat: 'PDF' | 'TIF';
   processedSubfolder: string;
   email: EmailConfig;
+  /** Maps each remappable WOI field name to a human-readable OCR source label. */
+  fieldMap: Record<string, string>;
 }
+
+/** Human-readable OCR source labels used in fieldMap values. */
+export const OCR_SOURCE_OPTIONS = [
+  '(none)',
+  'Customer Name',
+  'For the Passing Of',
+  'Delivery Location',
+  'Card Message',
+  'Order Number',
+  'Customer Phone',
+  'Customer Address',
+  'Product Item Number',
+  'Product Description',
+  'Product Price',
+  'Delivery Charge',
+  'Delivery Date',
+  'Delivery Time',
+  'Total Payable',
+  'Vendor Name',
+] as const;
+
+export const DEFAULT_FIELD_MAP: Record<string, string> = {
+  'Bill Name':             'Customer Name',
+  'Recipient Name':        'For the Passing Of',
+  'Card Message':          'Card Message',
+  'Product Code 1':        'Product Item Number',
+  'Delivery Instructions': 'Delivery Time',
+  'Additional Information':'For the Passing Of',
+};
 
 export function getConfigDir(): string {
   return path.join(
@@ -41,7 +80,12 @@ export const DEFAULT_CONFIG: FaxParserConfig = {
     smtpHost: 'smtp.gmail.com',
     smtpPort: 587,
     subjectLine: 'Online Order',
+    woiEncryption: {
+      algorithm: 'None',
+      password: '',
+    },
   },
+  fieldMap: { ...DEFAULT_FIELD_MAP },
 };
 
 export function loadConfig(): FaxParserConfig {
@@ -58,6 +102,14 @@ export function loadConfig(): FaxParserConfig {
       email: {
         ...DEFAULT_CONFIG.email,
         ...(parsed.email ?? {}),
+        woiEncryption: {
+          ...DEFAULT_CONFIG.email.woiEncryption,
+          ...(parsed.email?.woiEncryption ?? {}),
+        },
+      },
+      fieldMap: {
+        ...DEFAULT_FIELD_MAP,
+        ...(parsed.fieldMap ?? {}),
       },
     };
   } catch {

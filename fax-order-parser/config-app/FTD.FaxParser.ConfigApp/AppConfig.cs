@@ -21,6 +21,17 @@ internal sealed class AppConfig
   [JsonPropertyName("email")]
   public EmailConfig Email { get; set; } = new();
 
+  [JsonPropertyName("fieldMap")]
+  public Dictionary<string, string> FieldMap { get; set; } = new()
+  {
+    ["Bill Name"]              = "Customer Name",
+    ["Recipient Name"]         = "For the Passing Of",
+    ["Card Message"]           = "Card Message",
+    ["Product Code 1"]         = "Product Item Number",
+    ["Delivery Instructions"]  = "Delivery Time",
+    ["Additional Information"] = "For the Passing Of",
+  };
+
   private static readonly JsonSerializerOptions SerializerOptions = new()
   {
     WriteIndented = true,
@@ -68,6 +79,18 @@ internal sealed class EmailConfig
 
   [JsonPropertyName("smtpPort")]
   public int SmtpPort { get; set; } = 587;
+
+  [JsonPropertyName("woiEncryption")]
+  public WoiEncryptionConfig WoiEncryption { get; set; } = new();
+}
+
+internal sealed class WoiEncryptionConfig
+{
+  [JsonPropertyName("algorithm")]
+  public string Algorithm { get; set; } = "None";
+
+  [JsonPropertyName("password")]
+  public string Password { get; set; } = string.Empty;
 }
 
 internal sealed class OrderLogEntry

@@ -1,0 +1,98 @@
+import * as nodemailer from 'nodemailer';
+import { loadConfig } from './config';
+
+const body = [
+  'Bill Name: WOI Test Buyer',
+  'Bill Address1: 1605 Carmody Court',
+  'Bill Address2:',
+  'Bill City: Sewickley',
+  'Bill State: PA',
+  'Bill Country: USA',
+  'Bill Zip Code: 15143',
+  'Bill Phone Area Code: 412',
+  'Bill Phone Prefix: 616',
+  'Bill Phone Number: 2883',
+  'Bill Phone Extension:',
+  'Bill Phone2 Area Code:',
+  'Bill Phone2 Prefix:',
+  'Bill Phone2 Number:',
+  'Bill Phone2 Extension:',
+  'Bill Fax Area Code:',
+  'Bill Fax Prefix:',
+  'Bill Fax Number:',
+  'Recipient Name: WOI Test Recipient',
+  'Recipient Address1: 2615 Carriage House Drive',
+  'Recipient Address2:',
+  'Recipient City: Allison Park',
+  'Recipient State: PA',
+  'Recipient Country Code: USA',
+  'Recipient Zip Code: 15101',
+  'Recipient Phone Area Code: 412',
+  'Recipient Phone Prefix: 555',
+  'Recipient Phone Number: 0100',
+  'Recipient Phone Extension:',
+  'Recipient Company:',
+  'E-mail Address: test@example.com',
+  'Delivery Instructions: TEST ORDER DO NOT FILL',
+  'Delivery (Month): 05',
+  'Delivery (Day): 04',
+  'Delivery (Year): 2026',
+  'Card Message: This is a WOI parser test order. Please do not fill.',
+  'Occasion Code: 1',
+  'Product Code1: CFS99',
+  'Product Description1: WOI TEST ITEM',
+  'Product Amount1: 57.59',
+  'Product Qty1: 1',
+  'Delivery Charge: 12.50',
+  'Relay Charge:',
+  'Retrans Charge:',
+  'Service Charge:',
+  'Tax Amount:',
+  'Discount Amount:',
+  'Total Order Amount: 70.09',
+  'Additional Information: TEST ORDER DO NOT FILL',
+].join('\r\n');
+
+async function main(): Promise<void> {
+  const { email } = loadConfig();
+
+  if (!email.senderPassword) {
+    throw new Error('Missing email.senderPassword in Fax Order Parser config.');
+  }
+
+  const transport = nodemailer.createTransport({
+    host: email.smtpHost,
+    port: email.smtpPort,
+    secure: false,
+    auth: {
+      user: email.senderAddress,
+      pass: email.senderPassword,
+    },
+  });
+
+  const rawMessage = [
+    `From: <${email.senderAddress}>`,
+    `To: <${email.recipientAddress}>`,
+    `Subject: ${email.subjectLine}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=us-ascii',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    body,
+  ].join('\r\n');
+
+  await transport.sendMail({
+    envelope: {
+      from: email.senderAddress,
+      to: email.recipientAddress,
+    },
+    raw: rawMessage,
+  });
+
+  console.log(`Sent raw WOI test email to ${email.recipientAddress} with subject "${email.subjectLine}".`);
+}
+
+main().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
