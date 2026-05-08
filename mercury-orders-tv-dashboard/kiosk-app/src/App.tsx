@@ -164,13 +164,23 @@ const DEFAULT_TODAY_DINGS = 1;
 const DEFAULT_DING_GAP_MS = 620;
 const DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC = 20;
 const NEW_ORDER_PULSE_WINDOW_MINUTES = 30;
+const CHART_ML = 40;
+const CHART_MR = 36;
+const CHART_MT = 14;
+const CHART_MB = 28;
+const CHART_VW = 1000;
+const CHART_VH = 220;
+const CHART_PW = CHART_VW - CHART_ML - CHART_MR;
+const CHART_PH = CHART_VH - CHART_MT - CHART_MB;
+const CHART_VISIBLE_HOURS = Array.from({ length: 24 }, (_, i) => i); // [0, 1, …, 23]
 const APP_VERSION_LABEL = `v${String(appPackage.version || '0.0.0').trim() || '0.0.0'}`;
+const LOADING_TICKER_TEXT = Array.from({ length: 18 }, () => 'Loading').join('  🌸  ');
 const DASHBOARD_MODE_STORAGE_KEY = 'kiosk_dashboard_mode';
 const AUDIO_ALERTS_STORAGE_KEY = 'kiosk_audio_alerts';
 const DASHBOARD_CLIENT_CONFIG_STORAGE_KEY = 'kiosk_dashboard_client_config_v1';
 const DASHBOARD_CONFIG_STORAGE_KEY_LEGACY = 'kiosk_dashboard_user_config_v1';
 const UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
-const MARKETPLACE_REGEX = /\b(uber\s*eats|door\s*dash|doordash)\b/i;
+const MARKETPLACE_REGEX = /\b(grub\s*hub|uber\s*eats|door\s*dash|doordash)\b/i;
 const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
   pollMs: DEFAULT_POLL_MS,
   flashMs: DEFAULT_FLASH_MS,
@@ -442,6 +452,7 @@ function emptyGroups(): GroupedCards {
     delivered_or_exception: [],
   };
 }
+
 
 function normalizeText(raw: string): string {
   return String(raw || '')
@@ -833,6 +844,11 @@ function isWireOrderType(orderTypeRaw: string): boolean {
   return /\bwire\b/i.test(String(orderTypeRaw || ''));
 }
 
+function isWireOutOrderType(orderTypeRaw: string): boolean {
+  const t = String(orderTypeRaw || '').toLowerCase();
+  return /\bwire\b/.test(t) && /\bout\b/.test(t);
+}
+
 function isLocalOrderType(orderTypeRaw: string): boolean {
   return /\blocal\b/i.test(String(orderTypeRaw || ''));
 }
@@ -988,7 +1004,7 @@ function normalizeToggle(value: unknown, fallback: boolean): boolean {
 
 const DASHBOARD_PAGE_DEFINITIONS: Array<{ id: DashboardPageId; label: string }> = [
   { id: 'alerts_active', label: 'Alerts + Active Orders' },
-  { id: 'page2', label: 'Page 2 (Scaffold)' },
+  { id: 'page2', label: 'Today\'s Stats' },
 ];
 
 function normalizeEnabledPageIds(raw: unknown): DashboardPageId[] {
@@ -1021,17 +1037,31 @@ function renderPagePreviewSvg(pageId: DashboardPageId) {
     );
   }
   return (
-    <svg viewBox="0 0 120 56" role="img" aria-label="Page 2 scaffold preview">
+    <svg viewBox="0 0 120 56" role="img" aria-label="Today's stats page preview">
       <rect x="1" y="1" width="118" height="54" rx="6" fill="#f6f8fb" stroke="#a9b5c8" />
-      <rect x="14" y="12" width="92" height="32" rx="4" fill="#ffffff" stroke="#bdc9db" strokeDasharray="3 3" />
-      <rect x="26" y="24" width="68" height="6" rx="3" fill="#c8d4e8" />
+      {/* KPI cards row */}
+      {[8, 26, 44, 62, 80, 98].map((x, i) => (
+        <rect key={i} x={x} y="6" width="16" height="12" rx="2" fill={i === 1 ? '#d4f0e4' : i === 3 ? '#fde8ea' : '#e2e8f3'} stroke="#b0bdc8" strokeWidth="0.5" />
+      ))}
+      {/* Pipeline row */}
+      <rect x="8" y="22" width="104" height="10" rx="2" fill="#dde4ec" stroke="#b0bdc8" strokeWidth="0.5" />
+      {[8, 26, 44, 62, 80].map((x, i) => (
+        <rect key={i} x={x} y="22" width={i === 0 ? 18 : i === 1 ? 14 : i === 2 ? 10 : i === 3 ? 22 : 16} height="10" rx="0" fill={i === 3 ? '#c8dff5' : i === 4 ? '#d4f0e4' : '#e8ecf4'} />
+      ))}
+      {/* Intake cards + ring */}
+      {[8, 34, 60, 86].map((x, i) => (
+        <rect key={i} x={x} y="36" width="22" height="14" rx="2" fill={i === 1 ? '#fde8ea' : '#e2e8f3'} stroke="#b0bdc8" strokeWidth="0.5" />
+      ))}
+      <circle cx="110" cy="43" r="8" fill="none" stroke="#d4f0e4" strokeWidth="3" />
+      <circle cx="110" cy="43" r="8" fill="none" stroke="#4caf7a" strokeWidth="3" strokeDasharray="30 21" strokeDashoffset="12" transform="rotate(-90 110 43)" />
     </svg>
   );
 }
 
 function pageDescription(pageId: DashboardPageId): string {
   if (pageId === 'alerts_active') return 'Alerts + Active Orders';
-  return 'Scaffold (empty)';
+  if (pageId === 'page2') return 'Stats & KPIs';
+  return 'Page';
 }
 
 function pickServerConfigFields(raw: Partial<DashboardUserConfig> | null | undefined): Partial<DashboardUserConfig> {
@@ -2261,6 +2291,7 @@ function mergeActiveOrderCard(target: Map<string, BoardCard>, nextCard: BoardCar
       addressLine: firstNonEmptyText(nextCard.addressLine, existing.addressLine),
       cityStateZip: firstNonEmptyText(nextCard.cityStateZip, existing.cityStateZip),
       deliveryZip: firstNonEmptyText(nextCard.deliveryZip, existing.deliveryZip),
+      isMarketplace: existing.isMarketplace || nextCard.isMarketplace,
     });
     return;
   }
@@ -2274,6 +2305,7 @@ function mergeActiveOrderCard(target: Map<string, BoardCard>, nextCard: BoardCar
     addressLine: firstNonEmptyText(existing.addressLine, nextCard.addressLine),
     cityStateZip: firstNonEmptyText(existing.cityStateZip, nextCard.cityStateZip),
     deliveryZip: firstNonEmptyText(existing.deliveryZip, nextCard.deliveryZip),
+    isMarketplace: existing.isMarketplace || nextCard.isMarketplace,
   };
   if (
     merged.recipientName !== existing.recipientName
@@ -3057,6 +3089,10 @@ export default function App() {
   const [, setGroups] = useState<GroupedCards>(emptyGroups());
   const [allActiveOrders, setAllActiveOrders] = useState<BoardCard[]>([]);
   const [pendingTickets, setPendingTickets] = useState<IntakeTicketCard[]>([]);
+  const [todaySaleDates, setTodaySaleDates] = useState<string[]>([]);
+  const [lastYearSaleDates, setLastYearSaleDates] = useState<string[]>([]);
+  const [lastYearStats, setLastYearStats] = useState<{ count: number; revenue: number; avgTicket: number } | null>(null);
+  const [todayFinancials, setTodayFinancials] = useState<{ revenue: number; avgTicket: number; largestOrder: number; wireInCount: number; wireInRevenue: number }>({ revenue: 0, avgTicket: 0, largestOrder: 0, wireInCount: 0, wireInRevenue: 0 });
   const [loading, setLoading] = useState(true);
   const [isRefreshingActiveOrders, setIsRefreshingActiveOrders] = useState(false);
   const [, setLastUpdated] = useState<string>("");
@@ -3528,7 +3564,10 @@ export default function App() {
     [allActiveOrders, showCompleted],
   );
   const activeOrders = useMemo(() => {
-    return displayEligibleOrders.filter(card => isWithinDateKeys(card.deliveryDate, allowedDeliveryDateKeys));
+    return displayEligibleOrders.filter(card =>
+      isWithinDateKeys(card.deliveryDate, allowedDeliveryDateKeys) &&
+      !isWireOutOrderType(card.orderType)
+    );
   }, [displayEligibleOrders, allowedDeliveryDateKeys]);
   const normalizedActiveOrderSearchQuery = useMemo(
     () => normalizeText(activeOrderSearchQuery),
@@ -3569,11 +3608,11 @@ export default function App() {
     [displayEligibleOrders, includeNextDay, nextDateKey],
   );
   const selectedDayOrderTotal = useMemo(
-    () => allActiveOrders.filter(card => toDateKey(card.deliveryDate) === selectedDateKey).length,
+    () => allActiveOrders.filter(card => toDateKey(card.deliveryDate) === selectedDateKey && !isWireOutOrderType(card.orderType)).length,
     [allActiveOrders, selectedDateKey],
   );
   const selectedDayOrderCompleted = useMemo(
-    () => allActiveOrders.filter(card => toDateKey(card.deliveryDate) === selectedDateKey && isCompletedOrder(card)).length,
+    () => allActiveOrders.filter(card => toDateKey(card.deliveryDate) === selectedDateKey && !isWireOutOrderType(card.orderType) && isCompletedOrder(card)).length,
     [allActiveOrders, selectedDateKey],
   );
   const selectedDayCompletionPercent = useMemo(() => {
@@ -3919,7 +3958,7 @@ export default function App() {
         existing.USER_REFERENCE = existing.USER_REFERENCE || userReference;
         existing.SALE_ID = existing.SALE_ID || String(row.SALE_ID || '').trim();
         existing.TICKET_POSITION = existing.TICKET_POSITION || String(row.TICKET_POSITION || '1').trim();
-        existing.ORDER_TYPE = existing.ORDER_TYPE || String(row.ORDER_TYPE || '').trim();
+        existing.ORDER_TYPE = resolvePreferredOrderType(existing.ORDER_TYPE || '', String(row.ORDER_TYPE || '').trim());
         existing.RECIPIENT_NAME = existing.RECIPIENT_NAME || String(row.RECIPIENT_NAME || '').trim();
         existing.RECIPIENT_ADDRESS = existing.RECIPIENT_ADDRESS || normalizedStreetLine(row);
         existing.RECIPIENT_CITY = existing.RECIPIENT_CITY || normalizedCity(row);
@@ -5179,6 +5218,32 @@ export default function App() {
       }
       // Progress/counting should use all selected-day orders, including non-local order types.
       setAllActiveOrders(reconciledActiveOrders);
+      // All SALE_DATEs for today's delivery orders — bucketed by hour to build the intake chart.
+      // Mercury always returns full ISO datetime strings, so getHours() gives the correct local hour.
+      const todayKey = currentLocalDateKey();
+      const saleDatesForChart = ticketSearchRows
+        .filter(r => toDateKey(String(r.DELIVERY_DATE || '')) === todayKey && !isWireOutOrderType(String(r.ORDER_TYPE || '')))
+        .map(r => String(r.SALE_DATE || '').trim())
+        .filter(Boolean);
+      setTodaySaleDates(saleDatesForChart);
+
+      // Financial KPIs for today's delivery orders
+      const todayDeliveryRows = ticketSearchRows.filter(r => toDateKey(String(r.DELIVERY_DATE || '')) === todayKey);
+      const localAndWireInRows = todayDeliveryRows.filter(r => !isWireOutOrderType(String(r.ORDER_TYPE || '')));
+      const wireInRows = todayDeliveryRows.filter(r => {
+        const ot = String(r.ORDER_TYPE || '').trim();
+        return ot === '103' || ot === 'Wire In' || /wire[\s-]?in\b/i.test(ot);
+      });
+      const localRevenue = localAndWireInRows.reduce((sum, r) => sum + (parseFloat(String(r.TOTAL || '0')) || 0), 0);
+      const localAmounts = localAndWireInRows.map(r => parseFloat(String(r.TOTAL || '0')) || 0).filter(n => n > 0);
+      setTodayFinancials({
+        revenue: localRevenue,
+        avgTicket: localAmounts.length ? localRevenue / localAmounts.length : 0,
+        largestOrder: localAmounts.length ? Math.max(...localAmounts) : 0,
+        wireInCount: wireInRows.length,
+        wireInRevenue: wireInRows.reduce((sum, r) => sum + (parseFloat(String(r.TOTAL || '0')) || 0), 0),
+      });
+
       setPendingTickets(pendingWithDistance);
       setLastUpdated(new Date().toLocaleTimeString());
       hasCompletedInitialPollRef.current = true;
@@ -5462,10 +5527,6 @@ export default function App() {
     };
   }, []);
 
-  const totalOrderCount = useMemo(
-    () => activeOrders.length + pendingTickets.length,
-    [activeOrders.length, pendingTickets.length],
-  );
 
   const uncreatedTicketCount = useMemo(
     () => pendingTickets.filter(ticket => ticket.kind === 'uncreated').length,
@@ -5486,6 +5547,104 @@ export default function App() {
     )).length,
     [allActiveOrders, selectedDateKey],
   );
+
+  const todayStageCounts = useMemo(() => {
+    const todayOrders = allActiveOrders.filter(card => toDateKey(card.deliveryDate) === selectedDateKey && !isWireOutOrderType(card.orderType));
+    const exceptions = todayOrders.filter(c => isExceptionStatusReason(`${c.stageReason} ${c.deliveryStatus}`)).length;
+    const delivered = todayOrders.filter(c => c.stage === 'delivered_or_exception' && !isExceptionStatusReason(`${c.stageReason} ${c.deliveryStatus}`)).length;
+    const onTruck = todayOrders.filter(c => c.stage === 'on_truck' && !isCanceledOrder(c)).length;
+    const staged = todayOrders.filter(c => c.stage === 'saved_or_staged' && !isCanceledOrder(c)).length;
+    const designed = todayOrders.filter(c => c.stage === 'designed' && !isCanceledOrder(c)).length;
+    const queued = todayOrders.filter(c => (c.stage === 'queued_not_designed' || c.stage === 'incoming') && !isCanceledOrder(c)).length;
+    const marketplace = todayOrders.filter(c => c.isMarketplace).length;
+    return { queued, designed, staged, onTruck, delivered, exceptions, marketplace, total: todayOrders.length };
+  }, [allActiveOrders, selectedDateKey]);
+
+  const intakeSummary = useMemo(() => ({
+    asks: pendingTickets.filter(t => t.kind === 'ask').length,
+    cancels: pendingTickets.filter(t => t.kind === 'cancel').length,
+  }), [pendingTickets]);
+
+  const hourlyOrderCounts = useMemo(() => {
+    const counts = new Array(24).fill(0) as number[];
+    for (const d of todaySaleDates) {
+      const ms = Date.parse(d);
+      if (isNaN(ms)) continue;
+      counts[new Date(ms).getHours()]++;
+    }
+    return counts;
+  }, [todaySaleDates]);
+
+  useEffect(() => {
+    const fetchLastYear = async () => {
+      try {
+        const today = new Date();
+        const ly = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
+        const lyNext = new Date(ly.getFullYear(), ly.getMonth(), ly.getDate() + 1);
+        const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        // Mercury ToDate is exclusive — pass the following day so the target date is included
+        const result = await fetchTicketSearch({ fromDate: fmt(ly), toDate: fmt(lyNext), includeDelivered: true, notDelivered: false });
+        const rows = (result.rows ?? []).filter(r => !isWireOutOrderType(String(r.ORDER_TYPE || '')));
+        const dates = rows.map(r => String(r.SALE_DATE || '').trim()).filter(Boolean);
+        setLastYearSaleDates(dates);
+        const totals = rows.map(r => parseFloat(String(r.TOTAL || '0')) || 0).filter(n => n > 0);
+        const revenue = totals.reduce((s, n) => s + n, 0);
+        setLastYearStats({ count: rows.length, revenue, avgTicket: totals.length ? revenue / totals.length : 0 });
+      } catch { /* silently ignore */ }
+    };
+    void fetchLastYear();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const chartLineData = useMemo(() => {
+    const currentHour = new Date().getHours();
+
+    const lastYearCounts = new Array(24).fill(0) as number[];
+    for (const d of lastYearSaleDates) {
+      const ms = Date.parse(d);
+      if (isNaN(ms)) continue;
+      lastYearCounts[new Date(ms).getHours()]++;
+    }
+
+    const counts = hourlyOrderCounts as number[];
+    const yMaxCumulative = Math.max(todaySaleDates.length, lastYearSaleDates.length, 1);
+    const yMaxHourly = Math.max(...counts, ...lastYearCounts, 1);
+
+    type CumulativePoint = { hour: number; x: number; y: number; cumulative: number };
+    type HourlyPoint = { hour: number; x: number; y: number; count: number };
+
+    const xForHour = (hour: number) =>
+      CHART_ML + Math.round((hour / 23) * CHART_PW);
+
+    const buildCumulativePoints = (countsByHour: number[], maxHour: number): CumulativePoint[] => {
+      let running = 0;
+      const pts: CumulativePoint[] = [];
+      for (let h = 0; h <= Math.min(maxHour, 23); h++) {
+        running += countsByHour[h] ?? 0;
+        const x = xForHour(h);
+        const y = CHART_MT + Math.round(CHART_PH * (1 - running / yMaxCumulative));
+        pts.push({ hour: h, x, y, cumulative: running });
+      }
+      return pts;
+    };
+
+    const buildHourlyPoints = (countsByHour: number[], maxHour: number): HourlyPoint[] => {
+      const pts: HourlyPoint[] = [];
+      for (let h = 0; h <= Math.min(maxHour, 23); h++) {
+        const count = countsByHour[h] ?? 0;
+        const x = xForHour(h);
+        // Use cumulative scale so both lines share one Y axis
+        const y = CHART_MT + Math.round(CHART_PH * (1 - count / yMaxCumulative));
+        pts.push({ hour: h, x, y, count });
+      }
+      return pts;
+    };
+
+    const todayCumulativePoints = buildCumulativePoints(counts, currentHour);
+    const todayHourlyPoints = buildHourlyPoints(counts, currentHour);
+
+    return { todayCumulativePoints, todayHourlyPoints, yMaxCumulative, yMaxHourly };
+  }, [hourlyOrderCounts, todaySaleDates.length, lastYearSaleDates]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const newOrdersPulse = useMemo(() => {
     const windowMs = NEW_ORDER_PULSE_WINDOW_MINUTES * 60 * 1000;
     const nowEpoch = tickerNow.getTime();
@@ -6291,15 +6450,6 @@ export default function App() {
               <FontAwesomeIcon icon={faGear} /> Config
             </button>
           </div>
-          <div className="app__rotation-meta app__meta" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <span>Total Orders: {totalOrderCount}</span>
-            <span>New Orders: {uncreatedTicketCount}</span>
-            {/* <span>Updated: {lastUpdated || '...'}</span> */}
-            {/* <span className="badge badge--kpi">Completion Rate: {selectedDayOrderTotal ? Math.round((selectedDayOrderCompleted / selectedDayOrderTotal) * 100) : 0}%</span> */}
-            <span className="badge badge--kpi">In Progress: {filteredActiveOrders.length}</span>
-            <span className="badge badge--kpi">Completed: {selectedDayOrderCompleted}</span>
-            <span className="badge badge--kpi">Exceptions: {selectedDayExceptionCount}</span>
-          </div>
         </div>
       ) : null}
 
@@ -6307,7 +6457,7 @@ export default function App() {
         {loading ? (
           <div className="board-loading-overlay" role="status" aria-live="polite" aria-label="Loading board">
             <span className="board-loading-overlay__spinner" aria-hidden="true" />
-            <span className="board-loading-overlay__label">Loading board...</span>
+            <span className="board-loading-overlay__label">Loading Orders</span>
           </div>
         ) : null}
         {activePage?.id === 'alerts_active' ? (
@@ -6517,9 +6667,254 @@ export default function App() {
             </section>
           </div>
         ) : (
-          <div className="board-page__placeholder">
-            <div className="board-page__placeholder-title">Page 2</div>
-            <div className="board-page__placeholder-copy">Scaffold page ready for future modules.</div>
+          <div className="page2">
+            {/* Row 1: KPI stat cards */}
+            <div className="page2__kpi-row">
+              <div className="kpi-card">
+                <span className="kpi-card__value">{selectedDayOrderTotal}</span>
+                <span className="kpi-card__label">{selectedDayCountLabel} Total</span>
+              </div>
+              <div className="kpi-card kpi-card--delivered">
+                <span className="kpi-card__value">{todayStageCounts.delivered}</span>
+                <span className="kpi-card__label">Delivered</span>
+              </div>
+              <div className="kpi-card kpi-card--on-truck">
+                <span className="kpi-card__value">{todayStageCounts.queued + todayStageCounts.designed + todayStageCounts.staged + todayStageCounts.onTruck}</span>
+                <span className="kpi-card__label">In Progress</span>
+              </div>
+              <div className={`kpi-card${todayStageCounts.exceptions > 0 ? ' kpi-card--exception' : ''}`}>
+                <span className="kpi-card__value">{todayStageCounts.exceptions}</span>
+                <span className="kpi-card__label">Exceptions</span>
+              </div>
+              <div className={`kpi-card${todayStageCounts.marketplace > 0 ? ' kpi-card--marketplace' : ''}`}>
+                <span className="kpi-card__value">{todayStageCounts.marketplace}</span>
+                <span className="kpi-card__label">Marketplace</span>
+              </div>
+              <div className="kpi-card kpi-card--next-day">
+                <span className="kpi-card__value">{nextDaySummaryCount}</span>
+                <span className="kpi-card__label">Next Day</span>
+              </div>
+            </div>
+
+            {/* Row 2: Financial KPIs */}
+            <div className="page2__financial-row">
+              <div className="kpi-card kpi-card--revenue">
+                <span className="kpi-card__value kpi-card__value--currency">
+                  {todayFinancials.revenue > 0
+                    ? `$${todayFinancials.revenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                    : '—'}
+                </span>
+                <span className="kpi-card__label">
+                  Revenue
+                  {lastYearStats && lastYearStats.revenue > 0 && todayFinancials.revenue > 0 && (() => {
+                    const pct = Math.round(((todayFinancials.revenue - lastYearStats.revenue) / lastYearStats.revenue) * 100);
+                    return <span className={`kpi-card__yoy${pct >= 0 ? ' kpi-card__yoy--up' : ' kpi-card__yoy--down'}`}>{pct >= 0 ? `+${pct}%` : `${pct}%`} YoY</span>;
+                  })()}
+                </span>
+              </div>
+              <div className="kpi-card kpi-card--avg">
+                <span className="kpi-card__value kpi-card__value--currency">
+                  {todayFinancials.avgTicket > 0
+                    ? `$${todayFinancials.avgTicket.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                    : '—'}
+                </span>
+                <span className="kpi-card__label">
+                  Avg Ticket
+                  {lastYearStats && lastYearStats.avgTicket > 0 && todayFinancials.avgTicket > 0 && (() => {
+                    const pct = Math.round(((todayFinancials.avgTicket - lastYearStats.avgTicket) / lastYearStats.avgTicket) * 100);
+                    return <span className={`kpi-card__yoy${pct >= 0 ? ' kpi-card__yoy--up' : ' kpi-card__yoy--down'}`}>{pct >= 0 ? `+${pct}%` : `${pct}%`} YoY</span>;
+                  })()}
+                </span>
+              </div>
+              <div className="kpi-card kpi-card--largest">
+                <span className="kpi-card__value kpi-card__value--currency">
+                  {todayFinancials.largestOrder > 0
+                    ? `$${todayFinancials.largestOrder.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : '—'}
+                </span>
+                <span className="kpi-card__label">Largest Order</span>
+              </div>
+              <div className="kpi-card">
+                <span className="kpi-card__value">{todayFinancials.wireInCount}</span>
+                <span className="kpi-card__label">
+                  Wire-In{todayFinancials.wireInCount > 0 && todayFinancials.wireInRevenue > 0
+                    ? ` · $${todayFinancials.wireInRevenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                    : ''}
+                  {lastYearStats && (() => {
+                    const pct = lastYearStats.count > 0 ? Math.round(((selectedDayOrderTotal - lastYearStats.count) / lastYearStats.count) * 100) : null;
+                    return pct !== null
+                      ? <span className={`kpi-card__yoy${pct >= 0 ? ' kpi-card__yoy--up' : ' kpi-card__yoy--down'}`}>{pct >= 0 ? `+${pct}%` : `${pct}%`} orders YoY</span>
+                      : null;
+                  })()}
+                </span>
+              </div>
+            </div>
+
+            {/* Row 3: Order intake chart — hourly + cumulative */}
+            <div className="page2__chart-panel">
+              <div className="page2__chart-header">
+                <span className="page2__chart-title">Order Intake — Today's Deliveries</span>
+                <span className="page2__chart-legend">
+                  <span className="page2__chart-legend-item">
+                    <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#4caf86" strokeWidth="2" strokeDasharray="4 2" /><circle cx="12" cy="5" r="3" fill="#4caf86" /></svg>
+                    Per Hour
+                  </span>
+                  <span className="page2__chart-legend-item">
+                    <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#2b7fbf" strokeWidth="2.5" /><circle cx="12" cy="5" r="3.5" fill="#2b7fbf" /></svg>
+                    Cumulative
+                  </span>
+                  {lastYearSaleDates.length > 0 && (
+                    <span className="page2__chart-legend-item">
+                      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#c8a800" strokeWidth="2" strokeDasharray="4 3" /></svg>
+                      {new Date().getFullYear() - 1} Total
+                    </span>
+                  )}
+                </span>
+              </div>
+              {chartLineData.todayCumulativePoints.every(p => p.cumulative === 0) && !lastYearSaleDates.length ? (
+                <div className="page2__chart-empty">No orders recorded yet today</div>
+              ) : (
+                <svg
+                  viewBox={`0 0 ${CHART_VW} ${CHART_VH}`}
+                  width="100%"
+                  height="100%"
+                  preserveAspectRatio="none"
+                  aria-label="Orders placed today by hour and cumulative"
+                  className="page2__chart-svg"
+                >
+                  {/* Horizontal gridlines + left y-axis labels (cumulative scale) */}
+                  {[0, 0.25, 0.5, 0.75, 1].map(f => {
+                    const y = CHART_MT + Math.round(CHART_PH * (1 - f));
+                    const val = Math.round(chartLineData.yMaxCumulative * f);
+                    return (
+                      <g key={f}>
+                        <line x1={CHART_ML} y1={y} x2={CHART_ML + CHART_PW} y2={y} stroke={f === 0 ? '#9ea8b7' : '#dde4ec'} strokeWidth={f === 0 ? 1.5 : 1} />
+                        <text x={CHART_ML - 5} y={y} fontSize="11" fill="#6a7e96" textAnchor="end" dominantBaseline="middle">{val}</text>
+                      </g>
+                    );
+                  })}
+                  {/* X-axis: every 2 hours, midnight to midnight */}
+                  {CHART_VISIBLE_HOURS.filter(h => h % 2 === 0).map(hour => {
+                    const x = CHART_ML + Math.round((hour / 23) * CHART_PW);
+                    const label = hour === 0 ? '12a' : hour < 12 ? `${hour}a` : hour === 12 ? '12p' : `${hour - 12}p`;
+                    const isActive = chartLineData.todayHourlyPoints.some(p => p.hour === hour && p.count > 0);
+                    return (
+                      <text key={hour} x={x} y={CHART_MT + CHART_PH + 17} fontSize="10" textAnchor="middle" fill={isActive ? '#334e6e' : '#b0bec8'} fontWeight={isActive ? '600' : '400'}>
+                        {label}
+                      </text>
+                    );
+                  })}
+                  {/* Last year total — horizontal reference line */}
+                  {lastYearSaleDates.length > 0 && (() => {
+                    const lyTotal = lastYearSaleDates.length;
+                    const lyY = CHART_MT + Math.round(CHART_PH * (1 - lyTotal / chartLineData.yMaxCumulative));
+                    const clampedY = Math.max(lyY, CHART_MT + 1);
+                    return (
+                      <g>
+                        <line x1={CHART_ML} y1={clampedY} x2={CHART_ML + CHART_PW} y2={clampedY} stroke="#c8a800" strokeWidth="1.5" strokeDasharray="6 4" />
+                        <text x={CHART_ML + CHART_PW + 4} y={clampedY} fontSize="11" fill="#7a5800" dominantBaseline="middle" fontWeight="700" stroke="white" strokeWidth="3" paintOrder="stroke">
+                          {lyTotal}
+                        </text>
+                      </g>
+                    );
+                  })()}
+                  {/* Today hourly line — orders per hour */}
+                  {chartLineData.todayHourlyPoints.length > 1 && (
+                    <polyline
+                      points={chartLineData.todayHourlyPoints.map(p => `${p.x},${p.y}`).join(' ')}
+                      fill="none"
+                      stroke="#4caf86"
+                      strokeWidth="2"
+                      strokeDasharray="5 3"
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                    />
+                  )}
+                  {chartLineData.todayHourlyPoints.filter(p => p.count > 0).map(p => {
+                    const labelY = Math.min(p.y + 14, CHART_MT + CHART_PH - 3);
+                    return (
+                      <g key={`hr-${p.hour}`}>
+                        <circle cx={p.x} cy={p.y} r={3.5} fill="#4caf86" stroke="#fff" strokeWidth="1.5" />
+                        <text x={p.x} y={labelY} fontSize="10" textAnchor="middle" dominantBaseline="auto" fill="#2e8a60" fontWeight="700" stroke="white" strokeWidth="3" paintOrder="stroke">
+                          {p.count}
+                        </text>
+                      </g>
+                    );
+                  })}
+                  {/* Cumulative line — running total */}
+                  {chartLineData.todayCumulativePoints.length > 1 && (
+                    <polyline
+                      points={chartLineData.todayCumulativePoints.map(p => `${p.x},${p.y}`).join(' ')}
+                      fill="none"
+                      stroke="#2b7fbf"
+                      strokeWidth="2.5"
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                    />
+                  )}
+                  {chartLineData.todayCumulativePoints.filter(p => p.cumulative > 0).map((p, idx, arr) => {
+                    const isLast = idx === arr.length - 1;
+                    const showLabel = isLast || (idx > 0 && arr[idx - 1].cumulative !== p.cumulative);
+                    const labelY = Math.max(p.y - 9, CHART_MT + 13);
+                    return (
+                      <g key={`cum-${p.hour}`}>
+                        <circle cx={p.x} cy={p.y} r={isLast ? 5 : 3.5} fill={isLast ? '#1a5585' : '#2b7fbf'} stroke="#fff" strokeWidth="1.5" />
+                        {showLabel && (
+                          <text x={p.x} y={labelY} fontSize={isLast ? '13' : '11'} textAnchor="middle" dominantBaseline="auto" fill={isLast ? '#1a5585' : '#2b7fbf'} fontWeight={isLast ? '800' : '600'} stroke="white" strokeWidth="3" paintOrder="stroke">
+                            {p.cumulative}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
+              )}
+            </div>
+
+            {/* Row 4: Intake summary + completion ring */}
+            <div className="page2__bottom">
+              <div className="page2__intake-cards">
+                <div className={`intake-card${pendingTickets.length > 0 ? ' intake-card--pending' : ''}`}>
+                  <span className="intake-card__value">{pendingTickets.length}</span>
+                  <span className="intake-card__label">Pending Intake</span>
+                </div>
+                <div className={`intake-card${uncreatedTicketCount > 0 ? ' intake-card--alert' : ''}`}>
+                  <span className="intake-card__value">{uncreatedTicketCount}</span>
+                  <span className="intake-card__label">New Orders</span>
+                </div>
+                <div className={`intake-card${staleAskTicketCount > 0 ? ' intake-card--warn' : ''}`}>
+                  <span className="intake-card__value">{staleAskTicketCount}</span>
+                  <span className="intake-card__label">Stale Asks</span>
+                </div>
+                <div className={`intake-card${intakeSummary.cancels > 0 ? ' intake-card--warn' : ''}`}>
+                  <span className="intake-card__value">{intakeSummary.cancels}</span>
+                  <span className="intake-card__label">Cancels</span>
+                </div>
+                <div className={`intake-card${intakeSummary.asks > 0 ? ' intake-card--ask' : ''}`}>
+                  <span className="intake-card__value">{intakeSummary.asks}</span>
+                  <span className="intake-card__label">Asks</span>
+                </div>
+              </div>
+              <div className="completion-ring-card">
+                <span className="completion-ring-card__label">{selectedDayCountLabel} Completion</span>
+                <svg viewBox="0 0 110 110" width="80" height="80" aria-hidden="true">
+                  <circle className="completion-ring__track" cx="55" cy="55" r="44" />
+                  <circle
+                    className={`completion-ring__fill${selectedDayCompletionIsComplete ? ' completion-ring__fill--complete' : ''}`}
+                    cx="55"
+                    cy="55"
+                    r="44"
+                    transform="rotate(-90 55 55)"
+                    style={{
+                      strokeDasharray: `${2 * Math.PI * 44} ${2 * Math.PI * 44}`,
+                      strokeDashoffset: `${2 * Math.PI * 44 * (1 - selectedDayCompletionPercent / 100)}`,
+                    }}
+                  />
+                  <text className="completion-ring__text" x="55" y="51">{selectedDayCompletionPercent}%</text>
+                  <text className="completion-ring__subtext" x="55" y="67">{selectedDayOrderCompleted}/{selectedDayOrderTotal}</text>
+                </svg>
+              </div>
+            </div>
           </div>
         )}
       </main>
@@ -6540,8 +6935,8 @@ export default function App() {
           <span className="app__ticker-date">{tickerDateLabel}</span>
         </div>
         <div className="app__ticker-track" aria-hidden="true" style={tickerScrollDurationStyle}>
-          <span className="app__ticker-copy">{tickerScrollText}</span>
-          <span className="app__ticker-copy">{tickerScrollText}</span>
+          <span className="app__ticker-copy">{loading ? LOADING_TICKER_TEXT : tickerScrollText}</span>
+          <span className="app__ticker-copy">{loading ? LOADING_TICKER_TEXT : tickerScrollText}</span>
         </div>
       </div>
     </div>

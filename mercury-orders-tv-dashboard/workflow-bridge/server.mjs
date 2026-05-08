@@ -959,6 +959,13 @@ function parseSalePosition(rawValue = '') {
   return { saleId, ticketPosition };
 }
 
+// Mercury SALE_TYP_ID integer → human-readable order type string
+const SALE_TYP_ID_MAP = {
+  102: 'Local',
+  103: 'Wire In',
+  104: 'Wire Out',
+};
+
 function normalizeTicketSearchRow(rawRow = {}) {
   const row = rawRow || {};
   const rawUserReference = firstRowValue(row, [
@@ -1020,7 +1027,15 @@ function normalizeTicketSearchRow(rawRow = {}) {
     TICKET_POSITION: String(ticketPosition || '1').trim(),
     USER_REFERENCE: String(userReference || '').trim(),
     SALE_STATUS_ID: firstRowValue(row, ['SALE_STATUS_ID', 'SALESTATUSID', 'ORDER_STATUS_ID', 'ORDERSTATUSID', 'ORDER_STATUS']),
-    ORDER_TYPE: firstRowValue(row, ['ORDER_TYPE', 'SALE_TYPE', 'SALETYPE', 'TYPE', 'DELIVERY_TYPE', 'SALE_TYP_ID']),
+    ORDER_TYPE: (() => {
+      // SALE_TYP_ID is an integer in Mercury's TicketSearch (e.g. 104 = Wire Out)
+      const saleTypId = parseInt(String(row.SALE_TYP_ID || ''), 10);
+      const mappedType = !isNaN(saleTypId) ? SALE_TYP_ID_MAP[saleTypId] : undefined;
+      if (mappedType) return mappedType;
+      const candidates = ['ORDER_TYPE', 'SALE_TYPE', 'SALETYPE', 'TYPE', 'DELIVERY_TYPE'];
+      const wireValue = candidates.map(k => String(row[k] || '').trim()).find(v => /\bwire\b/i.test(v));
+      return wireValue || firstRowValue(row, candidates);
+    })(),
     RECIPIENT_NAME: firstRowValue(row, ['RECIPIENT_NAME', 'RECIP_NAME', 'RECIPIENTREF', 'RECIPIENT_REF', 'RECIPIENT', 'SUMMARY_TEXT', 'NAME']),
     RECIPIENT_ADDRESS: firstRowValue(row, [
       'RECIPIENT_ADDRESS',

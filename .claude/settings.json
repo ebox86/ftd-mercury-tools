@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs cat)",
+      "Bash(npx tsc *)",
+      "PowerShell($node = \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\artifacts\\\\tooling-local\\\\node-runtime\\\\node-v20.19.0-win-x64\\\\node.exe\"; cd \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\kiosk-app\"; & $node node_modules\\\\typescript\\\\bin\\\\tsc --noEmit 2>&1 | Select-Object -First 40)",
+      "PowerShell($node = \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\artifacts\\\\tooling-local\\\\node-runtime\\\\node-v20.19.0-win-x64\\\\node.exe\"; cd \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\kiosk-app\"; & $node node_modules\\\\typescript\\\\bin\\\\tsc --noEmit 2>&1 | Select-Object -First 30)",
+      "PowerShell($node = \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\artifacts\\\\tooling-local\\\\node-runtime\\\\node-v20.19.0-win-x64\\\\node.exe\"; cd \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\kiosk-app\"; & $node node_modules\\\\typescript\\\\bin\\\\tsc --noEmit 2>&1 | Select-Object -First 20)",
+      "Bash(node node_modules/typescript/bin/tsc --noEmit)",
+      "Bash(\"C:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\artifacts\\\\tooling-local\\\\node-runtime\\\\node-v20.19.0-win-x64\\\\node.exe\" node_modules/typescript/bin/tsc --noEmit)",
+      "PowerShell($node = \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\artifacts\\\\tooling-local\\\\node-runtime\\\\node-v20.19.0-win-x64\\\\node.exe\"; Set-Location \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\kiosk-app\"; & $node node_modules/typescript/bin/tsc --noEmit 2>&1)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\reference\" -Recurse)",
+      "Bash(Select-Object Name, FullName)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(curl -s \"http://192.168.1.50/WsMercuryWebAPI/orderentry.asmx?schema=TicketSearchDataset\")",
+      "Bash(curl -s \"http://192.168.1.50/WsMercuryWebAPI/dashboard.asmx?schema=DashboardEventDataset\")",
+      "Bash(curl -s -X POST http://localhost/WsMercuryWebAPI/orderentry.asmx -H 'Content-Type: text/xml; charset=utf-8' -H 'SOAPAction: \"http://localhost/webservices/TicketSearch\"' -d '<?xml version=\"1.0\" encoding=\"utf-8\"?> *)",
+      "Bash(npm run *)",
+      "Read(//c/Program Files/nodejs/**)",
+      "PowerShell($env:PATH = \"C:\\\\Program Files\\\\nodejs;\" + $env:PATH; cd \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\kiosk-app\"; npx tsc --noEmit 2>&1 | Select-Object -First 40)",
+      "Bash(find /mnt/c/inetpub -name \"*.asmx\" 2>/dev/null | head -30)",
+      "Read(//mnt/c/**)",
+      "Read(//c/inetpub/wwwroot/**)",
+      "Read(//c//**)",
+      "Read(//c/Wings/Web/WsMercuryWebAPI/**)",
+      "Read(//c/Wings/**)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Wings\" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Where-Object { $_.Name -match \"TicketSearch|OrderHistory\" } | Select-Object FullName | Select-Object -First 20)",
+      "PowerShell($url = \"http://localhost/WsMercuryWebAPI/OrderEntry.asmx?WSDL\"; try { $resp = Invoke-WebRequest -Uri $url -TimeoutSec 5 -ErrorAction Stop; $resp.Content.Substring\\(0, 3000\\) } catch { \"Error: $_\" })",
+      "PowerShell($url = \"http://localhost/WsMercuryWebAPI/Dashboard.asmx?WSDL\"; try { $resp = Invoke-WebRequest -Uri $url -TimeoutSec 5 -ErrorAction Stop; $resp.Content.Substring\\(0, 5000\\) } catch { \"Error: $_\" })",
+      "Bash(curl -s \"http://localhost/WsMercuryWebAPI/OrderEntry.asmx?WSDL\")",
+      "Bash(curl -s \"http://localhost/WsMercuryWebAPI/Dashboard.asmx?WSDL\")",
+      "Bash(curl -s \"http://localhost:3199/api/workflow/tickets/search?fromDate=2025-05-07&toDate=2025-05-07&notDelivered=false&includeDelivered=true\")",
+      "Bash(curl -s \"http://localhost:17344/api/workflow/tickets/search?fromDate=2025-05-07&toDate=2025-05-07&notDelivered=false&includeDelivered=true\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('rows:', len\\(d.get\\('rows',[]\\)\\), '| keys:', list\\(d.keys\\(\\)\\)\\)\")",
+      "Bash(curl -sv \"http://localhost:17344/api/workflow/tickets/search?fromDate=2025-05-07&toDate=2025-05-07&notDelivered=false&includeDelivered=true\")"
+    ]
+  }
+}
