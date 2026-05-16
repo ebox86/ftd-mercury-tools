@@ -602,6 +602,15 @@ function sendJson(res, statusCode, payload, extraHeaders = {}) {
   res.end(JSON.stringify(payload, null, 2));
 }
 
+function sendBinary(res, statusCode, payload, contentType, extraHeaders = {}) {
+  res.writeHead(statusCode, {
+    'Content-Type': contentType || 'application/octet-stream',
+    'Access-Control-Allow-Origin': '*',
+    ...extraHeaders
+  });
+  res.end(payload);
+}
+
 function sendXml(res, statusCode, payload) {
   res.writeHead(statusCode, {
     'Content-Type': 'text/xml; charset=utf-8',
@@ -959,6 +968,17 @@ function parseSalePosition(rawValue = '') {
   return { saleId, ticketPosition };
 }
 
+// Mercury SALE_TYP_ID integer → human-readable order type string
+// TicketSearch returns values in the 100-range (102=Local, 103=Wire In, 104=Wire Out).
+// 100 and 101 are unmapped by Mercury docs but reserved here for OE/Pickup variants.
+const SALE_TYP_ID_MAP = {
+  100: 'Pickup', // OE / in-store pickup (TicketSearch 100-range; unconfirmed, added defensively)
+  101: 'Pickup', // Pickup/COD (TicketSearch 100-range; unconfirmed, added defensively)
+  102: 'Local',
+  103: 'Wire In',
+  104: 'Wire Out',
+};
+
 function normalizeTicketSearchRow(rawRow = {}) {
   const row = rawRow || {};
   const rawUserReference = firstRowValue(row, [
@@ -1020,7 +1040,24 @@ function normalizeTicketSearchRow(rawRow = {}) {
     TICKET_POSITION: String(ticketPosition || '1').trim(),
     USER_REFERENCE: String(userReference || '').trim(),
     SALE_STATUS_ID: firstRowValue(row, ['SALE_STATUS_ID', 'SALESTATUSID', 'ORDER_STATUS_ID', 'ORDERSTATUSID', 'ORDER_STATUS']),
-    ORDER_TYPE: firstRowValue(row, ['ORDER_TYPE', 'SALE_TYPE', 'SALETYPE', 'TYPE', 'DELIVERY_TYPE', 'SALE_TYP_ID']),
+    ORDER_TYPE: (() => {
+      // SALE_TYP_ID is an integer in Mercury's TicketSearch (102=Local, 103=Wire In, 104=Wire Out)
+      const saleTypId = parseInt(String(row.SALE_TYP_ID || ''), 10);
+      const mappedType = !isNaN(saleTypId) ? SALE_TYP_ID_MAP[saleTypId] : undefined;
+      if (mappedType) {
+        // Wire In / Local orders with no recipient name are store pickups, never deliveries.
+        // TicketSearch only returns RECIP_NAME (no address fields), so empty name is definitive.
+        const recipName = String(row.RECIP_NAME || row.RECIPIENT_NAME || '').trim();
+        if (!recipName && (mappedType === 'Wire In' || mappedType === 'Local')) return 'Pickup';
+        return mappedType;
+      }
+      const candidates = ['ORDER_TYPE', 'SALE_TYPE', 'SALETYPE', 'TYPE', 'DELIVERY_TYPE'];
+      // Prefer pickup/COD keyword match over wire keyword to avoid misclassifying pickups
+      const pickupValue = candidates.map(k => String(row[k] || '').trim()).find(v => /\bpick[\s-]*up\b|\bcod\b/i.test(v));
+      if (pickupValue) return pickupValue;
+      const wireValue = candidates.map(k => String(row[k] || '').trim()).find(v => /\bwire\b/i.test(v));
+      return wireValue || firstRowValue(row, candidates);
+    })(),
     RECIPIENT_NAME: firstRowValue(row, ['RECIPIENT_NAME', 'RECIP_NAME', 'RECIPIENTREF', 'RECIPIENT_REF', 'RECIPIENT', 'SUMMARY_TEXT', 'NAME']),
     RECIPIENT_ADDRESS: firstRowValue(row, [
       'RECIPIENT_ADDRESS',
@@ -1827,6 +1864,106 @@ async function getMapboxGeocodeCoords(address = {}) {
     }
   });
   return payload;
+}
+
+function normalizeMapboxFeature(feature) {
+  const center = Array.isArray(feature?.center) ? feature.center : null;
+  const longitude = Number(center?.[0]);
+  const latitude = Number(center?.[1]);
+  if (!hasUsableCoords(latitude, longitude)) return null;
+  return {
+    id: String(feature?.id || feature?.mapbox_id || feature?.place_name || ''),
+    label: String(feature?.place_name || feature?.text || '').trim(),
+    address: String(feature?.place_name || '').trim(),
+    latitude,
+    longitude,
+  };
+}
+
+async function getMapboxAddressSuggestions(query, options = {}) {
+  if (!mapboxToken) {
+    throw new Error('MAPBOX_TOKEN is missing.');
+  }
+  const normalizedQuery = normalizeSpace(query || '');
+  if (normalizedQuery.length < 3) {
+    return { suggestions: [], mapboxEnabled: Boolean(mapboxToken) };
+  }
+  const country = normalizeSpace(options.country || 'US').toLowerCase();
+  const limit = Math.max(1, Math.min(8, Number(options.limit || 5) || 5));
+  const cacheKey = buildLiveCacheKey('mapbox-address-suggest', { query: normalizedQuery, country, limit });
+  const { payload } = await getLiveCachedPayload(cacheKey, mapboxAddressCacheTtlMs, async () => {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), Math.max(1000, mapboxTimeoutMs));
+    try {
+      const endpoint = `${mapboxApiBaseUrl}/geocoding/v5/mapbox.places/${encodeURIComponent(normalizedQuery)}.json`;
+      const params = new URLSearchParams({
+        access_token: mapboxToken,
+        limit: String(limit),
+        autocomplete: 'true',
+        types: 'address,poi',
+      });
+      if (country) params.set('country', country);
+      const response = await fetch(`${endpoint}?${params.toString()}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      const bodyText = await response.text();
+      if (!response.ok) {
+        throw new Error(`Mapbox Geocoding failed (${response.status}): ${bodyText.slice(0, 240)}`);
+      }
+      let body = null;
+      try {
+        body = JSON.parse(bodyText);
+      } catch {
+        throw new Error('Mapbox Geocoding returned invalid JSON.');
+      }
+      const suggestions = (Array.isArray(body?.features) ? body.features : [])
+        .map(normalizeMapboxFeature)
+        .filter(Boolean);
+      return {
+        suggestions,
+        mapboxEnabled: true,
+      };
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  });
+  return payload;
+}
+
+async function getMapboxStaticMapImage(params = {}) {
+  if (!mapboxToken) {
+    throw new Error('MAPBOX_TOKEN is missing.');
+  }
+  const latitude = Number(params.latitude);
+  const longitude = Number(params.longitude);
+  if (!hasUsableCoords(latitude, longitude)) {
+    throw new Error('Mapbox static map requires usable latitude and longitude.');
+  }
+  const width = Math.max(240, Math.min(900, Number(params.width || 640) || 640));
+  const height = Math.max(140, Math.min(640, Number(params.height || 260) || 260));
+  const zoom = Math.max(8, Math.min(18, Number(params.zoom || 14) || 14));
+  const marker = `pin-s+1f3d64(${longitude.toFixed(6)},${latitude.toFixed(6)})`;
+  const overlay = /^(1|true|yes)$/i.test(String(params.marker ?? 'false').trim()) ? `${marker}/` : '';
+  const endpoint = `${mapboxApiBaseUrl}/styles/v1/mapbox/streets-v12/static/${overlay}${longitude.toFixed(6)},${latitude.toFixed(6)},${zoom},0/${Math.round(width)}x${Math.round(height)}@2x`;
+  const url = `${endpoint}?${new URLSearchParams({
+    access_token: mapboxToken,
+    attribution: 'false',
+    logo: 'false',
+  }).toString()}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { Accept: 'image/png,image/*' },
+  });
+  const body = Buffer.from(await response.arrayBuffer());
+  if (!response.ok) {
+    throw new Error(`Mapbox Static Images failed (${response.status}): ${body.toString('utf8').slice(0, 240)}`);
+  }
+  return {
+    body,
+    contentType: response.headers.get('content-type') || 'image/png',
+  };
 }
 
 async function getLiveDistanceEstimate(params = {}) {
@@ -2639,6 +2776,61 @@ async function routeJson(req, res, url, pathname) {
       ttlMs: mapboxRouteCacheTtlMs,
       loader: () => getLiveDistanceEstimate(params),
     });
+  }
+
+  if (pathname === '/api/workflow/mapbox/address-suggest') {
+    const query = resolveParam(url, '', ['q', 'query', 'address'], '');
+    const country = resolveParam(url, '', ['country'], 'US');
+    const limit = resolveParam(url, '', ['limit'], '5');
+    return sendLiveCachedJson(res, url, {
+      scope: 'mapbox-address-suggest',
+      params: { query, country, limit },
+      endpoint: 'mapbox-address-suggest',
+      ttlMs: mapboxAddressCacheTtlMs,
+      loader: () => getMapboxAddressSuggestions(query, { country, limit }),
+    });
+  }
+
+  if (pathname === '/api/workflow/mapbox/static-map') {
+    try {
+      const image = await getMapboxStaticMapImage({
+        latitude: resolveParam(url, '', ['latitude', 'lat'], ''),
+        longitude: resolveParam(url, '', ['longitude', 'lon', 'lng'], ''),
+        width: resolveParam(url, '', ['width', 'w'], '640'),
+        height: resolveParam(url, '', ['height', 'h'], '260'),
+        zoom: resolveParam(url, '', ['zoom', 'z'], '14'),
+        marker: resolveParam(url, '', ['marker'], 'false'),
+      });
+      return sendBinary(res, 200, image.body, image.contentType, {
+        'Cache-Control': 'public, max-age=3600',
+      });
+    } catch (error) {
+      return sendJson(res, 502, {
+        error: String(error?.message || error),
+        endpoint: 'mapbox-static-map',
+      });
+    }
+  }
+
+  if (pathname === '/api/workflow/mapbox/static-map-base') {
+    try {
+      const image = await getMapboxStaticMapImage({
+        latitude: resolveParam(url, '', ['latitude', 'lat'], ''),
+        longitude: resolveParam(url, '', ['longitude', 'lon', 'lng'], ''),
+        width: resolveParam(url, '', ['width', 'w'], '640'),
+        height: resolveParam(url, '', ['height', 'h'], '260'),
+        zoom: resolveParam(url, '', ['zoom', 'z'], '14'),
+        marker: 'false',
+      });
+      return sendBinary(res, 200, image.body, image.contentType, {
+        'Cache-Control': 'no-store',
+      });
+    } catch (error) {
+      return sendJson(res, 502, {
+        error: String(error?.message || error),
+        endpoint: 'mapbox-static-map-base',
+      });
+    }
   }
 
   if (pathname === '/api/workflow/order-lifecycle/by-service-msg') {

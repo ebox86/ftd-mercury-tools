@@ -32,6 +32,19 @@ export interface DistanceEstimateResponse {
   };
 }
 
+export interface AddressSuggestion {
+  id: string;
+  label: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface AddressSuggestionResponse {
+  suggestions: AddressSuggestion[];
+  mapboxEnabled?: boolean;
+}
+
 const RAW_ENV_BASE_URL = String((import.meta.env.VITE_WORKFLOW_BASE_URL as string | undefined) || '').trim();
 
 function normalizeBaseUrl(raw: string): string {
@@ -355,6 +368,53 @@ export async function fetchDistanceEstimate(params: {
   });
   if (!query) return null;
   return getJson<DistanceEstimateResponse>(`/api/workflow/distance/estimate${query}`);
+}
+
+export async function fetchAddressSuggestions(queryText: string): Promise<AddressSuggestion[]> {
+  const query = buildQuery({ q: queryText, country: 'US', limit: 5 });
+  if (!query) return [];
+  const response = await getJson<AddressSuggestionResponse>(`/api/workflow/mapbox/address-suggest${query}`);
+  return Array.isArray(response.suggestions) ? response.suggestions : [];
+}
+
+export function buildStaticMapUrl(params: {
+  latitude: string | number;
+  longitude: string | number;
+  width?: string | number;
+  height?: string | number;
+  zoom?: string | number;
+  marker?: boolean;
+  cacheKey?: string | number;
+}): string {
+  const query = buildQuery({
+    latitude: params.latitude,
+    longitude: params.longitude,
+    width: params.width ?? 640,
+    height: params.height ?? 260,
+    zoom: params.zoom ?? 14,
+    marker: params.marker === undefined ? undefined : (params.marker ? 'true' : 'false'),
+    v: params.cacheKey,
+  });
+  return buildRequestUrl(`/api/workflow/mapbox/static-map${query}`);
+}
+
+export function buildStaticMapBaseUrl(params: {
+  latitude: string | number;
+  longitude: string | number;
+  width?: string | number;
+  height?: string | number;
+  zoom?: string | number;
+  cacheKey?: string | number;
+}): string {
+  const query = buildQuery({
+    latitude: params.latitude,
+    longitude: params.longitude,
+    width: params.width ?? 640,
+    height: params.height ?? 260,
+    zoom: params.zoom ?? 14,
+    v: params.cacheKey,
+  });
+  return buildRequestUrl(`/api/workflow/mapbox/static-map-base${query}`);
 }
 
 export async function fetchLifecycleLatest(ticketId: string): Promise<LifecycleRow | null> {
