@@ -2,7 +2,7 @@ import { buildCompletionTickerItem } from './modules/completion';
 import { buildExceptionWatchTickerItem } from './modules/exceptionWatch';
 import { buildIntakeTickerItem } from './modules/intake';
 import { buildNewOrdersTickerItem } from './modules/newOrders';
-import { buildStoreHoursTickerItem } from './modules/storeHours';
+import { buildStoreHoursTickerItem, type StoreHoursConfig } from './modules/storeHours';
 import { buildWeatherTickerItem } from './modules/weather';
 import type { TickerModuleId, TickerModuleItem, WeatherTickerSnapshot } from './types';
 
@@ -12,6 +12,7 @@ export function buildTickerItems(input: {
   enabledModuleIds: TickerModuleId[];
   weatherZip: string;
   weatherSnapshot: WeatherTickerSnapshot | null;
+  storeHours: StoreHoursConfig;
   completion: {
     dayLabel: string;
     completed: number;
@@ -59,7 +60,7 @@ export function buildTickerItems(input: {
       continue;
     }
     if (moduleId === 'store_hours') {
-      items.push(buildStoreHoursTickerItem());
+      items.push(buildStoreHoursTickerItem(input.storeHours));
     }
   }
 
