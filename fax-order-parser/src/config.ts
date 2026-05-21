@@ -20,7 +20,17 @@ export interface FaxParserConfig {
   fileFormat: 'PDF' | 'TIF';
   processedSubfolder: string;
   email: EmailConfig;
+  fieldMap: Record<string, string>;
 }
+
+export const DEFAULT_FIELD_MAP: Record<string, string> = {
+  'Bill Name':             'Customer Name',
+  'Recipient Name':        'For the Passing Of',
+  'Card Message':          'Card Message',
+  'Product Code 1':        'Product Item Number',
+  'Delivery Instructions': 'Delivery Time',
+  'Additional Information':'For the Passing Of',
+};
 
 export function getConfigDir(): string {
   return path.join(
@@ -48,15 +58,7 @@ export const DEFAULT_CONFIG: FaxParserConfig = {
     encryptionPassword: '',
     encryptionAlgorithm: 'TripleDES',
   },
-};
-
-export const DEFAULT_FIELD_MAP: Record<string, string> = {
-  'Bill Name':             'Customer Name',
-  'Recipient Name':        'For the Passing Of',
-  'Card Message':          'Card Message',
-  'Product Code 1':        'Product Item Number',
-  'Delivery Instructions': 'Delivery Time',
-  'Additional Information':'For the Passing Of',
+  fieldMap: { ...DEFAULT_FIELD_MAP },
 };
 
 export function loadConfig(): FaxParserConfig {
@@ -73,6 +75,10 @@ export function loadConfig(): FaxParserConfig {
       email: {
         ...DEFAULT_CONFIG.email,
         ...(parsed.email ?? {}),
+      },
+      fieldMap: {
+        ...DEFAULT_FIELD_MAP,
+        ...(parsed.fieldMap ?? {}),
       },
     };
   } catch {

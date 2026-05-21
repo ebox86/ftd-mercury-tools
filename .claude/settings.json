@@ -98,7 +98,10 @@
       "Bash(Copy-Item 'C:\\\\Users\\\\Florist\\\\Downloads\\\\avatars - ccef\\\\ccef\\\\*' -Destination 'c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\kiosk-app\\\\public\\\\weather-icons\\\\ccef\" -Force *)",
       "Bash(Select-String -Path \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\kiosk-app\\\\src\\\\App.tsx\" -Pattern \"^\\\\s*</>\\\\s*$\")",
       "Bash(Select-Object LineNumber, Line)",
-      "Bash(dotnet build *)"
+      "Bash(dotnet build *)",
+      "Bash(node -e \"const t = require\\('tesseract.js'\\); console.log\\(t.createWorker.toString\\(\\).slice\\(0,200\\)\\)\")",
+      "Bash(node -e \"const {createWorker} = require\\('tesseract.js'\\); const w = createWorker\\('eng', 1, {}\\); console.log\\('ok'\\)\")",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/tesseract.js/package.json'\\).version\\)\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\Florist\\Downloads\\avatars - ccef\\ccef"

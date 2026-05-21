@@ -36,7 +36,7 @@ async function processFile(filePath: string, fieldOverrides?: Partial<FaxOrderFi
   }
 
   // Quarantine the file if required WOI fields are missing after OCR
-  const fieldMap = (config as any).fieldMap ?? DEFAULT_FIELD_MAP;
+  const fieldMap = config.fieldMap;
   const missing = getMissingRequiredFields(fields, fieldMap);
   if (missing.length > 0 && !fieldOverrides) {
     const sidecar = holdSidecarPath(filePath);

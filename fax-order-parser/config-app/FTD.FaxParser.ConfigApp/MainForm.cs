@@ -741,8 +741,8 @@ internal sealed class MainForm : Form
     _smtpHostBox.Text         = cfg.Email.SmtpHost;
     _smtpPortSpinner.Value    = Math.Clamp(cfg.Email.SmtpPort, 1, 65535);
 
-    _encryptionPasswordBox.Text = cfg.Email.WoiEncryption.Password;
-    var algoIndex = _encryptionAlgorithmCombo.Items.IndexOf(cfg.Email.WoiEncryption.Algorithm);
+    _encryptionPasswordBox.Text = cfg.Email.EncryptionPassword;
+    var algoIndex = _encryptionAlgorithmCombo.Items.IndexOf(cfg.Email.EncryptionAlgorithm);
     _encryptionAlgorithmCombo.SelectedIndex = algoIndex >= 0 ? algoIndex : 0;
   }
 
@@ -762,11 +762,8 @@ internal sealed class MainForm : Form
         SubjectLine      = _subjectLineBox.Text.Trim(),
         SmtpHost         = _smtpHostBox.Text.Trim(),
         SmtpPort         = (int)_smtpPortSpinner.Value,
-        WoiEncryption    = new WoiEncryptionConfig
-        {
-          Algorithm = _encryptionAlgorithmCombo.SelectedItem?.ToString() ?? "None",
-          Password  = _encryptionPasswordBox.Text,
-        },
+        EncryptionPassword  = _encryptionPasswordBox.Text,
+        EncryptionAlgorithm = _encryptionAlgorithmCombo.SelectedItem?.ToString() ?? "TripleDES",
       },
     };
 

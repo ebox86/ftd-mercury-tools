@@ -81,17 +81,11 @@ internal sealed class EmailConfig
   [JsonPropertyName("smtpPort")]
   public int SmtpPort { get; set; } = 587;
 
-  [JsonPropertyName("woiEncryption")]
-  public WoiEncryptionConfig WoiEncryption { get; set; } = new();
-}
+  [JsonPropertyName("encryptionPassword")]
+  public string EncryptionPassword { get; set; } = string.Empty;
 
-internal sealed class WoiEncryptionConfig
-{
-  [JsonPropertyName("algorithm")]
-  public string Algorithm { get; set; } = "None";
-
-  [JsonPropertyName("password")]
-  public string Password { get; set; } = string.Empty;
+  [JsonPropertyName("encryptionAlgorithm")]
+  public string EncryptionAlgorithm { get; set; } = "TripleDES";
 }
 
 internal sealed class OrderLogEntry

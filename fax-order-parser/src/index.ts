@@ -80,8 +80,7 @@ export function parseOrderFields(ocrText: string): FaxOrderFields {
   if (deliveryBlockMatch) {
     // Join lines and normalize spaces
     const deliveryBlock = deliveryBlockMatch[1].replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-    console.log('DEBUG: Delivery block:', deliveryBlock);
-    // Extract date and times from the end of the block
+// Extract date and times from the end of the block
     const timeDateMatch = deliveryBlock.match(/from\s*([\d:]+\s*[APM]{2})(?:\s*to\s*([\d:]+\s*[APM]{2}))?\s*on\s*([A-Za-z]+ \d{1,2}, \d{4})/i);
     if (timeDateMatch) {
       deliveryDate = timeDateMatch[3].trim();
