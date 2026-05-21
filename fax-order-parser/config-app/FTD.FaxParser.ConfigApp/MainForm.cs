@@ -1,6 +1,8 @@
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.ComponentModel;
 using System.Security.Principal;
 using System.Windows.Forms;
@@ -11,9 +13,12 @@ internal sealed class MainForm : Form
 {
   // ── Constants ────────────────────────────────────────────────────────────────
 
-  private static readonly Color AccentColor   = Color.FromArgb(26, 58, 92);
-  private static readonly Color BgColor       = Color.FromArgb(240, 242, 245);
-  private const string          ServiceName   = "FTD Fax Order Parser";
+  private static readonly Color  AccentColor   = Color.FromArgb(26, 58, 92);
+  private static readonly Color  BgColor       = Color.FromArgb(240, 242, 245);
+  private const string           ServiceName   = "FTD Fax Order Parser";
+  private static readonly string AppRoot       = @"C:\FTDTools\FaxOrderParser";
+  private static readonly string NodeExePath   = Path.Combine(@"C:\FTDTools\FaxOrderParser", "runtime", "node.exe");
+  private static readonly string ServiceScript = Path.Combine(@"C:\FTDTools\FaxOrderParser", "service", "service.js");
 
   private static string ConfigPath => Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
@@ -22,6 +27,12 @@ internal sealed class MainForm : Form
   private static string LogPath => Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
     "FTD", "FaxOrderParser", "orders-log.json");
+
+  private static readonly string ServiceLogDir = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+    "FTD", "FaxOrderParser", "logs");
+  private static string OutLogPath => Path.Combine(ServiceLogDir, "fax-parser.out.log");
+  private static string ErrLogPath => Path.Combine(ServiceLogDir, "fax-parser.err.log");
 
   // ── Monitor tab controls ──────────────────────────────────────────────────────
 
@@ -43,6 +54,45 @@ internal sealed class MainForm : Form
 
   private DataGridView   _logGrid              = null!;
   private Label          _logCountLabel        = null!;
+  private ListBox        _pendingFilesList     = null!;
+  private Label          _pendingCountLabel    = null!;
+  private Panel          _tabContentHost       = null!;
+  private Button         _monitorTabButton     = null!;
+  private Button         _emailTabButton       = null!;
+  private Button         _logTabButton         = null!;
+  private Control        _monitorTabPage       = null!;
+  private Control        _emailTabPage         = null!;
+  private Control        _logTabPage           = null!;
+
+  // ── Email tab — encryption controls ──────────────────────────────────────────
+
+  private TextBox        _encryptionPasswordBox = null!;
+  private ComboBox       _encryptionAlgorithmCombo = null!;
+
+  // ── Pending files / Process Selected ─────────────────────────────────────────
+
+  private Button         _processSelectedBtn   = null!;
+  private readonly ToolTip _toolTip            = new ToolTip();
+  private readonly HashSet<string> _heldFiles  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+  private static readonly string[] RequiredWoiMappingFields =
+  [
+    "Bill Name", "Recipient Name", "Product Code 1",
+  ];
+
+  private static readonly string[] OcrSourceOptions =
+  [
+    "(none)", "Customer Name", "For the Passing Of", "Delivery Location",
+    "Card Message", "Order Number", "Customer Phone", "Customer Address",
+    "Product Item Number", "Product Description", "Product Price",
+    "Delivery Charge", "Delivery Date", "Delivery Time", "Total Payable", "Vendor Name",
+  ];
+
+  private static readonly HashSet<string> RemappableWoiFields =
+  [
+    "Bill Name", "Recipient Name", "Card Message",
+    "Product Code 1", "Delivery Instructions", "Additional Information",
+  ];
 
   // ── Status ───────────────────────────────────────────────────────────────────
 
@@ -73,6 +123,7 @@ internal sealed class MainForm : Form
     {
       LoadConfig();
       RefreshServiceStatus();
+      UpdateProcessSelectedState();
     };
   }
 
@@ -92,9 +143,45 @@ internal sealed class MainForm : Form
 
   private void BuildUi()
   {
-    Controls.Add(BuildFooter());   // Dock=Bottom — add first so TabControl fills correctly
-    Controls.Add(BuildHeader());   // Dock=Top
-    Controls.Add(BuildTabControl()); // Dock=Fill
+    var root = new TableLayoutPanel
+    {
+      Dock        = DockStyle.Fill,
+      ColumnCount = 1,
+      RowCount    = 4,
+      Margin      = Padding.Empty,
+      Padding     = Padding.Empty,
+    };
+    root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+    root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
+    root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36f));
+    root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+    root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48f));
+
+    _tabContentHost = new Panel
+    {
+      Dock      = DockStyle.Fill,
+      BackColor = BgColor,
+      Margin    = Padding.Empty,
+    };
+
+    _monitorTabPage = BuildMonitorTab();
+    _emailTabPage   = BuildEmailTab();
+    _logTabPage     = BuildLogTab();
+
+    root.Controls.Add(PrepareLayoutPanel(BuildHeader()), 0, 0);
+    root.Controls.Add(PrepareLayoutPanel(BuildTabBar()), 0, 1);
+    root.Controls.Add(_tabContentHost, 0, 2);
+    root.Controls.Add(PrepareLayoutPanel(BuildFooter()), 0, 3);
+
+    Controls.Add(root);
+    SelectTab("monitor");
+  }
+
+  private static T PrepareLayoutPanel<T>(T control) where T : Control
+  {
+    control.Dock = DockStyle.Fill;
+    control.Margin = Padding.Empty;
+    return control;
   }
 
   // ── Header ────────────────────────────────────────────────────────────────────
@@ -140,32 +227,83 @@ internal sealed class MainForm : Form
     return header;
   }
 
-  // ── Tab control ───────────────────────────────────────────────────────────────
+  // ── Tabs ──────────────────────────────────────────────────────────────────────
 
-  private TabControl BuildTabControl()
+  private Panel BuildTabBar()
   {
-    var tc = new TabControl
+    var tabBar = new Panel
     {
       Dock      = DockStyle.Fill,
-      Alignment = TabAlignment.Top,
-      SizeMode  = TabSizeMode.Fixed,
-      ItemSize  = new Size(120, 30),
+      BackColor = Color.FromArgb(226, 230, 235),
+      Margin    = Padding.Empty,
     };
-    tc.TabPages.Add(BuildMonitorTab());
-    tc.TabPages.Add(BuildEmailTab());
-    tc.TabPages.Add(BuildLogTab());
-    tc.SelectedIndexChanged += (_, _) =>
+    tabBar.Paint += (_, e) =>
     {
-      if (tc.SelectedIndex == 2) LoadLog();
+      using var pen = new Pen(Color.FromArgb(198, 204, 212));
+      e.Graphics.DrawLine(pen, 0, tabBar.Height - 1, tabBar.Width, tabBar.Height - 1);
     };
-    return tc;
+
+    _monitorTabButton = CreateTabButton("Monitor", 0);
+    _emailTabButton   = CreateTabButton("Email", 120);
+    _logTabButton     = CreateTabButton("Order Log", 240);
+
+    _monitorTabButton.Click += (_, _) => SelectTab("monitor");
+    _emailTabButton.Click   += (_, _) => SelectTab("email");
+    _logTabButton.Click     += (_, _) => SelectTab("log");
+
+    tabBar.Controls.AddRange(new Control[] { _monitorTabButton, _emailTabButton, _logTabButton });
+    return tabBar;
+  }
+
+  private Button CreateTabButton(string text, int left) => new Button
+  {
+    Text      = text,
+    Width     = 120,
+    Height    = 35,
+    Location  = new Point(left, 1),
+    FlatStyle = FlatStyle.Flat,
+    BackColor = Color.FromArgb(226, 230, 235),
+    ForeColor = Color.FromArgb(51, 51, 51),
+    Font      = new Font("Segoe UI", 9f, FontStyle.Regular),
+    TabStop   = false,
+  };
+
+  private void SelectTab(string key)
+  {
+    _tabContentHost.SuspendLayout();
+    _tabContentHost.Controls.Clear();
+
+    var selectedPage = key switch
+    {
+      "email" => _emailTabPage,
+      "log"   => _logTabPage,
+      _       => _monitorTabPage,
+    };
+    selectedPage.Dock = DockStyle.Fill;
+    _tabContentHost.Controls.Add(selectedPage);
+    _tabContentHost.ResumeLayout();
+
+    SetTabButtonState(_monitorTabButton, key == "monitor");
+    SetTabButtonState(_emailTabButton,   key == "email");
+    SetTabButtonState(_logTabButton,     key == "log");
+
+    if (key == "log") { LoadLog(); ScanPendingFiles(); }
+  }
+
+  private void SetTabButtonState(Button button, bool selected)
+  {
+    button.BackColor = selected ? Color.White : Color.FromArgb(226, 230, 235);
+    button.ForeColor = selected ? AccentColor : Color.FromArgb(51, 51, 51);
+    button.Font = new Font("Segoe UI", 9f, selected ? FontStyle.Bold : FontStyle.Regular);
+    button.FlatAppearance.BorderSize = selected ? 1 : 0;
+    button.FlatAppearance.BorderColor = selected ? Color.FromArgb(198, 204, 212) : Color.FromArgb(226, 230, 235);
   }
 
   // ── Monitor tab ───────────────────────────────────────────────────────────────
 
-  private TabPage BuildMonitorTab()
+  private Panel BuildMonitorTab()
   {
-    var page = new TabPage("Monitor");
+    var page = new Panel { BackColor = BgColor };
 
     var panel = new FlowLayoutPanel
     {
@@ -225,9 +363,9 @@ internal sealed class MainForm : Form
 
   // ── Email tab ─────────────────────────────────────────────────────────────────
 
-  private TabPage BuildEmailTab()
+  private Panel BuildEmailTab()
   {
-    var page = new TabPage("Email");
+    var page = new Panel { BackColor = BgColor };
 
     var panel = new FlowLayoutPanel
     {
@@ -256,6 +394,43 @@ internal sealed class MainForm : Form
     panel.Controls.Add(FieldLabel("Email Subject Line"));
     panel.Controls.Add(_subjectLineBox);
     panel.Controls.Add(HintLabel("Must match the subject line configured in Mercury Administration → Web Order Interface."));
+
+    // WOI body encryption group
+    var encryptGroup = new GroupBox
+    {
+      Text   = "WOI Body Encryption",
+      Width  = 560,
+      Height = 116,
+      Margin = new Padding(0, 10, 0, 0),
+    };
+
+    _encryptionPasswordBox = new TextBox { Width = 280, UseSystemPasswordChar = true, Location = new Point(160, 24) };
+    _encryptionAlgorithmCombo = new ComboBox
+    {
+      DropDownStyle = ComboBoxStyle.DropDownList,
+      Width         = 200,
+      Location      = new Point(160, 60),
+    };
+    _encryptionAlgorithmCombo.Items.AddRange(new object[] { "None", "TripleDES", "DES", "RC2", "Rijndael" });
+    _encryptionAlgorithmCombo.SelectedIndex = 0;
+
+    encryptGroup.Controls.AddRange(new Control[]
+    {
+      new Label { Text = "Encryption Password:", AutoSize = true, Location = new Point(10, 27) },
+      _encryptionPasswordBox,
+      new Label { Text = "Encryption Algorithm:", AutoSize = true, Location = new Point(10, 63) },
+      _encryptionAlgorithmCombo,
+      new Label
+      {
+        Text      = "Leave password blank to send plain text. Cipher: CBC / PKCS7.",
+        AutoSize  = true,
+        Location  = new Point(10, 92),
+        Font      = new Font("Segoe UI", 7.5f),
+        ForeColor = Color.Gray,
+      },
+    });
+
+    panel.Controls.Add(encryptGroup);
 
     // Advanced SMTP group
     var smtpGroup = new GroupBox
@@ -288,18 +463,120 @@ internal sealed class MainForm : Form
 
   // ── Log tab ───────────────────────────────────────────────────────────────────
 
-  private TabPage BuildLogTab()
+  private Panel BuildLogTab()
   {
-    var page = new TabPage("Order Log");
+    var page = new Panel { BackColor = Color.White };
 
-    // Toolbar
+    // ── Pending files panel (docked Top) ──────────────────────────────────────
+    var pendingPanel = new Panel { Dock = DockStyle.Top, Height = 158, BackColor = Color.White };
+
+    var pendingHeader = new Panel { Dock = DockStyle.Top, Height = 30, BackColor = Color.FromArgb(240, 242, 245) };
+
+    var pendingTitle = new Label
+    {
+      Text      = "Pending Files",
+      Font      = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+      ForeColor = AccentColor,
+      AutoSize  = true,
+      Location  = new Point(10, 8),
+    };
+
+    _pendingCountLabel = new Label
+    {
+      Text      = string.Empty,
+      AutoSize  = true,
+      ForeColor = Color.Gray,
+      Font      = new Font("Segoe UI", 8f),
+      Location  = new Point(120, 10),
+    };
+
+    _processSelectedBtn = new Button
+    {
+      Text      = "▶  Process Selected",
+      Width     = 134,
+      Height    = 22,
+      Anchor    = AnchorStyles.Top | AnchorStyles.Right,
+      FlatStyle = FlatStyle.System,
+    };
+    pendingHeader.Layout += (_, _) =>
+      _processSelectedBtn.Location = new Point(pendingHeader.ClientSize.Width - _processSelectedBtn.Width - 4, 4);
+    _processSelectedBtn.Click += (_, _) => ProcessSelectedFiles();
+
+    var previewBtn = new Button
+    {
+      Text      = "Preview Fields",
+      Width     = 104,
+      Height    = 22,
+      Anchor    = AnchorStyles.Top | AnchorStyles.Right,
+      FlatStyle = FlatStyle.System,
+    };
+    pendingHeader.Layout += (_, _) =>
+      previewBtn.Location = new Point(pendingHeader.ClientSize.Width - _processSelectedBtn.Width - previewBtn.Width - 14, 4);
+    previewBtn.Click += (_, _) => PreviewFileFields();
+
+    var scanBtn = new Button
+    {
+      Text      = "↺  Scan",
+      Width     = 72,
+      Height    = 22,
+      Anchor    = AnchorStyles.Top | AnchorStyles.Right,
+      FlatStyle = FlatStyle.System,
+    };
+    pendingHeader.Layout += (_, _) =>
+      scanBtn.Location = new Point(pendingHeader.ClientSize.Width - _processSelectedBtn.Width - previewBtn.Width - scanBtn.Width - 20, 4);
+    scanBtn.Click += (_, _) => ScanPendingFiles();
+
+    pendingHeader.Controls.AddRange(new Control[] { pendingTitle, _pendingCountLabel, scanBtn, previewBtn, _processSelectedBtn });
+
+    _pendingFilesList = new ListBox
+    {
+      Dock          = DockStyle.Fill,
+      SelectionMode = SelectionMode.MultiExtended,
+      DrawMode      = DrawMode.OwnerDrawFixed,
+      ItemHeight    = 20,
+      Font          = new Font("Segoe UI", 8.5f),
+      BorderStyle   = BorderStyle.None,
+      BackColor     = Color.White,
+    };
+
+    _pendingFilesList.DrawItem += (_, e) =>
+    {
+      if (e.Index < 0) return;
+      var itemPath = (string)_pendingFilesList.Items[e.Index];
+      var isHeld   = _heldFiles.Contains(itemPath);
+      var selected = (e.State & DrawItemState.Selected) != 0;
+
+      var bg = isHeld   ? Color.FromArgb(255, 243, 205)
+             : selected ? SystemColors.Highlight
+             : (e.Index % 2 == 0 ? Color.White : Color.FromArgb(248, 249, 250));
+      var fg = isHeld   ? Color.FromArgb(160, 80, 0)
+             : selected ? SystemColors.HighlightText
+             : Color.FromArgb(30, 30, 30);
+
+      using var bgBrush = new SolidBrush(bg);
+      e.Graphics.FillRectangle(bgBrush, e.Bounds);
+
+      var display = isHeld
+        ? $"⚠ HOLD: {Path.GetFileName(itemPath)}"
+        : Path.GetFileName(itemPath);
+      var font = isHeld ? new Font(e.Font!, FontStyle.Bold) : e.Font!;
+      TextRenderer.DrawText(e.Graphics, display, font, e.Bounds, fg,
+        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+    };
+
+    pendingPanel.Controls.AddRange(new Control[] { _pendingFilesList, pendingHeader });
+
+    // ── Separator ─────────────────────────────────────────────────────────────
+    var separator = new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Color.FromArgb(208, 213, 219) };
+
+    // ── Log toolbar ───────────────────────────────────────────────────────────
     var toolbar = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = BgColor };
     var refreshBtn = new Button
     {
-      Text     = "↺  Refresh",
-      Width    = 90,
-      Height   = 26,
-      Location = new Point(10, 5),
+      Text      = "↺  Refresh Log",
+      Width     = 104,
+      Height    = 26,
+      Location  = new Point(10, 5),
       FlatStyle = FlatStyle.System,
     };
     refreshBtn.Click += (_, _) => LoadLog();
@@ -307,13 +584,13 @@ internal sealed class MainForm : Form
     _logCountLabel = new Label
     {
       AutoSize  = true,
-      Location  = new Point(112, 10),
+      Location  = new Point(126, 10),
       ForeColor = Color.Gray,
       Font      = new Font("Segoe UI", 8.5f),
     };
     toolbar.Controls.AddRange(new Control[] { refreshBtn, _logCountLabel });
 
-    // Grid
+    // ── Log grid ──────────────────────────────────────────────────────────────
     _logGrid = new DataGridView
     {
       Dock                    = DockStyle.Fill,
@@ -331,12 +608,12 @@ internal sealed class MainForm : Form
       CellBorderStyle         = DataGridViewCellBorderStyle.SingleHorizontal,
     };
 
-    _logGrid.ColumnHeadersDefaultCellStyle.BackColor  = AccentColor;
-    _logGrid.ColumnHeadersDefaultCellStyle.ForeColor  = Color.White;
-    _logGrid.ColumnHeadersDefaultCellStyle.Font       = new Font("Segoe UI", 8.5f, FontStyle.Bold);
-    _logGrid.ColumnHeadersDefaultCellStyle.Padding    = new Padding(4, 0, 0, 0);
-    _logGrid.EnableHeadersVisualStyles                = false;
-    _logGrid.ColumnHeadersHeight                      = 28;
+    _logGrid.ColumnHeadersDefaultCellStyle.BackColor   = AccentColor;
+    _logGrid.ColumnHeadersDefaultCellStyle.ForeColor   = Color.White;
+    _logGrid.ColumnHeadersDefaultCellStyle.Font        = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+    _logGrid.ColumnHeadersDefaultCellStyle.Padding     = new Padding(4, 0, 0, 0);
+    _logGrid.EnableHeadersVisualStyles                 = false;
+    _logGrid.ColumnHeadersHeight                       = 28;
     _logGrid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
 
     _logGrid.Columns.AddRange(new DataGridViewColumn[]
@@ -350,7 +627,8 @@ internal sealed class MainForm : Form
       new DataGridViewTextBoxColumn { HeaderText = "Note",      Name = "Note",      FillWeight = 19 },
     });
 
-    page.Controls.AddRange(new Control[] { _logGrid, toolbar });
+    // AddRange z-order: items dock in reverse — grid fills, toolbar docks top, separator docks top, pendingPanel docks top
+    page.Controls.AddRange(new Control[] { _logGrid, toolbar, separator, pendingPanel });
     return page;
   }
 
@@ -462,6 +740,10 @@ internal sealed class MainForm : Form
     _subjectLineBox.Text      = cfg.Email.SubjectLine;
     _smtpHostBox.Text         = cfg.Email.SmtpHost;
     _smtpPortSpinner.Value    = Math.Clamp(cfg.Email.SmtpPort, 1, 65535);
+
+    _encryptionPasswordBox.Text = cfg.Email.WoiEncryption.Password;
+    var algoIndex = _encryptionAlgorithmCombo.Items.IndexOf(cfg.Email.WoiEncryption.Algorithm);
+    _encryptionAlgorithmCombo.SelectedIndex = algoIndex >= 0 ? algoIndex : 0;
   }
 
   private void SaveConfig()
@@ -480,6 +762,11 @@ internal sealed class MainForm : Form
         SubjectLine      = _subjectLineBox.Text.Trim(),
         SmtpHost         = _smtpHostBox.Text.Trim(),
         SmtpPort         = (int)_smtpPortSpinner.Value,
+        WoiEncryption    = new WoiEncryptionConfig
+        {
+          Algorithm = _encryptionAlgorithmCombo.SelectedItem?.ToString() ?? "None",
+          Password  = _encryptionPasswordBox.Text,
+        },
       },
     };
 
@@ -695,6 +982,500 @@ internal sealed class MainForm : Form
   }
 
   private sealed record ServiceCommandResult(int ExitCode, string Output);
+
+  // ── Pending files management ──────────────────────────────────────────────────
+
+  private void ScanPendingFiles()
+  {
+    _pendingFilesList.Items.Clear();
+
+    var cfg       = AppConfig.Load(ConfigPath);
+    var folder    = cfg.WatchFolder;
+    var processed = cfg.ProcessedSubfolder;
+
+    if (!Directory.Exists(folder))
+    {
+      _pendingCountLabel.Text = "(watch folder not found)";
+      return;
+    }
+
+    var patterns = cfg.FileFormat == "TIF"
+      ? new[] { "*.tif", "*.tiff" }
+      : new[] { "*.pdf" };
+
+    var processedPath = Path.Combine(folder, processed) + Path.DirectorySeparatorChar;
+
+    _heldFiles.Clear();
+
+    var files = patterns
+      .SelectMany(p => Directory.GetFiles(folder, p, SearchOption.TopDirectoryOnly))
+      .Where(f => !f.StartsWith(processedPath, StringComparison.OrdinalIgnoreCase))
+      .OrderBy(f => f)
+      .ToList();
+
+    foreach (var f in files)
+    {
+      if (File.Exists(f + ".hold.json")) _heldFiles.Add(f);
+      _pendingFilesList.Items.Add(f);
+    }
+
+    var heldCount    = _heldFiles.Count;
+    var pendingCount = files.Count - heldCount;
+    _pendingCountLabel.Text = files.Count == 0
+      ? "(none)"
+      : heldCount > 0
+        ? $"{pendingCount} waiting, {heldCount} held (review required)"
+        : $"{files.Count} file{(files.Count != 1 ? "s" : "")} waiting";
+  }
+
+  private void PreviewFileFields()
+  {
+    if (!File.Exists(NodeExePath))
+    {
+      SetFooterStatus($"node.exe not found: {NodeExePath}", isError: true);
+      return;
+    }
+    if (!File.Exists(ServiceScript))
+    {
+      SetFooterStatus($"service.js not found: {ServiceScript}", isError: true);
+      return;
+    }
+
+    var selected = _pendingFilesList.SelectedItems.Cast<string>().FirstOrDefault();
+    if (selected is null)
+    {
+      SetFooterStatus("Select a file from the Pending list to preview.", isError: false);
+      return;
+    }
+
+    if (!File.Exists(selected))
+    {
+      ScanPendingFiles();
+      SetFooterStatus($"File no longer in watch folder: {Path.GetFileName(selected)}", isError: true);
+      return;
+    }
+
+    SetFooterStatus($"Running OCR on {Path.GetFileName(selected)}...", isError: false);
+    Application.DoEvents();
+
+    try
+    {
+      var psi = new ProcessStartInfo(NodeExePath)
+      {
+        RedirectStandardOutput = true,
+        RedirectStandardError  = true,
+        UseShellExecute        = false,
+        CreateNoWindow         = true,
+        WorkingDirectory       = Path.GetDirectoryName(ServiceScript)!,
+      };
+      psi.ArgumentList.Add(ServiceScript);
+      psi.ArgumentList.Add($"--extract-only={selected}");
+
+      using var proc = Process.Start(psi)!;
+      var stdout = proc.StandardOutput.ReadToEnd();
+      var stderr = proc.StandardError.ReadToEnd();
+      proc.WaitForExit();
+
+      if (proc.ExitCode != 0)
+      {
+        var fullError = (stderr.Trim().Length > 0 ? stderr : stdout).Trim();
+        MessageBox.Show(fullError, "OCR Preview Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        SetFooterStatus("OCR preview failed — see error dialog.", isError: true);
+        return;
+      }
+
+      var envelope = System.Text.Json.JsonDocument.Parse(stdout);
+      var root     = envelope.RootElement;
+      var rawText  = root.TryGetProperty("rawText", out var rt) ? rt.GetString() ?? string.Empty : stdout;
+
+      var fields = new Dictionary<string, string?>();
+      if (root.TryGetProperty("fields", out var fObj))
+        foreach (var prop in fObj.EnumerateObject())
+          fields[prop.Name] = prop.Value.ValueKind == System.Text.Json.JsonValueKind.Null
+            ? null : prop.Value.GetString();
+
+      ShowFieldPreviewDialog(Path.GetFileName(selected), selected, fields, rawText);
+      SetFooterStatus(string.Empty, isError: false);
+    }
+    catch (Exception ex)
+    {
+      SetFooterStatus($"Preview failed: {ex.Message}", isError: true);
+    }
+  }
+
+  private void ShowFieldPreviewDialog(string fileName, string filePath, Dictionary<string, string?> fields, string rawText)
+  {
+    var woiMap = new (string WoiLabel, string JsonKey, bool Required)[]
+    {
+      ("Bill Name",              "customerName",       true),
+      ("Bill Address",           "customerAddress",    false),
+      ("Bill Phone",             "customerPhone",      false),
+      ("For the Passing Of",     "forThePassingOf",    true),
+      ("Delivery Location",      "deliveryLocation",   false),
+      ("Delivery Date",          "deliveryDate",       true),
+      ("Delivery Time",          "deliveryTime",       false),
+      ("Card Message",           "cardMessage",        false),
+      ("Product Code / Item #",  "productItemNumber",  true),
+      ("Product Description",    "productDescription", false),
+      ("Product Price",          "productPrice",       false),
+      ("Delivery Charge",        "deliveryCharge",     false),
+      ("Total Payable",          "totalPayable",       false),
+      ("Order Number",           "orderNumber",        false),
+      ("Order Placed Date",      "orderPlacedDate",    false),
+      ("Vendor Name",            "vendorName",         false),
+      ("Vendor Tel",             "vendorTel",          false),
+      ("Vendor Fax",             "vendorFax",          false),
+      ("Vendor SMS",             "vendorSms",          false),
+    };
+
+    var hasEmptyRequired = woiMap
+      .Where(m => m.Required)
+      .Any(m => string.IsNullOrWhiteSpace(fields.GetValueOrDefault(m.JsonKey)));
+
+    var dlg = new Form
+    {
+      Text            = $"Extracted Fields — {fileName}",
+      Size            = new Size(680, 640),
+      MinimumSize     = new Size(500, 460),
+      StartPosition   = FormStartPosition.CenterParent,
+      FormBorderStyle = FormBorderStyle.Sizable,
+      BackColor       = Color.White,
+      Font            = new Font("Segoe UI", 9f),
+    };
+
+    var infoBar = new Label
+    {
+      Text      = hasEmptyRequired
+        ? "One or more required fields are empty (highlighted in red). Edit values below, then click \"Process with These Values\"."
+        : $"OCR results for: {fileName}  —  edit any value below before processing.",
+      Dock      = DockStyle.Top,
+      Height    = 40,
+      Padding   = new Padding(10, 11, 10, 0),
+      Font      = new Font("Segoe UI", 8.5f, FontStyle.Italic),
+      ForeColor = hasEmptyRequired ? Color.FromArgb(180, 30, 30) : Color.FromArgb(100, 80, 0),
+      BackColor = hasEmptyRequired ? Color.FromArgb(255, 235, 235) : Color.FromArgb(255, 251, 220),
+    };
+
+    var grid = new DataGridView
+    {
+      Dock                    = DockStyle.Fill,
+      ReadOnly                = false,
+      AllowUserToAddRows      = false,
+      AllowUserToDeleteRows   = false,
+      AllowUserToResizeRows   = false,
+      RowHeadersVisible       = false,
+      BackgroundColor         = Color.White,
+      BorderStyle             = BorderStyle.None,
+      AutoSizeColumnsMode     = DataGridViewAutoSizeColumnsMode.Fill,
+      SelectionMode           = DataGridViewSelectionMode.FullRowSelect,
+      Font                    = new Font("Segoe UI", 9f),
+      GridColor               = Color.FromArgb(224, 228, 232),
+      CellBorderStyle         = DataGridViewCellBorderStyle.SingleHorizontal,
+      EditMode                = DataGridViewEditMode.EditOnEnter,
+    };
+    grid.ColumnHeadersDefaultCellStyle.BackColor = AccentColor;
+    grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+    grid.ColumnHeadersDefaultCellStyle.Font      = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+    grid.EnableHeadersVisualStyles               = false;
+    grid.ColumnHeadersHeight                     = 28;
+    grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
+    grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "WOI Field",                  Name = "Field",   FillWeight = 34, ReadOnly = true });
+    grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Extracted Value (editable)", Name = "Value",   FillWeight = 66 });
+    grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "JsonKey", Visible = false });
+
+    foreach (var (label, key, required) in woiMap)
+    {
+      fields.TryGetValue(key, out var val);
+      var rowIndex = grid.Rows.Add(label, val ?? string.Empty, key);
+      var row      = grid.Rows[rowIndex];
+      row.Cells["Field"].Style.BackColor = Color.FromArgb(240, 242, 245);
+      row.Cells["Field"].Style.ForeColor = Color.FromArgb(60, 60, 60);
+      row.Cells["Field"].Style.Font      = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+      if (required && string.IsNullOrWhiteSpace(val))
+      {
+        row.Cells["Field"].Style.BackColor  = Color.FromArgb(255, 200, 200);
+        row.Cells["Field"].Style.ForeColor  = Color.Firebrick;
+        row.Cells["Value"].Style.BackColor  = Color.FromArgb(255, 230, 230);
+      }
+      else if (string.IsNullOrWhiteSpace(val))
+      {
+        row.Cells["Value"].Style.ForeColor = Color.Silver;
+      }
+    }
+
+    var fieldsPage = new TabPage("Mapped Fields");
+    fieldsPage.Controls.Add(grid);
+
+    var rawBox = new TextBox
+    {
+      Dock        = DockStyle.Fill,
+      Multiline   = true,
+      ScrollBars  = ScrollBars.Both,
+      ReadOnly    = true,
+      Font        = new Font("Consolas", 8.5f),
+      BackColor   = Color.FromArgb(30, 30, 30),
+      ForeColor   = Color.FromArgb(212, 212, 212),
+      BorderStyle = BorderStyle.None,
+      WordWrap    = false,
+      Text        = rawText,
+    };
+    var rawPage = new TabPage("Raw OCR Text");
+    rawPage.Controls.Add(rawBox);
+
+    var tabs = new TabControl { Dock = DockStyle.Fill };
+    tabs.TabPages.Add(fieldsPage);
+    tabs.TabPages.Add(rawPage);
+
+    string? overridesFilePath = null;
+
+    var processBtn = new Button
+    {
+      Text      = "Process with These Values",
+      Width     = 186,
+      Height    = 28,
+      FlatStyle = FlatStyle.System,
+      Font      = new Font("Segoe UI", 9f, FontStyle.Bold),
+    };
+    processBtn.Click += (_, _) =>
+    {
+      var overrides = new Dictionary<string, string?>();
+      foreach (DataGridViewRow r in grid.Rows)
+      {
+        if (r.IsNewRow) continue;
+        var jsonKey = r.Cells["JsonKey"].Value?.ToString();
+        var val     = r.Cells["Value"].Value?.ToString();
+        if (!string.IsNullOrEmpty(jsonKey)) overrides[jsonKey] = val;
+      }
+
+      var stillEmpty = woiMap
+        .Where(m => m.Required && string.IsNullOrWhiteSpace(overrides.GetValueOrDefault(m.JsonKey)))
+        .Select(m => m.WoiLabel)
+        .ToList();
+      if (stillEmpty.Count > 0)
+      {
+        MessageBox.Show(
+          $"The following required WOI fields are still empty:\n\n{string.Join("\n", stillEmpty.Select(f => "  • " + f))}\n\nPlease fill in these values before processing.",
+          "Required Fields Missing",
+          MessageBoxButtons.OK,
+          MessageBoxIcon.Warning);
+        return;
+      }
+
+      try
+      {
+        var tmp = Path.ChangeExtension(Path.GetTempFileName(), ".json");
+        File.WriteAllText(tmp, System.Text.Json.JsonSerializer.Serialize(overrides));
+        overridesFilePath = tmp;
+      }
+      catch (Exception ex)
+      {
+        MessageBox.Show($"Failed to write field overrides: {ex.Message}", "Error",
+          MessageBoxButtons.OK, MessageBoxIcon.Error);
+        return;
+      }
+
+      dlg.DialogResult = DialogResult.OK;
+      dlg.Close();
+    };
+
+    var closeBtn = new Button { Text = "Close", Width = 80, Height = 28, FlatStyle = FlatStyle.System };
+    closeBtn.Click += (_, _) => dlg.Close();
+
+    var btnPanel = new Panel { Dock = DockStyle.Bottom, Height = 44, BackColor = Color.White };
+    btnPanel.Paint += (_, e) =>
+      e.Graphics.DrawLine(new Pen(Color.FromArgb(208, 213, 219)), 0, 0, btnPanel.Width, 0);
+    btnPanel.Controls.Add(closeBtn);
+    btnPanel.Controls.Add(processBtn);
+    btnPanel.Layout += (_, _) =>
+    {
+      closeBtn.Location   = new Point(btnPanel.ClientSize.Width - closeBtn.Width - 10, 8);
+      processBtn.Location = new Point(btnPanel.ClientSize.Width - closeBtn.Width - processBtn.Width - 20, 8);
+    };
+
+    dlg.Controls.Add(tabs);
+    dlg.Controls.Add(infoBar);
+    dlg.Controls.Add(btnPanel);
+    dlg.ShowDialog();
+    dlg.Dispose();
+
+    if (overridesFilePath is not null)
+    {
+      ProcessFileWithOverrides(filePath, overridesFilePath);
+      try { File.Delete(overridesFilePath); } catch { /* non-fatal */ }
+    }
+  }
+
+  private void ProcessSelectedFiles()
+  {
+    if (!File.Exists(NodeExePath))
+    {
+      SetFooterStatus($"node.exe not found: {NodeExePath}", isError: true);
+      return;
+    }
+    if (!File.Exists(ServiceScript))
+    {
+      SetFooterStatus($"service.js not found: {ServiceScript}", isError: true);
+      return;
+    }
+
+    var selected = _pendingFilesList.SelectedItems.Cast<string>().ToList();
+    if (selected.Count == 0)
+    {
+      SetFooterStatus("Select one or more files from the Pending list first.", isError: false);
+      return;
+    }
+
+    var ok   = 0;
+    var fail = 0;
+
+    foreach (var filePath in selected)
+    {
+      if (!File.Exists(filePath))
+      {
+        fail++;
+        SetFooterStatus($"Skipped (already processed): {Path.GetFileName(filePath)}", isError: true);
+        continue;
+      }
+
+      SetFooterStatus($"Processing {Path.GetFileName(filePath)}…", isError: false);
+      Application.DoEvents();
+
+      try
+      {
+        var psi = new ProcessStartInfo(NodeExePath)
+        {
+          UseShellExecute        = false,
+          RedirectStandardOutput = true,
+          RedirectStandardError  = true,
+          CreateNoWindow         = true,
+          WorkingDirectory       = Path.GetDirectoryName(ServiceScript)!,
+        };
+        psi.ArgumentList.Add(ServiceScript);
+        psi.ArgumentList.Add($"--process-file={filePath}");
+
+        using var proc = Process.Start(psi)!;
+        var stdout = proc.StandardOutput.ReadToEnd();
+        var stderr = proc.StandardError.ReadToEnd();
+        proc.WaitForExit(120_000);
+
+        if (proc.ExitCode == 0)
+        {
+          ok++;
+        }
+        else
+        {
+          fail++;
+          var errText   = (stderr.Trim().Length > 0 ? stderr : stdout).Trim();
+          var firstLine = errText.Split('\n').FirstOrDefault(l => l.Trim().Length > 0) ?? "unknown error";
+          SetFooterStatus($"Failed ({Path.GetFileName(filePath)}): {firstLine}", isError: true);
+        }
+      }
+      catch (Exception ex)
+      {
+        fail++;
+        SetFooterStatus($"Error: {ex.Message}", isError: true);
+      }
+    }
+
+    ScanPendingFiles();
+    LoadLog();
+
+    if (fail == 0)
+      SetFooterStatus($"Processed {ok} file{(ok != 1 ? "s" : "")} successfully.", isError: false);
+    else if (ok > 0)
+      SetFooterStatus($"Processed {ok} ok, {fail} failed — see error above.", isError: true);
+  }
+
+  private void ProcessFileWithOverrides(string filePath, string overridesFilePath)
+  {
+    if (!File.Exists(NodeExePath))
+    {
+      SetFooterStatus($"node.exe not found: {NodeExePath}", isError: true);
+      return;
+    }
+    if (!File.Exists(ServiceScript))
+    {
+      SetFooterStatus($"service.js not found: {ServiceScript}", isError: true);
+      return;
+    }
+    if (!File.Exists(filePath))
+    {
+      SetFooterStatus($"File no longer exists: {Path.GetFileName(filePath)}", isError: true);
+      return;
+    }
+
+    SetFooterStatus($"Processing {Path.GetFileName(filePath)} with edited values…", isError: false);
+    Application.DoEvents();
+
+    try
+    {
+      var psi = new ProcessStartInfo(NodeExePath)
+      {
+        UseShellExecute        = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError  = true,
+        CreateNoWindow         = true,
+        WorkingDirectory       = Path.GetDirectoryName(ServiceScript)!,
+      };
+      psi.ArgumentList.Add(ServiceScript);
+      psi.ArgumentList.Add($"--process-file={filePath}");
+      psi.ArgumentList.Add($"--field-overrides-file={overridesFilePath}");
+
+      using var proc = Process.Start(psi)!;
+      var stdout = proc.StandardOutput.ReadToEnd();
+      var stderr = proc.StandardError.ReadToEnd();
+      proc.WaitForExit(120_000);
+
+      if (proc.ExitCode == 0)
+        SetFooterStatus($"✓ Processed {Path.GetFileName(filePath)} successfully.", isError: false);
+      else
+      {
+        var errText   = (stderr.Trim().Length > 0 ? stderr : stdout).Trim();
+        var firstLine = errText.Split('\n').FirstOrDefault(l => l.Trim().Length > 0) ?? "unknown error";
+        SetFooterStatus($"Failed: {firstLine}", isError: true);
+      }
+    }
+    catch (Exception ex)
+    {
+      SetFooterStatus($"Error: {ex.Message}", isError: true);
+    }
+
+    ScanPendingFiles();
+    LoadLog();
+  }
+
+  // ── Field mapping validation ──────────────────────────────────────────────────
+
+  private void UpdateProcessSelectedState()
+  {
+    AppConfig? cfg = null;
+    try { cfg = AppConfig.Load(ConfigPath); } catch { }
+
+    var missing = RequiredWoiMappingFields
+      .Where(f => cfg is null ||
+                  !cfg.FieldMap.TryGetValue(f, out var src) ||
+                  src == "(none)")
+      .ToList();
+
+    _processSelectedBtn.Enabled = missing.Count == 0;
+    _toolTip.SetToolTip(_processSelectedBtn,
+      missing.Count > 0
+        ? $"Disabled: required WOI fields have no OCR source mapped:\n{string.Join(", ", missing)}\n\nOpen the Field Map tab to fix."
+        : string.Empty);
+  }
+
+  // ── Config change log ─────────────────────────────────────────────────────────
+
+  private void AppendConfigLog(string message)
+  {
+    try
+    {
+      Directory.CreateDirectory(ServiceLogDir);
+      File.AppendAllText(OutLogPath,
+        $"[Config {DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
+    }
+    catch { /* non-fatal */ }
+  }
 
   // ── Footer status message ─────────────────────────────────────────────────────
 

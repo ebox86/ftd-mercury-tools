@@ -97,7 +97,8 @@
       "Bash(Out-Null)",
       "Bash(Copy-Item 'C:\\\\Users\\\\Florist\\\\Downloads\\\\avatars - ccef\\\\ccef\\\\*' -Destination 'c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\kiosk-app\\\\public\\\\weather-icons\\\\ccef\" -Force *)",
       "Bash(Select-String -Path \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\\\\mercury-orders-tv-dashboard\\\\kiosk-app\\\\src\\\\App.tsx\" -Pattern \"^\\\\s*</>\\\\s*$\")",
-      "Bash(Select-Object LineNumber, Line)"
+      "Bash(Select-Object LineNumber, Line)",
+      "Bash(dotnet build *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Florist\\Downloads\\avatars - ccef\\ccef"
