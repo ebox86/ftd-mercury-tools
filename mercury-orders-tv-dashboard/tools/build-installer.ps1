@@ -107,6 +107,23 @@ $defineVersion = "/DMyAppVersion=$Version"
 $definePublisher = '/DMyAppPublisher="' + $Publisher + '"'
 $defineUrl = '/DMyAppURL="' + $PublisherUrl + '"'
 
+function Normalize-MapboxToken {
+  param([string]$RawToken)
+  $token = ""
+  if ($null -ne $RawToken) {
+    $token = $RawToken.Trim()
+  }
+  if ($token -match '(?i)^(MAPBOX_TOKEN|MAPBOX_ACCESS_TOKEN)\s*=\s*(.*)$') {
+    $token = $Matches[2].Trim()
+  }
+  if (($token.StartsWith('"') -and $token.EndsWith('"')) -or ($token.StartsWith("'") -and $token.EndsWith("'"))) {
+    $token = $token.Substring(1, $token.Length - 2).Trim()
+  }
+  return $token
+}
+
+$MapboxToken = Normalize-MapboxToken $MapboxToken
+
 $compileArgs = @(
   $defineVersion,
   $definePublisher,

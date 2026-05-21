@@ -68,6 +68,8 @@ async function loadConfig(): Promise<void> {
   ($<HTMLInputElement>('senderPassword')).value     = String(email['senderPassword'] ?? '');
   ($<HTMLInputElement>('recipientAddress')).value   = String(email['recipientAddress'] ?? '');
   ($<HTMLInputElement>('subjectLine')).value        = String(email['subjectLine'] ?? '');
+  ($<HTMLInputElement>('encryptionPassword')).value = String(email['encryptionPassword'] ?? '');
+  ($<HTMLSelectElement>('encryptionAlgorithm')).value = String(email['encryptionAlgorithm'] ?? 'TripleDES');
   ($<HTMLInputElement>('smtpHost')).value           = String(email['smtpHost'] ?? '');
   ($<HTMLInputElement>('smtpPort')).value           = String(email['smtpPort'] ?? 587);
 }
@@ -79,12 +81,14 @@ async function saveConfig(): Promise<void> {
     fileFormat:          $<HTMLSelectElement>('fileFormat').value,
     processedSubfolder:  $<HTMLInputElement>('processedSubfolder').value.trim() || 'processed',
     email: {
-      senderAddress:    $<HTMLInputElement>('senderAddress').value.trim(),
-      senderPassword:   $<HTMLInputElement>('senderPassword').value,
-      recipientAddress: $<HTMLInputElement>('recipientAddress').value.trim(),
-      subjectLine:      $<HTMLInputElement>('subjectLine').value.trim(),
-      smtpHost:         $<HTMLInputElement>('smtpHost').value.trim(),
-      smtpPort:         parseInt($<HTMLInputElement>('smtpPort').value, 10) || 587,
+      senderAddress:      $<HTMLInputElement>('senderAddress').value.trim(),
+      senderPassword:     $<HTMLInputElement>('senderPassword').value,
+      recipientAddress:   $<HTMLInputElement>('recipientAddress').value.trim(),
+      subjectLine:        $<HTMLInputElement>('subjectLine').value.trim(),
+      encryptionPassword: $<HTMLInputElement>('encryptionPassword').value,
+      encryptionAlgorithm:$<HTMLSelectElement>('encryptionAlgorithm').value as any,
+      smtpHost:           $<HTMLInputElement>('smtpHost').value.trim(),
+      smtpPort:           parseInt($<HTMLInputElement>('smtpPort').value, 10) || 587,
     },
   };
 

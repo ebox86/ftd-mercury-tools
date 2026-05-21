@@ -32,6 +32,8 @@ const DEFAULT_CONFIG = {
     smtpHost: 'smtp.gmail.com',
     smtpPort: 587,
     subjectLine: 'Online Order',
+    encryptionPassword: '',
+    encryptionAlgorithm: 'TripleDES',
   },
 };
 

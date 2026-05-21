@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import * as nodemailer from 'nodemailer';
 import { FaxOrderFields } from './index';
 import { EmailConfig } from './config';
@@ -78,6 +79,83 @@ function parseRecipient(location: string | undefined): ParsedRecipient {
   return { name: '', company: '', ...parseAddress(location) };
 }
 
+// ── WOI field sanitization ────────────────────────────────────────────────────
+
+/**
+ * The WOI spec forbids special characters in field values (# $ % ^ &).
+ * Amounts are handled separately (the spec explicitly allows $ and decimal there).
+ * Multi-line values are also collapsed to a single line.
+ */
+function sanitizeWoiText(value: string, maxLength: number): string {
+  return value
+    .replace(/\/n/g, ' ')        // strip OCR "/n" artifact (misread newline)
+    .replace(/[#$%^&]/g, '')     // remove spec-prohibited chars
+    .replace(/[\r\n]+/g, ' ')    // flatten multi-line to single line
+    .replace(/\s{2,}/g, ' ')     // collapse multiple spaces
+    .trim()
+    .slice(0, maxLength);
+}
+
+/**
+ * Normalize a user-supplied password into a fixed-length key or IV.
+ * If the password is too long, it is truncated; if too short, it is right-padded with '*'.
+ */
+function normalizePassword(password: string, length: number): Buffer {
+  const raw = Buffer.from(password, 'utf8');
+  if (raw.length >= length) {
+    return raw.slice(0, length);
+  }
+  const result = Buffer.alloc(length, '*');
+  raw.copy(result, 0, 0, raw.length);
+  return result;
+}
+
+function getCipherOptions(algorithm: EmailConfig['encryptionAlgorithm'] = 'TripleDES') {
+  switch (algorithm) {
+    case 'DES': return { cipherName: 'des-cbc', keyLength: 8, ivLength: 8 };
+    case 'RC2': return { cipherName: 'rc2-cbc', keyLength: 16, ivLength: 8 };
+    case 'Rijndael': return { cipherName: 'aes-256-cbc', keyLength: 32, ivLength: 16 };
+    case 'TripleDES': return { cipherName: 'des-ede3-cbc', keyLength: 24, ivLength: 8 };
+    default: return { cipherName: 'des-ede3-cbc', keyLength: 24, ivLength: 8 };
+  }
+}
+
+function encryptWoiBody(body: string, password: string, algorithm: EmailConfig['encryptionAlgorithm'] = 'TripleDES'): string {
+  const { cipherName, keyLength, ivLength } = getCipherOptions(algorithm);
+  const key = normalizePassword(password, keyLength);
+  const iv = normalizePassword(password, ivLength);
+
+  const runCipher = (name: string, keyBuffer: Buffer, ivBuffer: Buffer) => {
+    const cipher = crypto.createCipheriv(name, keyBuffer, ivBuffer);
+    return Buffer.concat([cipher.update(Buffer.from(body, 'utf8')), cipher.final()]);
+  };
+
+  try {
+    const encrypted = runCipher(cipherName, key, iv);
+    return encrypted.toString('base64');
+  } catch (err) {
+    if (algorithm === 'TripleDES') {
+      const fallbackKey = normalizePassword(password, 8);
+      const fallbackIv = normalizePassword(password, 8);
+      const encrypted = runCipher('des-cbc', fallbackKey, fallbackIv);
+      return encrypted.toString('base64');
+    }
+    throw err;
+  }
+}
+
+/**
+ * Heuristic: returns true when a string looks like OCR noise rather than real text.
+ * A description is considered garbage when fewer than 40% of its tokens are
+ * purely alphabetic words of 4+ characters.
+ */
+function isGarbageText(text: string): boolean {
+  const words = text.trim().split(/\s+/);
+  if (words.length === 0) return true;
+  const goodWords = words.filter(w => /^[A-Za-z]{4,}$/.test(w));
+  return goodWords.length / words.length < 0.4;
+}
+
 // ── WOI email body formatter ───────────────────────────────────────────────────
 export function formatWoiEmail(fields: FaxOrderFields): string {
   const billPhone = parsePhone(fields.customerPhone);
@@ -150,8 +228,19 @@ export function formatWoiEmail(fields: FaxOrderFields): string {
 }
 
 // ── Email sender ───────────────────────────────────────────────────────────────
-export async function sendWoiEmail(fields: FaxOrderFields, emailConfig: EmailConfig): Promise<void> {
-  const body = formatWoiEmail(fields);
+export async function sendWoiEmail(
+  fields: FaxOrderFields,
+  emailConfig: EmailConfig,
+  fieldMap: Record<string, string> = DEFAULT_FIELD_MAP,
+): Promise<void> {
+  let body = formatWoiEmail(fields, fieldMap);
+  if (emailConfig.encryptionPassword?.trim()) {
+    body = encryptWoiBody(
+      body,
+      emailConfig.encryptionPassword,
+      emailConfig.encryptionAlgorithm ?? 'TripleDES',
+    );
+  }
 
   const transport = nodemailer.createTransport({
     host: emailConfig.smtpHost,

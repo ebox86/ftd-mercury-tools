@@ -72,6 +72,18 @@ function loadLocalEnvFiles() {
 
 loadLocalEnvFiles();
 
+function normalizeAccessToken(rawToken = '') {
+  let token = String(rawToken || '').trim();
+  const assignment = token.match(/^(?:MAPBOX_TOKEN|MAPBOX_ACCESS_TOKEN)\s*=\s*(.*)$/i);
+  if (assignment) {
+    token = String(assignment[1] || '').trim();
+  }
+  if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+    token = token.slice(1, -1).trim();
+  }
+  return token;
+}
+
 function readJsonFile(filePath) {
   const raw = readFileSync(filePath, 'utf8');
   const text = String(raw).replace(/^\uFEFF/, '');
@@ -112,7 +124,7 @@ const liveApiCacheMaxEntries = Number(process.env.MERCURY_LIVE_CACHE_MAX_ENTRIES
 const liveApiCacheBypassParam = String(process.env.MERCURY_LIVE_CACHE_BYPASS_PARAM || 'nocache').trim() || 'nocache';
 const liveApiResponseCache = new Map();
 const liveApiInFlight = new Map();
-const mapboxToken = String(process.env.MAPBOX_TOKEN || process.env.MAPBOX_ACCESS_TOKEN || '').trim();
+const mapboxToken = normalizeAccessToken(process.env.MAPBOX_TOKEN || process.env.MAPBOX_ACCESS_TOKEN || '');
 const mapboxApiBaseUrl = String(process.env.MAPBOX_API_BASE_URL || 'https://api.mapbox.com').trim().replace(/\/+$/, '') || 'https://api.mapbox.com';
 const mapboxProfileRaw = String(process.env.MAPBOX_DIRECTIONS_PROFILE || 'driving').trim();
 const mapboxProfile = mapboxProfileRaw.includes('/') ? mapboxProfileRaw : `mapbox/${mapboxProfileRaw}`;

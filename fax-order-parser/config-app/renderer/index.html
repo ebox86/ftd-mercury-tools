@@ -76,6 +76,23 @@
       <p class="hint">Must match the subject configured in Mercury Administration → WOI.</p>
     </div>
 
+    <div class="form-group">
+      <label for="encryptionPassword">WOI Body Encryption Password</label>
+      <input type="password" id="encryptionPassword" autocomplete="new-password" />
+      <p class="hint">Leave blank to send the WOI body as plain text. When set, the body is encrypted and Base64 encoded.</p>
+    </div>
+
+    <div class="form-group">
+      <label for="encryptionAlgorithm">Encryption Algorithm</label>
+      <select id="encryptionAlgorithm">
+        <option value="TripleDES">TripleDES</option>
+        <option value="DES">DES</option>
+        <option value="RC2">RC2</option>
+        <option value="Rijndael">Rijndael (AES-256)</option>
+      </select>
+      <p class="hint">Cipher mode: CBC. Padding: PKCS7.</p>
+    </div>
+
     <details>
       <summary>Advanced SMTP Settings</summary>
       <div class="form-group" style="margin-top:10px">

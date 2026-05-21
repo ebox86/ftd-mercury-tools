@@ -40,12 +40,14 @@ async function loadConfig() {
   $('fileFormat').value         = cfg.fileFormat ?? 'PDF';
   $('processedSubfolder').value = cfg.processedSubfolder ?? 'processed';
 
-  $('senderAddress').value      = email.senderAddress   ?? '';
-  $('senderPassword').value     = email.senderPassword  ?? '';
-  $('recipientAddress').value   = email.recipientAddress ?? '';
-  $('subjectLine').value        = email.subjectLine      ?? '';
-  $('smtpHost').value           = email.smtpHost         ?? '';
-  $('smtpPort').value           = email.smtpPort         ?? 587;
+  $('senderAddress').value        = email.senderAddress   ?? '';
+  $('senderPassword').value       = email.senderPassword  ?? '';
+  $('recipientAddress').value     = email.recipientAddress ?? '';
+  $('subjectLine').value          = email.subjectLine      ?? '';
+  $('encryptionPassword').value   = email.encryptionPassword ?? '';
+  $('encryptionAlgorithm').value  = email.encryptionAlgorithm ?? 'TripleDES';
+  $('smtpHost').value             = email.smtpHost         ?? '';
+  $('smtpPort').value             = email.smtpPort         ?? 587;
 }
 
 async function saveConfig() {
@@ -55,12 +57,14 @@ async function saveConfig() {
     fileFormat:          $('fileFormat').value,
     processedSubfolder:  $('processedSubfolder').value.trim() || 'processed',
     email: {
-      senderAddress:    $('senderAddress').value.trim(),
-      senderPassword:   $('senderPassword').value,
-      recipientAddress: $('recipientAddress').value.trim(),
-      subjectLine:      $('subjectLine').value.trim(),
-      smtpHost:         $('smtpHost').value.trim(),
-      smtpPort:         parseInt($('smtpPort').value, 10) || 587,
+      senderAddress:      $('senderAddress').value.trim(),
+      senderPassword:     $('senderPassword').value,
+      recipientAddress:   $('recipientAddress').value.trim(),
+      subjectLine:        $('subjectLine').value.trim(),
+      encryptionPassword: $('encryptionPassword').value,
+      encryptionAlgorithm:$('encryptionAlgorithm').value,
+      smtpHost:           $('smtpHost').value.trim(),
+      smtpPort:           parseInt($('smtpPort').value, 10) || 587,
     },
   };
 
