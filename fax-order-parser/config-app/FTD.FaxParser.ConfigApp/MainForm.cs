@@ -142,7 +142,13 @@ internal sealed class MainForm : Form
 
   private TabControl BuildTabControl()
   {
-    var tc = new TabControl { Dock = DockStyle.Fill };
+    var tc = new TabControl
+    {
+      Dock      = DockStyle.Fill,
+      Alignment = TabAlignment.Bottom,
+      SizeMode  = TabSizeMode.Fixed,
+      ItemSize  = new Size(120, 30),
+    };
     tc.TabPages.Add(BuildMonitorTab());
     tc.TabPages.Add(BuildEmailTab());
     tc.TabPages.Add(BuildLogTab());
