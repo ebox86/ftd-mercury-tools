@@ -186,6 +186,8 @@ export interface TicketSearchRow {
   DESIGN_STATUS?: string;
   DELIVERY_STATUS?: string;
   STATUS?: string;
+  TOTAL?: string;
+  AMT_PAID?: string;
 }
 
 export interface TicketSearchDataset {

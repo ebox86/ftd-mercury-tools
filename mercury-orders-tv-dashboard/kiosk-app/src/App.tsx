@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
+  faArrowUp,
+  faArrowDown,
   faCalendarDay,
   faClock,
   faCircleCheck,
@@ -20,7 +22,11 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import {
   fetchDashboardServerConfig,
+  buildStaticMapBaseUrl,
+  buildStaticMapUrl,
+  type AddressSuggestion,
   type DistanceEstimateResponse,
+  fetchAddressSuggestions,
   fetchEventsNow,
   fetchDistanceEstimate,
   fetchLifecycleByServiceMsg,
@@ -53,7 +59,9 @@ import {
 import { buildTickerItems, buildTickerScrollText } from './ticker/buildTickerFeed';
 import { normalizeTickerModuleIds, TICKER_MODULE_DEFINITIONS } from './ticker/registry';
 import { normalizeWeatherZip, prefetchWeatherTicker } from './ticker/modules/weather';
+import { DEFAULT_STORE_HOURS_CONFIG, type StoreHoursConfig } from './ticker/modules/storeHours';
 import type { TickerModuleId, WeatherTickerSnapshot } from './ticker/types';
+import { fetchWeatherForecast, fetchRadarFrames, latLonToTile, weatherCodeDisplay, ccefIconName, degreesToCompass, type WeatherForecastData, type RadarFrame } from './lib/weatherForecast';
 import appPackage from '../package.json';
 
 type GroupedCards = Record<StatusStage, BoardCard[]>;
@@ -128,7 +136,7 @@ interface AskCandidateAttempt {
 type AudioAlertKind = 'marketplace' | 'today';
 type AlertSoundPreset = 'alarm_pulse' | 'classic_ding' | 'bright_beep' | 'custom_upload';
 type ClockFormat = '12h' | '24h';
-type DashboardPageId = 'alerts_active' | 'page2';
+type DashboardPageId = 'alerts_active' | 'page2' | 'weather' | 'delivery_map';
 interface DashboardUserConfig {
   pollMs: number;
   flashMs: number;
@@ -151,6 +159,32 @@ interface DashboardUserConfig {
   enabledPageIds: DashboardPageId[];
   pageAutoRotateEnabled: boolean;
   pageAutoRotateIntervalSec: number;
+  minOrderThreshold: number;
+  currencySymbol: string;
+  storeHours: StoreHoursConfig;
+  shopName: string;
+  shopAddress: string;
+  shopAddressLatitude: number | null;
+  shopAddressLongitude: number | null;
+}
+
+interface DeliveryMapPin {
+  id: string;
+  label: string;
+  orderRef: string;
+  statusLabel: string;
+  deliveryDate: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  xPercent: number;
+  yPercent: number;
+}
+
+interface DeliveryMapViewport {
+  latitude: number;
+  longitude: number;
+  zoom: number;
 }
 
 const DEFAULT_POLL_MS = 15000;
@@ -164,13 +198,23 @@ const DEFAULT_TODAY_DINGS = 1;
 const DEFAULT_DING_GAP_MS = 620;
 const DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC = 20;
 const NEW_ORDER_PULSE_WINDOW_MINUTES = 30;
+const CHART_ML = 40;
+const CHART_MR = 36;
+const CHART_MT = 14;
+const CHART_MB = 28;
+const CHART_VW = 1000;
+const CHART_VH = 220;
+const CHART_PW = CHART_VW - CHART_ML - CHART_MR;
+const CHART_PH = CHART_VH - CHART_MT - CHART_MB;
+const CHART_VISIBLE_HOURS = Array.from({ length: 24 }, (_, i) => i); // [0, 1, …, 23]
 const APP_VERSION_LABEL = `v${String(appPackage.version || '0.0.0').trim() || '0.0.0'}`;
+const LOADING_TICKER_TEXT = Array.from({ length: 18 }, () => 'Loading').join('  🌸  ');
 const DASHBOARD_MODE_STORAGE_KEY = 'kiosk_dashboard_mode';
 const AUDIO_ALERTS_STORAGE_KEY = 'kiosk_audio_alerts';
 const DASHBOARD_CLIENT_CONFIG_STORAGE_KEY = 'kiosk_dashboard_client_config_v1';
 const DASHBOARD_CONFIG_STORAGE_KEY_LEGACY = 'kiosk_dashboard_user_config_v1';
 const UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
-const MARKETPLACE_REGEX = /\b(uber\s*eats|door\s*dash|doordash)\b/i;
+const MARKETPLACE_REGEX = /\b(grub\s*hub|uber\s*eats|door\s*dash|doordash)\b/i;
 const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
   pollMs: DEFAULT_POLL_MS,
   flashMs: DEFAULT_FLASH_MS,
@@ -193,6 +237,13 @@ const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
   enabledPageIds: ['alerts_active'],
   pageAutoRotateEnabled: false,
   pageAutoRotateIntervalSec: DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC,
+  minOrderThreshold: 55,
+  currencySymbol: '$',
+  storeHours: DEFAULT_STORE_HOURS_CONFIG,
+  shopName: '',
+  shopAddress: '',
+  shopAddressLatitude: null,
+  shopAddressLongitude: null,
 };
 const USD_ORDER_TOTAL_FORMAT = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -442,6 +493,7 @@ function emptyGroups(): GroupedCards {
     delivered_or_exception: [],
   };
 }
+
 
 function normalizeText(raw: string): string {
   return String(raw || '')
@@ -825,12 +877,14 @@ function isPickupOrCodOrderType(orderTypeRaw: string): boolean {
   );
 }
 
-function isPickupSaleType(orderTypeRaw: string): boolean {
-  return String(orderTypeRaw || '').trim().toLowerCase() === 'pickup';
-}
 
 function isWireOrderType(orderTypeRaw: string): boolean {
   return /\bwire\b/i.test(String(orderTypeRaw || ''));
+}
+
+function isWireOutOrderType(orderTypeRaw: string): boolean {
+  const t = String(orderTypeRaw || '').toLowerCase();
+  return /\bwire\b/.test(t) && /\bout\b/.test(t);
 }
 
 function isLocalOrderType(orderTypeRaw: string): boolean {
@@ -840,8 +894,8 @@ function isLocalOrderType(orderTypeRaw: string): boolean {
 function resolvePreferredOrderType(currentTypeRaw: string, incomingTypeRaw: string): string {
   const currentType = String(currentTypeRaw || '').trim();
   const incomingType = String(incomingTypeRaw || '').trim();
-  if (isLocalOrderType(incomingType) || isWireOrderType(incomingType)) return incomingType;
-  if (isLocalOrderType(currentType) || isWireOrderType(currentType)) return currentType;
+  if (isLocalOrderType(incomingType) || isWireOrderType(incomingType) || isPickupOrCodOrderType(incomingType)) return incomingType;
+  if (isLocalOrderType(currentType) || isWireOrderType(currentType) || isPickupOrCodOrderType(currentType)) return currentType;
   return firstNonEmptyText(incomingType, currentType);
 }
 
@@ -986,9 +1040,135 @@ function normalizeToggle(value: unknown, fallback: boolean): boolean {
   return fallback;
 }
 
+function normalizeConfigText(value: unknown, maxLength: number): string {
+  return String(value || '').slice(0, maxLength);
+}
+
+function normalizeOptionalCoordinate(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  if (numeric < -180 || numeric > 180) return null;
+  return numeric;
+}
+
+function normalizeStoreHoursTime(value: unknown, fallback: string): string {
+  const raw = String(value || '').trim();
+  if (/^\d{2}:\d{2}$/.test(raw)) return raw;
+  return fallback;
+}
+
+function normalizeStoreHoursConfig(raw: Partial<StoreHoursConfig> | null | undefined): StoreHoursConfig {
+  const base = DEFAULT_STORE_HOURS_CONFIG;
+  return {
+    monFriEnabled: normalizeToggle(raw?.monFriEnabled, base.monFriEnabled),
+    monFriOpen: normalizeStoreHoursTime(raw?.monFriOpen, base.monFriOpen),
+    monFriClose: normalizeStoreHoursTime(raw?.monFriClose, base.monFriClose),
+    saturdayEnabled: normalizeToggle(raw?.saturdayEnabled, base.saturdayEnabled),
+    saturdayOpen: normalizeStoreHoursTime(raw?.saturdayOpen, base.saturdayOpen),
+    saturdayClose: normalizeStoreHoursTime(raw?.saturdayClose, base.saturdayClose),
+    sundayEnabled: normalizeToggle(raw?.sundayEnabled, base.sundayEnabled),
+    sundayOpen: normalizeStoreHoursTime(raw?.sundayOpen, base.sundayOpen),
+    sundayClose: normalizeStoreHoursTime(raw?.sundayClose, base.sundayClose),
+  };
+}
+
+function mercatorWorldPoint(latitude: number, longitude: number, zoom: number): { x: number; y: number } {
+  const sinLat = Math.sin((Math.max(-85.05113, Math.min(85.05113, latitude)) * Math.PI) / 180);
+  const scale = 512 * (2 ** zoom);
+  return {
+    x: ((longitude + 180) / 360) * scale,
+    y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale,
+  };
+}
+
+function deliveryMapLookupKey(card: BoardCard): string {
+  return [
+    normalizeAddressKeyText(card.addressLine),
+    normalizeAddressKeyText(card.cityStateZip),
+    normalizeAddressKeyText(deriveCardFooterZip(card)),
+  ].filter(Boolean).join('|');
+}
+
+function deliveryMapAddressQuery(card: BoardCard): string {
+  return [
+    card.addressLine,
+    card.cityStateZip,
+    deriveCardFooterZip(card),
+  ].map(value => String(value || '').trim()).filter(Boolean).join(', ');
+}
+
+function buildDeliveryMapViewport(points: Array<{ latitude: number; longitude: number }>): DeliveryMapViewport | null {
+  if (!points.length) return null;
+  const minLat = Math.min(...points.map(point => point.latitude));
+  const maxLat = Math.max(...points.map(point => point.latitude));
+  const minLon = Math.min(...points.map(point => point.longitude));
+  const maxLon = Math.max(...points.map(point => point.longitude));
+  const latitude = (minLat + maxLat) / 2;
+  const longitude = (minLon + maxLon) / 2;
+  if (points.length === 1) return { latitude, longitude, zoom: 13 };
+
+  const mapWidth = 1000;
+  const mapHeight = 560;
+  const padding = 120;
+  const sw = mercatorWorldPoint(minLat, minLon, 0);
+  const ne = mercatorWorldPoint(maxLat, maxLon, 0);
+  const spanX = Math.max(0.00001, Math.abs(ne.x - sw.x));
+  const spanY = Math.max(0.00001, Math.abs(sw.y - ne.y));
+  const zoomX = Math.log2(Math.max(1, mapWidth - padding) / spanX);
+  const zoomY = Math.log2(Math.max(1, mapHeight - padding) / spanY);
+  const zoom = Math.max(8, Math.min(14, Math.floor(Math.min(zoomX, zoomY))));
+  return { latitude, longitude, zoom };
+}
+
+function positionDeliveryMapPins(
+  points: Array<Omit<DeliveryMapPin, 'xPercent' | 'yPercent'>>,
+  viewport: DeliveryMapViewport | null,
+): DeliveryMapPin[] {
+  if (!viewport) return [];
+  const center = mercatorWorldPoint(viewport.latitude, viewport.longitude, viewport.zoom);
+  const mapWidth = 1000;
+  const mapHeight = 560;
+  const positioned = points.map(point => {
+    const projected = mercatorWorldPoint(point.latitude, point.longitude, viewport.zoom);
+    return {
+      ...point,
+      xPercent: ((mapWidth / 2 + projected.x - center.x) / mapWidth) * 100,
+      yPercent: ((mapHeight / 2 + projected.y - center.y) / mapHeight) * 100,
+    };
+  });
+
+  const clusters: DeliveryMapPin[][] = [];
+  for (const pin of positioned) {
+    const cluster = clusters.find(existing => existing.some(other => (
+      Math.abs(other.xPercent - pin.xPercent) < 3.2
+      && Math.abs(other.yPercent - pin.yPercent) < 4.6
+    )));
+    if (cluster) cluster.push(pin);
+    else clusters.push([pin]);
+  }
+
+  return clusters.flatMap(cluster => {
+    if (cluster.length === 1) return cluster;
+    const centerX = cluster.reduce((sum, pin) => sum + pin.xPercent, 0) / cluster.length;
+    const centerY = cluster.reduce((sum, pin) => sum + pin.yPercent, 0) / cluster.length;
+    const radius = Math.min(6.2, Math.max(2.6, 1.35 + cluster.length * 0.36));
+    return cluster.map((pin, index) => {
+      const angle = (-Math.PI / 2) + (index / cluster.length) * Math.PI * 2;
+      return {
+        ...pin,
+        xPercent: Math.max(3, Math.min(97, centerX + Math.cos(angle) * radius)),
+        yPercent: Math.max(5, Math.min(95, centerY + Math.sin(angle) * radius)),
+      };
+    });
+  });
+}
+
 const DASHBOARD_PAGE_DEFINITIONS: Array<{ id: DashboardPageId; label: string }> = [
   { id: 'alerts_active', label: 'Alerts + Active Orders' },
-  { id: 'page2', label: 'Page 2 (Scaffold)' },
+  { id: 'page2', label: 'Today\'s Stats' },
+  { id: 'weather', label: 'Weather' },
+  { id: 'delivery_map', label: 'Delivery Map' },
 ];
 
 function normalizeEnabledPageIds(raw: unknown): DashboardPageId[] {
@@ -1020,18 +1200,84 @@ function renderPagePreviewSvg(pageId: DashboardPageId) {
       </svg>
     );
   }
+  if (pageId === 'page2') {
+    return (
+      <svg viewBox="0 0 120 56" role="img" aria-label="Today's stats page preview">
+        <rect x="1" y="1" width="118" height="54" rx="6" fill="#f6f8fb" stroke="#a9b5c8" />
+        {/* KPI cards row */}
+        {[8, 26, 44, 62, 80, 98].map((x, i) => (
+          <rect key={i} x={x} y="6" width="16" height="12" rx="2" fill={i === 1 ? '#d4f0e4' : i === 3 ? '#fde8ea' : '#e2e8f3'} stroke="#b0bdc8" strokeWidth="0.5" />
+        ))}
+        {/* Pipeline row */}
+        <rect x="8" y="22" width="104" height="10" rx="2" fill="#dde4ec" stroke="#b0bdc8" strokeWidth="0.5" />
+        {[8, 26, 44, 62, 80].map((x, i) => (
+          <rect key={i} x={x} y="22" width={i === 0 ? 18 : i === 1 ? 14 : i === 2 ? 10 : i === 3 ? 22 : 16} height="10" rx="0" fill={i === 3 ? '#c8dff5' : i === 4 ? '#d4f0e4' : '#e8ecf4'} />
+        ))}
+        {/* Intake cards + ring */}
+        {[8, 34, 60, 86].map((x, i) => (
+          <rect key={i} x={x} y="36" width="22" height="14" rx="2" fill={i === 1 ? '#fde8ea' : '#e2e8f3'} stroke="#b0bdc8" strokeWidth="0.5" />
+        ))}
+        <circle cx="110" cy="43" r="8" fill="none" stroke="#d4f0e4" strokeWidth="3" />
+        <circle cx="110" cy="43" r="8" fill="none" stroke="#4caf7a" strokeWidth="3" strokeDasharray="30 21" strokeDashoffset="12" transform="rotate(-90 110 43)" />
+      </svg>
+    );
+  }
+  if (pageId === 'delivery_map') {
+    return (
+      <svg viewBox="0 0 120 56" role="img" aria-label="Delivery map page preview">
+        <rect x="1" y="1" width="118" height="54" rx="6" fill="#e6eef5" stroke="#86a4bd" />
+        <path d="M6 18 C18 12, 26 14, 40 9 C52 5, 62 11, 72 8 C88 4, 98 10, 114 6 L114 50 C100 45, 88 49, 74 44 C62 39, 50 46, 38 42 C24 37, 18 45, 6 40 Z" fill="#d7e7d9" stroke="#9bb9a2" strokeWidth="0.8" />
+        <path d="M8 34 C24 26, 38 28, 52 22 C68 15, 78 20, 92 15 C100 12, 106 10, 114 11" fill="none" stroke="#f8fafc" strokeWidth="4" />
+        <path d="M16 8 C24 20, 32 25, 46 32 C58 38, 70 37, 84 47" fill="none" stroke="#f8fafc" strokeWidth="3" />
+        {[
+          [28, 23],
+          [50, 31],
+          [68, 18],
+          [87, 38],
+          [101, 20],
+        ].map(([x, y], index) => (
+          <g key={index}>
+            <path d={`M${x} ${y - 7} c-3.4 0-6 2.6-6 5.8 0 4.2 6 10.2 6 10.2s6-6 6-10.2c0-3.2-2.6-5.8-6-5.8z`} fill="#1f3d64" />
+            <circle cx={x} cy={y - 1.6} r="2" fill="#fff" />
+          </g>
+        ))}
+      </svg>
+    );
+  }
   return (
-    <svg viewBox="0 0 120 56" role="img" aria-label="Page 2 scaffold preview">
-      <rect x="1" y="1" width="118" height="54" rx="6" fill="#f6f8fb" stroke="#a9b5c8" />
-      <rect x="14" y="12" width="92" height="32" rx="4" fill="#ffffff" stroke="#bdc9db" strokeDasharray="3 3" />
-      <rect x="26" y="24" width="68" height="6" rx="3" fill="#c8d4e8" />
+    <svg viewBox="0 0 120 56" role="img" aria-label="Weather page preview">
+      <rect x="1" y="1" width="118" height="54" rx="6" fill="#e4f0fa" stroke="#7aaed0" />
+      {/* Current conditions card */}
+      <rect x="5" y="5" width="34" height="30" rx="3" fill="#fff9e8" stroke="#c9a83c" strokeWidth="0.8" />
+      <circle cx="22" cy="16" r="7" fill="#f5d04a" />
+      <rect x="9" y="27" width="26" height="3" rx="1.5" fill="#c9a830" opacity="0.6" />
+      {/* Today card */}
+      <rect x="43" y="5" width="32" height="30" rx="3" fill="#eef5ff" stroke="#7fa8d4" strokeWidth="0.8" />
+      <rect x="48" y="9" width="22" height="5" rx="2" fill="#2a5fa0" opacity="0.5" />
+      <rect x="48" y="17" width="16" height="3" rx="1.5" fill="#5080b8" opacity="0.4" />
+      <rect x="48" y="23" width="20" height="3" rx="1.5" fill="#5080b8" opacity="0.35" />
+      {/* Tomorrow card */}
+      <rect x="79" y="5" width="34" height="30" rx="3" fill="#eef5ff" stroke="#7fa8d4" strokeWidth="0.8" />
+      <rect x="84" y="9" width="22" height="5" rx="2" fill="#2a5fa0" opacity="0.5" />
+      <rect x="84" y="17" width="18" height="3" rx="1.5" fill="#5080b8" opacity="0.4" />
+      <rect x="84" y="23" width="14" height="3" rx="1.5" fill="#5080b8" opacity="0.35" />
+      {/* Hourly chart strip */}
+      <rect x="5" y="39" width="64" height="13" rx="2" fill="#d0e4f0" stroke="#8ab0cc" strokeWidth="0.5" />
+      <polyline points="7,50 18,44 29,46 40,42 51,43 62,47 68,50" fill="none" stroke="#1a5a9a" strokeWidth="1.5" />
+      {/* Radar strip */}
+      <rect x="73" y="39" width="40" height="13" rx="2" fill="#c4d8e0" stroke="#6898aa" strokeWidth="0.5" />
+      <ellipse cx="93" cy="45" rx="6" ry="5" fill="none" stroke="#3a788a" strokeWidth="0.6" />
+      <ellipse cx="93" cy="45" rx="3" ry="2.5" fill="#70b880" opacity="0.5" />
     </svg>
   );
 }
 
 function pageDescription(pageId: DashboardPageId): string {
   if (pageId === 'alerts_active') return 'Alerts + Active Orders';
-  return 'Scaffold (empty)';
+  if (pageId === 'page2') return 'Stats & KPIs';
+  if (pageId === 'weather') return 'Weather Forecast';
+  if (pageId === 'delivery_map') return 'Delivery Map';
+  return 'Page';
 }
 
 function pickServerConfigFields(raw: Partial<DashboardUserConfig> | null | undefined): Partial<DashboardUserConfig> {
@@ -1053,6 +1299,13 @@ function pickServerConfigFields(raw: Partial<DashboardUserConfig> | null | undef
     enabledPageIds: raw?.enabledPageIds,
     pageAutoRotateEnabled: raw?.pageAutoRotateEnabled,
     pageAutoRotateIntervalSec: raw?.pageAutoRotateIntervalSec,
+    minOrderThreshold: raw?.minOrderThreshold,
+    currencySymbol: raw?.currencySymbol,
+    storeHours: raw?.storeHours,
+    shopName: raw?.shopName,
+    shopAddress: raw?.shopAddress,
+    shopAddressLatitude: raw?.shopAddressLatitude,
+    shopAddressLongitude: raw?.shopAddressLongitude,
   };
 }
 
@@ -1104,6 +1357,13 @@ function sanitizeDashboardConfig(raw: Partial<DashboardUserConfig> | null | unde
       300,
       DEFAULT_DASHBOARD_CONFIG.pageAutoRotateIntervalSec,
     ),
+    minOrderThreshold: clampInteger(raw?.minOrderThreshold, 0, 9999, DEFAULT_DASHBOARD_CONFIG.minOrderThreshold),
+    currencySymbol: String(raw?.currencySymbol ?? DEFAULT_DASHBOARD_CONFIG.currencySymbol).trim().slice(0, 3) || '$',
+    storeHours: normalizeStoreHoursConfig(raw?.storeHours),
+    shopName: normalizeConfigText(raw?.shopName, 80),
+    shopAddress: normalizeConfigText(raw?.shopAddress, 180),
+    shopAddressLatitude: normalizeOptionalCoordinate(raw?.shopAddressLatitude),
+    shopAddressLongitude: normalizeOptionalCoordinate(raw?.shopAddressLongitude),
   };
 }
 
@@ -1142,7 +1402,14 @@ function isDashboardConfigEqual(leftRaw: DashboardUserConfig, rightRaw: Dashboar
     && left.tickerModules.join('|') === right.tickerModules.join('|')
     && left.enabledPageIds.join('|') === right.enabledPageIds.join('|')
     && left.pageAutoRotateEnabled === right.pageAutoRotateEnabled
-    && left.pageAutoRotateIntervalSec === right.pageAutoRotateIntervalSec;
+    && left.pageAutoRotateIntervalSec === right.pageAutoRotateIntervalSec
+    && left.minOrderThreshold === right.minOrderThreshold
+    && left.currencySymbol === right.currencySymbol
+    && JSON.stringify(left.storeHours) === JSON.stringify(right.storeHours)
+    && left.shopName === right.shopName
+    && left.shopAddress === right.shopAddress
+    && left.shopAddressLatitude === right.shopAddressLatitude
+    && left.shopAddressLongitude === right.shopAddressLongitude;
 }
 
 function initialDashboardConfig(): DashboardUserConfig {
@@ -2261,6 +2528,7 @@ function mergeActiveOrderCard(target: Map<string, BoardCard>, nextCard: BoardCar
       addressLine: firstNonEmptyText(nextCard.addressLine, existing.addressLine),
       cityStateZip: firstNonEmptyText(nextCard.cityStateZip, existing.cityStateZip),
       deliveryZip: firstNonEmptyText(nextCard.deliveryZip, existing.deliveryZip),
+      isMarketplace: existing.isMarketplace || nextCard.isMarketplace,
     });
     return;
   }
@@ -2274,6 +2542,7 @@ function mergeActiveOrderCard(target: Map<string, BoardCard>, nextCard: BoardCar
     addressLine: firstNonEmptyText(existing.addressLine, nextCard.addressLine),
     cityStateZip: firstNonEmptyText(existing.cityStateZip, nextCard.cityStateZip),
     deliveryZip: firstNonEmptyText(existing.deliveryZip, nextCard.deliveryZip),
+    isMarketplace: existing.isMarketplace || nextCard.isMarketplace,
   };
   if (
     merged.recipientName !== existing.recipientName
@@ -3057,6 +3326,10 @@ export default function App() {
   const [, setGroups] = useState<GroupedCards>(emptyGroups());
   const [allActiveOrders, setAllActiveOrders] = useState<BoardCard[]>([]);
   const [pendingTickets, setPendingTickets] = useState<IntakeTicketCard[]>([]);
+  const [todaySaleDates, setTodaySaleDates] = useState<string[]>([]);
+  const [lastYearSaleDates, setLastYearSaleDates] = useState<string[]>([]);
+  const [lastYearStats, setLastYearStats] = useState<{ count: number; revenue: number; avgTicket: number } | null>(null);
+  const [todayFinancials, setTodayFinancials] = useState<{ revenue: number; avgTicket: number; largestOrder: number; wireInCount: number; wireInRevenue: number }>({ revenue: 0, avgTicket: 0, largestOrder: 0, wireInCount: 0, wireInRevenue: 0 });
   const [loading, setLoading] = useState(true);
   const [isRefreshingActiveOrders, setIsRefreshingActiveOrders] = useState(false);
   const [, setLastUpdated] = useState<string>("");
@@ -3072,12 +3345,25 @@ export default function App() {
   const [isAudioAlertsEnabled, setIsAudioAlertsEnabled] = useState<boolean>(() => initialAudioAlertsEnabled());
   const [isDashboardMode, setIsDashboardMode] = useState<boolean>(() => initialDashboardMode());
   const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [configTab, setConfigTab] = useState<'server' | 'client'>('server');
   const [currentPageId, setCurrentPageId] = useState<DashboardPageId>('alerts_active');
   const [config, setConfig] = useState<DashboardUserConfig>(() => initialDashboardConfig());
   const [configDraft, setConfigDraft] = useState<DashboardUserConfig | null>(null);
   const [configWeatherZipDraft, setConfigWeatherZipDraft] = useState<string>(() => DEFAULT_DASHBOARD_CONFIG.tickerWeatherZip);
   const [configMessage, setConfigMessage] = useState('');
   const [weatherTickerSnapshot, setWeatherTickerSnapshot] = useState<WeatherTickerSnapshot | null>(null);
+  const [weatherForecastData, setWeatherForecastData] = useState<WeatherForecastData | null>(null);
+  const [weatherForecastLoading, setWeatherForecastLoading] = useState(false);
+  const [shopAddressSuggestions, setShopAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const [isShopAddressSuggesting, setIsShopAddressSuggesting] = useState(false);
+  const [shopAddressSuggestionError, setShopAddressSuggestionError] = useState('');
+  const [deliveryMapPins, setDeliveryMapPins] = useState<Array<Omit<DeliveryMapPin, 'xPercent' | 'yPercent'>>>([]);
+  const [deliveryMapLoading, setDeliveryMapLoading] = useState(false);
+  const [deliveryMapError, setDeliveryMapError] = useState('');
+  const [selectedDeliveryMapPinId, setSelectedDeliveryMapPinId] = useState('');
+  const [financialsMasked, setFinancialsMasked] = useState(false);
+  const [radarFrames, setRadarFrames] = useState<RadarFrame[]>([]);
+  const [radarFrameIdx, setRadarFrameIdx] = useState(0);
   const seenTicketIdsRef = useRef<Set<string>>(new Set());
   const flashUntilRef = useRef<Map<string, number>>(new Map());
   const pendingListRef = useRef<HTMLDivElement | null>(null);
@@ -3092,11 +3378,13 @@ export default function App() {
   const pollQueuedRef = useRef(false);
   const hasCompletedInitialPollRef = useRef(false);
   const pollFeedCacheRef = useRef<Map<string, TimedCacheEntry<unknown>>>(new Map());
+  const selectedDateKeyRef = useRef<string>(currentLocalDateKey());
   const ticketStatusTtlCacheRef = useRef<Map<string, TimedCacheEntry<TicketStatusRow | null>>>(new Map());
   const lifecycleTtlCacheRef = useRef<Map<string, TimedCacheEntry<LifecycleRow | null>>>(new Map());
   const orderDetailsTtlCacheRef = useRef<Map<string, TimedCacheEntry<Awaited<ReturnType<typeof fetchOrderDetails>>>>>(new Map());
   const orderDetailZipByTicketRef = useRef<Map<string, string>>(new Map());
   const pendingDistanceByLookupKeyRef = useRef<Map<string, string>>(new Map());
+  const deliveryMapGeocodeCacheRef = useRef<Map<string, Omit<DeliveryMapPin, 'xPercent' | 'yPercent'> | null>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioAlertsEnabledRef = useRef(isAudioAlertsEnabled);
   const audioAlertSnapshotReadyRef = useRef(false);
@@ -3133,6 +3421,45 @@ export default function App() {
   const customLogoSrc = useMemo(
     () => (configForLogoPreview.customLogoDataUrl ? configForLogoPreview.customLogoDataUrl : '/olivers.png'),
     [configForLogoPreview.customLogoDataUrl],
+  );
+  const dashboardTitle = useMemo(() => {
+    const shopName = config.shopName.trim();
+    return shopName ? `${shopName} TV Dashboard` : 'TV Dashboard';
+  }, [config.shopName]);
+  const shopMapUrl = useMemo(() => {
+    if (!editingConfig.shopAddress.trim()) return '';
+    if (editingConfig.shopAddressLatitude === null || editingConfig.shopAddressLongitude === null) return '';
+    return buildStaticMapUrl({
+      latitude: editingConfig.shopAddressLatitude,
+      longitude: editingConfig.shopAddressLongitude,
+      width: 640,
+      height: 260,
+      zoom: 15,
+      marker: true,
+    });
+  }, [editingConfig.shopAddressLatitude, editingConfig.shopAddressLongitude]);
+  const deliveryMapViewport = useMemo(
+    () => buildDeliveryMapViewport(deliveryMapPins),
+    [deliveryMapPins],
+  );
+  const positionedDeliveryMapPins = useMemo(
+    () => positionDeliveryMapPins(deliveryMapPins, deliveryMapViewport),
+    [deliveryMapPins, deliveryMapViewport],
+  );
+  const deliveryMapUrl = useMemo(() => {
+    if (!deliveryMapViewport) return '';
+    return buildStaticMapBaseUrl({
+      latitude: deliveryMapViewport.latitude,
+      longitude: deliveryMapViewport.longitude,
+      width: 900,
+      height: 520,
+      zoom: deliveryMapViewport.zoom,
+      cacheKey: 'delivery-map-base-v1',
+    });
+  }, [deliveryMapViewport]);
+  const selectedDeliveryMapPin = useMemo(
+    () => positionedDeliveryMapPins.find(pin => pin.id === selectedDeliveryMapPinId) || null,
+    [positionedDeliveryMapPins, selectedDeliveryMapPinId],
   );
   const askStaleMs = useMemo(
     () => clampInteger(config.askStaleHours * 60 * 60 * 1000, 60 * 60 * 1000, 72 * 60 * 60 * 1000, DEFAULT_ASK_STALE_HOURS * 60 * 60 * 1000),
@@ -3331,25 +3658,34 @@ export default function App() {
     if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
     if (logoUploadRef.current) logoUploadRef.current.value = '';
   }, [config, editingConfig]);
-  const saveServerSettingsOnly = useCallback(async () => {
-    const serverSlice = sanitizeServerBackedConfig(editingConfig);
-    const serverConfigSaved = await saveDashboardServerConfig(serverSlice as Record<string, unknown>);
-    if (!serverConfigSaved) {
-      setConfigMessage('Could not save server settings to disk.');
-      return;
-    }
-    setConfig(previous => sanitizeDashboardConfig({
-      ...previous,
-      ...serverSlice,
-    }));
-    setConfigMessage('Server settings saved to disk.');
-  }, [editingConfig]);
   const updateConfigNumber = useCallback((key: keyof DashboardUserConfig, valueRaw: string) => {
     const value = Number(valueRaw);
     setConfigDraft(previous => {
       const base = sanitizeDashboardConfig(previous || config);
       return sanitizeDashboardConfig({ ...base, [key]: Number.isFinite(value) ? value : base[key] });
     });
+  }, [config]);
+  const updateStoreHours = useCallback((updates: Partial<StoreHoursConfig>) => {
+    setConfigDraft(previous => {
+      const base = sanitizeDashboardConfig(previous || config);
+      return sanitizeDashboardConfig({
+        ...base,
+        storeHours: {
+          ...base.storeHours,
+          ...updates,
+        },
+      });
+    });
+  }, [config]);
+  const selectShopAddressSuggestion = useCallback((suggestion: AddressSuggestion) => {
+    setConfigDraft(previous => sanitizeDashboardConfig({
+      ...(previous || config),
+      shopAddress: suggestion.address || suggestion.label,
+      shopAddressLatitude: suggestion.latitude,
+      shopAddressLongitude: suggestion.longitude,
+    }));
+    setShopAddressSuggestions([]);
+    setShopAddressSuggestionError('');
   }, [config]);
   const toggleEnabledPageInDraft = useCallback((pageId: DashboardPageId, enabled: boolean) => {
     setConfigDraft(previous => {
@@ -3500,9 +3836,10 @@ export default function App() {
   const setSelectedDateByKey = useCallback((dateKeyRaw: string) => {
     const nextDate = localDateFromDateKey(dateKeyRaw);
     if (!nextDate) return;
+    if (isRefreshingActiveOrders || loading) return;
     requestActiveOrdersRefreshSpinner();
     setDateOffsetDays(dayOffsetFromToday(nextDate));
-  }, [requestActiveOrdersRefreshSpinner]);
+  }, [isRefreshingActiveOrders, loading, requestActiveOrdersRefreshSpinner]);
   const selectedDate = useMemo(() => {
     const date = localDateFromDateKey(todayAnchorKey) || new Date();
     date.setHours(0, 0, 0, 0);
@@ -3528,7 +3865,10 @@ export default function App() {
     [allActiveOrders, showCompleted],
   );
   const activeOrders = useMemo(() => {
-    return displayEligibleOrders.filter(card => isWithinDateKeys(card.deliveryDate, allowedDeliveryDateKeys));
+    return displayEligibleOrders.filter(card =>
+      isWithinDateKeys(card.deliveryDate, allowedDeliveryDateKeys) &&
+      !isWireOutOrderType(card.orderType)
+    );
   }, [displayEligibleOrders, allowedDeliveryDateKeys]);
   const normalizedActiveOrderSearchQuery = useMemo(
     () => normalizeText(activeOrderSearchQuery),
@@ -3551,6 +3891,8 @@ export default function App() {
     });
   }, [activeOrders, normalizedActiveOrderSearchQuery]);
   const selectedDateKey = useMemo(() => dateKeyFromDate(selectedDate), [selectedDate]);
+  // Keep ref in sync so the pollBoard closure (which captures stale values) always sees the current date
+  useEffect(() => { selectedDateKeyRef.current = selectedDateKey; }, [selectedDateKey]);
   const nextDateKey = useMemo(() => {
     const next = new Date(selectedDate);
     next.setDate(next.getDate() + 1);
@@ -3569,13 +3911,22 @@ export default function App() {
     [displayEligibleOrders, includeNextDay, nextDateKey],
   );
   const selectedDayOrderTotal = useMemo(
-    () => allActiveOrders.filter(card => toDateKey(card.deliveryDate) === selectedDateKey).length,
+    () => allActiveOrders.filter(card => toDateKey(card.deliveryDate) === selectedDateKey && !isWireOutOrderType(card.orderType)).length,
     [allActiveOrders, selectedDateKey],
   );
   const selectedDayOrderCompleted = useMemo(
-    () => allActiveOrders.filter(card => toDateKey(card.deliveryDate) === selectedDateKey && isCompletedOrder(card)).length,
+    () => allActiveOrders.filter(card => toDateKey(card.deliveryDate) === selectedDateKey && !isWireOutOrderType(card.orderType) && isCompletedOrder(card)).length,
     [allActiveOrders, selectedDateKey],
   );
+  const selectedDayDeliveryMapOrders = useMemo(() => (
+    allActiveOrders.filter(card => {
+      if (toDateKey(card.deliveryDate) !== selectedDateKey) return false;
+      if (isWireOutOrderType(card.orderType)) return false;
+      if (isCompletedOrder(card)) return false;
+      if (!String(card.addressLine || '').trim()) return false;
+      return true;
+    })
+  ), [allActiveOrders, selectedDateKey]);
   const selectedDayCompletionPercent = useMemo(() => {
     if (!selectedDayOrderTotal) return 0;
     return Math.max(0, Math.min(100, Math.round((selectedDayOrderCompleted / selectedDayOrderTotal) * 100)));
@@ -3919,7 +4270,7 @@ export default function App() {
         existing.USER_REFERENCE = existing.USER_REFERENCE || userReference;
         existing.SALE_ID = existing.SALE_ID || String(row.SALE_ID || '').trim();
         existing.TICKET_POSITION = existing.TICKET_POSITION || String(row.TICKET_POSITION || '1').trim();
-        existing.ORDER_TYPE = existing.ORDER_TYPE || String(row.ORDER_TYPE || '').trim();
+        existing.ORDER_TYPE = resolvePreferredOrderType(existing.ORDER_TYPE || '', String(row.ORDER_TYPE || '').trim());
         existing.RECIPIENT_NAME = existing.RECIPIENT_NAME || String(row.RECIPIENT_NAME || '').trim();
         existing.RECIPIENT_ADDRESS = existing.RECIPIENT_ADDRESS || normalizedStreetLine(row);
         existing.RECIPIENT_CITY = existing.RECIPIENT_CITY || normalizedCity(row);
@@ -5179,6 +5530,32 @@ export default function App() {
       }
       // Progress/counting should use all selected-day orders, including non-local order types.
       setAllActiveOrders(reconciledActiveOrders);
+      // All SALE_DATEs for the selected delivery date — bucketed by hour to build the intake chart.
+      // Mercury always returns full ISO datetime strings, so getHours() gives the correct local hour.
+      const selectedKey = selectedDateKeyRef.current;
+      const saleDatesForChart = ticketSearchRows
+        .filter(r => toDateKey(String(r.DELIVERY_DATE || '')) === selectedKey && !isWireOutOrderType(String(r.ORDER_TYPE || '')))
+        .map(r => String(r.SALE_DATE || '').trim())
+        .filter(Boolean);
+      setTodaySaleDates(saleDatesForChart);
+
+      // Financial KPIs for the selected delivery date
+      const todayDeliveryRows = ticketSearchRows.filter(r => toDateKey(String(r.DELIVERY_DATE || '')) === selectedKey);
+      const localAndWireInRows = todayDeliveryRows.filter(r => !isWireOutOrderType(String(r.ORDER_TYPE || '')));
+      const wireInRows = todayDeliveryRows.filter(r => {
+        const ot = String(r.ORDER_TYPE || '').trim();
+        return ot === '103' || ot === 'Wire In' || /wire[\s-]?in\b/i.test(ot);
+      });
+      const localRevenue = localAndWireInRows.reduce((sum, r) => sum + (parseFloat(String(r.TOTAL || '0')) || 0), 0);
+      const localAmounts = localAndWireInRows.map(r => parseFloat(String(r.TOTAL || '0')) || 0).filter(n => n > 0);
+      setTodayFinancials({
+        revenue: localRevenue,
+        avgTicket: localAmounts.length ? localRevenue / localAmounts.length : 0,
+        largestOrder: localAmounts.length ? Math.max(...localAmounts) : 0,
+        wireInCount: wireInRows.length,
+        wireInRevenue: wireInRows.reduce((sum, r) => sum + (parseFloat(String(r.TOTAL || '0')) || 0), 0),
+      });
+
       setPendingTickets(pendingWithDistance);
       setLastUpdated(new Date().toLocaleTimeString());
       hasCompletedInitialPollRef.current = true;
@@ -5376,6 +5753,192 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    if (currentPageId !== 'weather') {
+      setWeatherForecastData(null);
+      return;
+    }
+    let disposed = false;
+    let activeController: AbortController | null = null;
+
+    const refresh = async () => {
+      if (disposed) return;
+      const controller = new AbortController();
+      activeController = controller;
+      setWeatherForecastLoading(true);
+      try {
+        const data = await fetchWeatherForecast(config.tickerWeatherZip, controller.signal);
+        if (!disposed) setWeatherForecastData(data);
+      } catch {
+        // ignore fetch errors (aborts, network failures)
+      } finally {
+        if (!disposed) setWeatherForecastLoading(false);
+      }
+    };
+
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 10 * 60 * 1000);
+
+    return () => {
+      disposed = true;
+      if (activeController) activeController.abort();
+      window.clearInterval(timer);
+    };
+  }, [currentPageId, config.tickerWeatherZip]);
+
+  // Fetch RainViewer radar frames when on weather page; refresh every 5 min
+  useEffect(() => {
+    if (currentPageId !== 'weather') {
+      setRadarFrames([]);
+      setRadarFrameIdx(0);
+      return;
+    }
+    let disposed = false;
+    const refresh = async () => {
+      const frames = await fetchRadarFrames();
+      if (!disposed && frames.length > 0) {
+        setRadarFrames(frames);
+        setRadarFrameIdx(0);
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5 * 60 * 1000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [currentPageId]);
+
+  useEffect(() => {
+    if (!isConfigOpen || configTab !== 'server') {
+      setShopAddressSuggestions([]);
+      setShopAddressSuggestionError('');
+      setIsShopAddressSuggesting(false);
+      return;
+    }
+    const query = editingConfig.shopAddress.trim();
+    if (query.length < 3) {
+      setShopAddressSuggestions([]);
+      setShopAddressSuggestionError('');
+      setIsShopAddressSuggesting(false);
+      return;
+    }
+    if (editingConfig.shopAddressLatitude !== null && editingConfig.shopAddressLongitude !== null) {
+      setShopAddressSuggestions([]);
+      setShopAddressSuggestionError('');
+      setIsShopAddressSuggesting(false);
+      return;
+    }
+
+    let disposed = false;
+    setIsShopAddressSuggesting(true);
+    const timer = window.setTimeout(() => {
+      void fetchAddressSuggestions(query)
+        .then(suggestions => {
+          if (disposed) return;
+          setShopAddressSuggestions(suggestions);
+          setShopAddressSuggestionError('');
+        })
+        .catch(() => {
+          if (disposed) return;
+          setShopAddressSuggestions([]);
+          setShopAddressSuggestionError('Address lookup unavailable.');
+        })
+        .finally(() => {
+          if (!disposed) setIsShopAddressSuggesting(false);
+        });
+    }, 250);
+
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    configTab,
+    editingConfig.shopAddress,
+    editingConfig.shopAddressLatitude,
+    editingConfig.shopAddressLongitude,
+    isConfigOpen,
+  ]);
+
+  useEffect(() => {
+    if (currentPageId !== 'delivery_map') {
+      setDeliveryMapLoading(false);
+      setDeliveryMapError('');
+      return;
+    }
+    let disposed = false;
+    const lookupKeys = selectedDayDeliveryMapOrders
+      .map(card => deliveryMapLookupKey(card))
+      .filter(Boolean);
+    if (!lookupKeys.length) {
+      setDeliveryMapPins([]);
+      setDeliveryMapLoading(false);
+      setDeliveryMapError('');
+      return;
+    }
+
+    const resolvePins = async () => {
+      setDeliveryMapLoading(true);
+      setDeliveryMapError('');
+      const pins: Array<Omit<DeliveryMapPin, 'xPercent' | 'yPercent'>> = [];
+
+      for (const card of selectedDayDeliveryMapOrders) {
+        if (disposed) return;
+        const lookupKey = deliveryMapLookupKey(card);
+        if (!lookupKey) continue;
+        if (deliveryMapGeocodeCacheRef.current.has(lookupKey)) {
+          const cached = deliveryMapGeocodeCacheRef.current.get(lookupKey);
+          if (cached) pins.push(cached);
+          continue;
+        }
+
+        try {
+          const suggestions = await fetchAddressSuggestions(deliveryMapAddressQuery(card));
+          const match = suggestions[0] || null;
+          if (!match) {
+            deliveryMapGeocodeCacheRef.current.set(lookupKey, null);
+            continue;
+          }
+          const pin = {
+            id: card.ticketId || card.userReference || lookupKey,
+            label: card.recipientName || card.userReference || 'Delivery',
+            orderRef: card.userReference || card.ticketId || '',
+            statusLabel: singleStatusPill(card).label,
+            deliveryDate: formatDateOnly(card.deliveryDate) || selectedDayCountLabel,
+            address: match.address || deliveryMapAddressQuery(card),
+            latitude: match.latitude,
+            longitude: match.longitude,
+          };
+          deliveryMapGeocodeCacheRef.current.set(lookupKey, pin);
+          pins.push(pin);
+        } catch {
+          deliveryMapGeocodeCacheRef.current.set(lookupKey, null);
+        }
+      }
+
+      if (disposed) return;
+      setDeliveryMapPins(pins);
+      setSelectedDeliveryMapPinId('');
+      setDeliveryMapError(pins.length ? '' : 'Unable to geocode delivery addresses for this date.');
+      setDeliveryMapLoading(false);
+    };
+
+    void resolvePins();
+    return () => {
+      disposed = true;
+    };
+  }, [currentPageId, selectedDateKey, selectedDayDeliveryMapOrders]);
+
+  // Advance radar animation frame
+  useEffect(() => {
+    if (radarFrames.length === 0) return;
+    const timer = window.setInterval(() => {
+      setRadarFrameIdx(prev => (prev + 1) % radarFrames.length);
+    }, 800);
+    return () => window.clearInterval(timer);
+  }, [radarFrames.length]);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(DASHBOARD_MODE_STORAGE_KEY, isDashboardMode ? '1' : '0');
@@ -5462,10 +6025,6 @@ export default function App() {
     };
   }, []);
 
-  const totalOrderCount = useMemo(
-    () => activeOrders.length + pendingTickets.length,
-    [activeOrders.length, pendingTickets.length],
-  );
 
   const uncreatedTicketCount = useMemo(
     () => pendingTickets.filter(ticket => ticket.kind === 'uncreated').length,
@@ -5486,6 +6045,128 @@ export default function App() {
     )).length,
     [allActiveOrders, selectedDateKey],
   );
+
+  const todayStageCounts = useMemo(() => {
+    const todayOrders = allActiveOrders.filter(card => toDateKey(card.deliveryDate) === selectedDateKey && !isWireOutOrderType(card.orderType));
+    const exceptions = todayOrders.filter(c => isExceptionStatusReason(`${c.stageReason} ${c.deliveryStatus}`)).length;
+    const delivered = todayOrders.filter(c => c.stage === 'delivered_or_exception' && !isExceptionStatusReason(`${c.stageReason} ${c.deliveryStatus}`)).length;
+    const onTruck = todayOrders.filter(c => c.stage === 'on_truck' && !isCanceledOrder(c)).length;
+    const staged = todayOrders.filter(c => c.stage === 'saved_or_staged' && !isCanceledOrder(c)).length;
+    const designed = todayOrders.filter(c => c.stage === 'designed' && !isCanceledOrder(c)).length;
+    const queued = todayOrders.filter(c => (c.stage === 'queued_not_designed' || c.stage === 'incoming') && !isCanceledOrder(c)).length;
+    const marketplace = todayOrders.filter(c => c.isMarketplace).length;
+    const canceled = todayOrders.filter(c => isCanceledOrder(c)).length;
+    return { queued, designed, staged, onTruck, delivered, exceptions, marketplace, canceled, total: todayOrders.length };
+  }, [allActiveOrders, selectedDateKey]);
+
+
+
+  const hourlyOrderCounts = useMemo(() => {
+    const counts = new Array(24).fill(0) as number[];
+    for (const d of todaySaleDates) {
+      const ms = Date.parse(d);
+      if (isNaN(ms)) continue;
+      counts[new Date(ms).getHours()]++;
+    }
+    return counts;
+  }, [todaySaleDates]);
+
+  useEffect(() => {
+    const fetchLastYear = async () => {
+      try {
+        const selected = localDateFromDateKey(selectedDateKey) ?? new Date();
+        const ly = new Date(selected.getFullYear() - 1, selected.getMonth(), selected.getDate());
+        const lyNext = new Date(ly.getFullYear(), ly.getMonth(), ly.getDate() + 1);
+        const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        // Mercury ToDate is exclusive — pass the following day so the target date is included
+        const result = await fetchTicketSearch({ fromDate: fmt(ly), toDate: fmt(lyNext), includeDelivered: true, notDelivered: false });
+        const rows = (result.rows ?? []).filter(r => !isWireOutOrderType(String(r.ORDER_TYPE || '')));
+        const dates = rows.map(r => String(r.SALE_DATE || '').trim()).filter(Boolean);
+        setLastYearSaleDates(dates);
+        const totals = rows.map(r => parseFloat(String(r.TOTAL || '0')) || 0).filter(n => n > 0);
+        const revenue = totals.reduce((s, n) => s + n, 0);
+        setLastYearStats({ count: rows.length, revenue, avgTicket: totals.length ? revenue / totals.length : 0 });
+      } catch { /* silently ignore */ }
+    };
+    void fetchLastYear();
+  }, [selectedDateKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const weatherChartData = useMemo(() => {
+    if (!weatherForecastData || weatherForecastData.hourly.length === 0) return null;
+    const { hourly } = weatherForecastData;
+    const temps = hourly.map(h => h.temp);
+    const minTemp = Math.min(...temps) - 5;
+    const maxTemp = Math.max(...temps) + 5;
+    const tempRange = maxTemp - minTemp || 1;
+    const W = 900, H = 230, ML = 48, MR = 12, MT = 16, MB = 60;
+    const PW = W - ML - MR;
+    const PH = H - MT - MB;
+    const n = hourly.length;
+    const xOf = (i: number) => ML + (i / Math.max(1, n - 1)) * PW;
+    const yOf = (t: number) => MT + (1 - (t - minTemp) / tempRange) * PH;
+    const points = hourly.map((h, i) => ({ x: xOf(i), y: yOf(h.temp), h }));
+    const tempPolyline = points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    const areaPolygon = [
+      `${xOf(0).toFixed(1)},${(MT + PH).toFixed(1)}`,
+      tempPolyline,
+      `${xOf(n - 1).toFixed(1)},${(MT + PH).toFixed(1)}`,
+    ].join(' ');
+    const barW = Math.max(6, (PW / Math.max(1, n)) * 0.45);
+    return { W, H, ML, MR, MT, MB, PW, PH, n, xOf, yOf, points, tempPolyline, areaPolygon, barW, minTemp, maxTemp, tempRange };
+  }, [weatherForecastData]);
+
+  const chartLineData = useMemo(() => {
+    const currentHour = new Date().getHours();
+
+    const lastYearCounts = new Array(24).fill(0) as number[];
+    for (const d of lastYearSaleDates) {
+      const ms = Date.parse(d);
+      if (isNaN(ms)) continue;
+      lastYearCounts[new Date(ms).getHours()]++;
+    }
+
+    const counts = hourlyOrderCounts as number[];
+    const yMaxCumulative = Math.max(todaySaleDates.length, lastYearSaleDates.length, 1);
+    const yMaxHourly = Math.max(...counts, ...lastYearCounts, 1);
+
+    type CumulativePoint = { hour: number; x: number; y: number; cumulative: number };
+    type HourlyPoint = { hour: number; x: number; y: number; count: number };
+
+    const xForHour = (hour: number) =>
+      CHART_ML + Math.round((hour / 23) * CHART_PW);
+
+    const buildCumulativePoints = (countsByHour: number[], maxHour: number): CumulativePoint[] => {
+      let running = 0;
+      const pts: CumulativePoint[] = [];
+      for (let h = 0; h <= Math.min(maxHour, 23); h++) {
+        running += countsByHour[h] ?? 0;
+        const x = xForHour(h);
+        const y = CHART_MT + Math.round(CHART_PH * (1 - running / yMaxCumulative));
+        pts.push({ hour: h, x, y, cumulative: running });
+      }
+      return pts;
+    };
+
+    const buildHourlyPoints = (countsByHour: number[], maxHour: number): HourlyPoint[] => {
+      const pts: HourlyPoint[] = [];
+      for (let h = 0; h <= Math.min(maxHour, 23); h++) {
+        const count = countsByHour[h] ?? 0;
+        const x = xForHour(h);
+        // Use cumulative scale so both lines share one Y axis
+        const y = CHART_MT + Math.round(CHART_PH * (1 - count / yMaxCumulative));
+        pts.push({ hour: h, x, y, count });
+      }
+      return pts;
+    };
+
+    const todayCumulativePoints = buildCumulativePoints(counts, currentHour);
+    const fullDayCumulativePoints = buildCumulativePoints(counts, 23);
+    const todayHourlyPoints = buildHourlyPoints(counts, currentHour);
+    const fullDayHourlyPoints = buildHourlyPoints(counts, 23);
+
+    return { todayCumulativePoints, fullDayCumulativePoints, todayHourlyPoints, fullDayHourlyPoints, yMaxCumulative, yMaxHourly };
+  }, [hourlyOrderCounts, todaySaleDates.length, lastYearSaleDates]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const newOrdersPulse = useMemo(() => {
     const windowMs = NEW_ORDER_PULSE_WINDOW_MINUTES * 60 * 1000;
     const nowEpoch = tickerNow.getTime();
@@ -5567,6 +6248,7 @@ export default function App() {
     enabledModuleIds: config.tickerModules,
     weatherZip: config.tickerWeatherZip,
     weatherSnapshot: weatherTickerSnapshot,
+    storeHours: config.storeHours,
     completion: {
       dayLabel: selectedDayCountLabel,
       completed: selectedDayOrderCompleted,
@@ -5591,6 +6273,7 @@ export default function App() {
   }), [
     config.tickerModules,
     config.tickerWeatherZip,
+    config.storeHours,
     weatherTickerSnapshot,
     selectedDayCountLabel,
     selectedDayOrderCompleted,
@@ -5680,47 +6363,49 @@ export default function App() {
             <img className="app__logo" src={customLogoSrc} alt="Shop logo" />
           </div>
           <div className="app__title-text">
-            <h1>Oliver Flowers Order Flow Dashboard</h1>
-            {!isConfigOpen ? (
-              <div className="app__today-wrap">
-                <button
-                  type="button"
-                  className="app__date-nav"
-                  onClick={() => {
-                    requestActiveOrdersRefreshSpinner();
-                    setDateOffsetDays(previous => previous - 1);
-                  }}
-                  aria-label="Previous day"
-                >
-                  <FontAwesomeIcon icon={faChevronLeft} />
-                </button>
-                <div className="app__today">{todayLabel}</div>
-                <label className="app__date-nav app__date-nav--native-picker" aria-label="Pick day">
-                  <FontAwesomeIcon icon={faCalendarDay} />
-                  <input
-                    type="date"
-                    className="app__date-nav-input"
-                    value={selectedDateKey}
-                    onChange={(event) => setSelectedDateByKey(event.target.value)}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="app__date-nav"
-                  onClick={() => {
-                    requestActiveOrdersRefreshSpinner();
-                    setDateOffsetDays(previous => previous + 1);
-                  }}
-                  aria-label="Next day"
-                >
-                  <FontAwesomeIcon icon={faChevronRight} />
-                </button>
-              </div>
-            ) : null}
+            <h1>{dashboardTitle}</h1>
+            <div className="app__today-wrap">
+              <button
+                type="button"
+                className="app__date-nav"
+                onClick={() => {
+                  if (isRefreshingActiveOrders || loading) return;
+                  requestActiveOrdersRefreshSpinner();
+                  setDateOffsetDays(previous => previous - 1);
+                }}
+                aria-label="Previous day"
+                disabled={isRefreshingActiveOrders || loading}
+              >
+                <FontAwesomeIcon icon={faChevronLeft} />
+              </button>
+              <div className="app__today">{todayLabel}</div>
+              <label className="app__date-nav app__date-nav--native-picker" aria-label="Pick day">
+                <FontAwesomeIcon icon={faCalendarDay} />
+                <input
+                  type="date"
+                  className="app__date-nav-input"
+                  value={selectedDateKey}
+                  disabled={isRefreshingActiveOrders || loading}
+                  onChange={(event) => setSelectedDateByKey(event.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="app__date-nav"
+                onClick={() => {
+                  if (isRefreshingActiveOrders || loading) return;
+                  requestActiveOrdersRefreshSpinner();
+                  setDateOffsetDays(previous => previous + 1);
+                }}
+                aria-label="Next day"
+                disabled={isRefreshingActiveOrders || loading}
+              >
+                <FontAwesomeIcon icon={faChevronRight} />
+              </button>
+            </div>
           </div>
         </div>
-        {!isConfigOpen ? (
-          <div className="app__controls app__controls--compact">
+        <div className="app__controls app__controls--compact">
               <button
                 type="button"
                 aria-pressed={includeNextDay}
@@ -5804,60 +6489,58 @@ export default function App() {
                   {isDashboardMode ? (
                     <>
                       <span className="app__control-line">Exit</span>
-                      <span className="app__control-line">Dashboard</span>
+                      <span className="app__control-line">Fullscreen</span>
                     </>
                   ) : (
                     <>
-                      <span className="app__control-line">Dashboard</span>
-                      <span className="app__control-line">Mode</span>
+                      <span className="app__control-line">Fullscreen</span>
                     </>
                   )}
                 </span>
               </button>
           </div>
-        ) : null}
       </header>
 
       {isConfigOpen ? (
-        <section className="app__config-page">
-          <div className="app__config-header">
-            <div>
-              <div className="app__config-title">
-                <FontAwesomeIcon icon={faGear} />
-                Dashboard Configuration
+        <div className="app__config-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) cancelConfigChanges(); }}>
+          <section className="app__config-page">
+            <div className="app__config-header">
+              <div className="app__config-header-left">
+                <div className="app__config-title">
+                  <FontAwesomeIcon icon={faGear} />
+                  Dashboard Configuration
+                </div>
+                <div className="app__config-tabs" role="tablist" aria-label="Configuration sections">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={configTab === 'server'}
+                    className={`app__config-tab app__config-tab--server${configTab === 'server' ? ' app__config-tab--active' : ''}`}
+                    onClick={() => setConfigTab('server')}
+                  >
+                    Server Settings
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={configTab === 'client'}
+                    className={`app__config-tab app__config-tab--client${configTab === 'client' ? ' app__config-tab--active' : ''}`}
+                    onClick={() => setConfigTab('client')}
+                  >
+                    Client Settings
+                  </button>
+                </div>
               </div>
+              <button type="button" className="app__config-close-btn" onClick={cancelConfigChanges} aria-label="Close settings">
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
             </div>
-          </div>
-          {configMessage ? <div className="app__config-message">{configMessage}</div> : null}
 
-          <section className="app__config-panel app__config-panel--server">
-            <h2 className="app__config-panel-title">Server Settings</h2>
+            <div className="app__config-body">
+              {configMessage ? <div className="app__config-message">{configMessage}</div> : null}
 
-            <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">API / Mercury</h3>
-              <div className="app__config-grid">
-                <label className="app__config-row">
-                  <span>Dashboard API route</span>
-                  <input type="text" value="same-origin (/api)" readOnly />
-                </label>
-                <label className="app__config-row app__config-row--full">
-                  <span>Mercury base URL (optional)</span>
-                  <input
-                    type="text"
-                    value={editingConfig.mercuryBaseUrl}
-                    placeholder="http://127.0.0.1:17344"
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-                      setConfigDraft(previous => sanitizeDashboardConfig({
-                        ...(previous || config),
-                        mercuryBaseUrl: nextValue,
-                      }));
-                    }}
-                  />
-                </label>
-              </div>
-            </section>
-
+              {configTab === 'server' ? (
+              <>
             <section className="app__config-section app__config-section--server">
               <h3 className="app__config-section-title">Feed and Timing</h3>
               <div className="app__config-grid">
@@ -6081,8 +6764,153 @@ export default function App() {
             </section>
 
             <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">Branding</h3>
+              <h3 className="app__config-section-title">Store Hours</h3>
               <div className="app__config-grid">
+                <label className="app__config-row app__config-toggle-row">
+                  <span>Monday-Friday open</span>
+                  <input
+                    type="checkbox"
+                    checked={editingConfig.storeHours.monFriEnabled}
+                    onChange={(event) => updateStoreHours({ monFriEnabled: event.target.checked })}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Monday-Friday opens</span>
+                  <input
+                    type="time"
+                    value={editingConfig.storeHours.monFriOpen}
+                    onChange={(event) => updateStoreHours({ monFriOpen: event.target.value })}
+                    disabled={!editingConfig.storeHours.monFriEnabled}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Monday-Friday closes</span>
+                  <input
+                    type="time"
+                    value={editingConfig.storeHours.monFriClose}
+                    onChange={(event) => updateStoreHours({ monFriClose: event.target.value })}
+                    disabled={!editingConfig.storeHours.monFriEnabled}
+                  />
+                </label>
+                <label className="app__config-row app__config-toggle-row">
+                  <span>Saturday open</span>
+                  <input
+                    type="checkbox"
+                    checked={editingConfig.storeHours.saturdayEnabled}
+                    onChange={(event) => updateStoreHours({ saturdayEnabled: event.target.checked })}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Saturday opens</span>
+                  <input
+                    type="time"
+                    value={editingConfig.storeHours.saturdayOpen}
+                    onChange={(event) => updateStoreHours({ saturdayOpen: event.target.value })}
+                    disabled={!editingConfig.storeHours.saturdayEnabled}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Saturday closes</span>
+                  <input
+                    type="time"
+                    value={editingConfig.storeHours.saturdayClose}
+                    onChange={(event) => updateStoreHours({ saturdayClose: event.target.value })}
+                    disabled={!editingConfig.storeHours.saturdayEnabled}
+                  />
+                </label>
+                <label className="app__config-row app__config-toggle-row">
+                  <span>Sunday open</span>
+                  <input
+                    type="checkbox"
+                    checked={editingConfig.storeHours.sundayEnabled}
+                    onChange={(event) => updateStoreHours({ sundayEnabled: event.target.checked })}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Sunday opens</span>
+                  <input
+                    type="time"
+                    value={editingConfig.storeHours.sundayOpen}
+                    onChange={(event) => updateStoreHours({ sundayOpen: event.target.value })}
+                    disabled={!editingConfig.storeHours.sundayEnabled}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Sunday closes</span>
+                  <input
+                    type="time"
+                    value={editingConfig.storeHours.sundayClose}
+                    onChange={(event) => updateStoreHours({ sundayClose: event.target.value })}
+                    disabled={!editingConfig.storeHours.sundayEnabled}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="app__config-section app__config-section--server">
+              <h3 className="app__config-section-title">Shop Information & Branding</h3>
+              <div className="app__config-grid">
+                <label className="app__config-row">
+                  <span>Store name</span>
+                  <input
+                    type="text"
+                    maxLength={80}
+                    value={editingConfig.shopName}
+                    placeholder="Store name"
+                    onChange={(event) => {
+                      setConfigDraft(previous => sanitizeDashboardConfig({
+                        ...(previous || config),
+                        shopName: event.target.value,
+                      }));
+                    }}
+                  />
+                </label>
+                <label className="app__config-row app__config-row--full">
+                  <span>Store address</span>
+                  <div className="app__config-address-field">
+                    <input
+                      type="text"
+                      maxLength={180}
+                      value={editingConfig.shopAddress}
+                      placeholder="Store address"
+                      autoComplete="off"
+                      onChange={(event) => {
+                        setConfigDraft(previous => sanitizeDashboardConfig({
+                          ...(previous || config),
+                          shopAddress: event.target.value,
+                          shopAddressLatitude: null,
+                          shopAddressLongitude: null,
+                        }));
+                      }}
+                    />
+                    {shopAddressSuggestions.length ? (
+                      <div className="app__config-address-suggestions">
+                        {shopAddressSuggestions.map((suggestion, index) => (
+                          <button
+                            key={`${suggestion.id || suggestion.address}-${index}`}
+                            type="button"
+                            className="app__config-address-suggestion"
+                            onClick={() => selectShopAddressSuggestion(suggestion)}
+                          >
+                            {suggestion.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  {isShopAddressSuggesting ? <div className="app__config-help">Searching addresses...</div> : null}
+                  {shopAddressSuggestionError ? <div className="app__config-help">{shopAddressSuggestionError}</div> : null}
+                  {shopMapUrl ? (
+                    <div className="app__config-map-preview">
+                      <img src={shopMapUrl} alt="Validated shop address map" />
+                    </div>
+                  ) : (
+                    <div className="app__config-map-empty">
+                      <FontAwesomeIcon icon={faMagnifyingGlass} aria-hidden="true" />
+                      <span>Choose a suggested address to preview the shop map.</span>
+                    </div>
+                  )}
+                </label>
                 <div className="app__config-row app__config-row--full">
                   <span>Shop logo image</span>
                   <div className="app__config-inline-actions">
@@ -6113,134 +6941,200 @@ export default function App() {
               </div>
             </section>
 
-            <div className="app__config-panel-actions">
-              <button type="button" className="app__control-btn app__control-btn--primary" onClick={() => void saveServerSettingsOnly()}>
-                Save Server Settings
-              </button>
-            </div>
-          </section>
+            <section className="app__config-section app__config-section--server">
+              <h3 className="app__config-section-title">Order Settings</h3>
+              <div className="app__config-grid">
+                <label className="app__config-row">
+                  <span>Currency symbol</span>
+                  <input
+                    type="text"
+                    maxLength={3}
+                    value={editingConfig.currencySymbol}
+                    placeholder="$"
+                    onChange={(event) => {
+                      const nextValue = event.target.value.slice(0, 3) || '$';
+                      setConfigDraft(previous => sanitizeDashboardConfig({
+                        ...(previous || config),
+                        currencySymbol: nextValue,
+                      }));
+                    }}
+                  />
+                </label>
+                <label className="app__config-row">
+                  <span>Minimum order threshold ({editingConfig.currencySymbol})</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={9999}
+                    value={editingConfig.minOrderThreshold}
+                    onChange={(event) => updateConfigNumber('minOrderThreshold', event.target.value)}
+                  />
+                </label>
+                <div className="app__config-row app__config-row--full">
+                  <div className="app__config-help">Incoming orders below this amount will be flagged for review. Set to 0 to disable.</div>
+                </div>
+              </div>
+            </section>
 
-          <section className="app__config-panel app__config-panel--client">
-            <h2 className="app__config-panel-title">Client / Local Settings</h2>
+            <section className="app__config-section app__config-section--server">
+              <h3 className="app__config-section-title">API / Mercury (Advanced)</h3>
+              <div className="app__config-grid">
+                <label className="app__config-row">
+                  <span>Dashboard API route</span>
+                  <input type="text" value="same-origin (/api)" readOnly />
+                </label>
+                <label className="app__config-row app__config-row--full">
+                  <span>Mercury base URL (optional)</span>
+                  <input
+                    type="text"
+                    value={editingConfig.mercuryBaseUrl}
+                    placeholder="http://127.0.0.1:17344"
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setConfigDraft(previous => sanitizeDashboardConfig({
+                        ...(previous || config),
+                        mercuryBaseUrl: nextValue,
+                      }));
+                    }}
+                  />
+                </label>
+              </div>
+            </section>
 
+              </>
+              ) : null}
+
+              {configTab === 'client' ? (
+              <>
           <section className="app__config-section">
             <h3 className="app__config-section-title">Audio Alert Settings</h3>
             <div className="app__config-grid">
-              <label className="app__config-row app__config-row--full">
-                <span>Regular order sound preset</span>
-                <select
-                  value={editingConfig.soundPreset}
-                  onChange={(event) => {
-                    const nextPreset = normalizeSoundPreset(event.target.value);
-                    setConfigDraft(previous => sanitizeDashboardConfig({
-                      ...(previous || config),
-                      soundPreset: nextPreset,
-                    }));
-                  }}
-                >
-                  <option value="alarm_pulse">Alarm Pulse (default)</option>
-                  <option value="classic_ding">Classic Ding</option>
-                  <option value="bright_beep">Bright Beep</option>
-                  <option value="custom_upload">Custom Uploaded Sound</option>
-                </select>
-              </label>
-              <div className="app__config-row app__config-row--full">
-                <span>Regular-order audio file</span>
-                <div className="app__config-inline-actions">
-                  <input
-                    ref={soundUploadRef}
-                    type="file"
-                    accept=".wav,.mp3,.ogg,.m4a,audio/*"
-                    onChange={(event) => {
-                      void handleCustomSoundUpload(event);
-                    }}
-                  />
-                  <button type="button" className="app__control-btn" onClick={clearCustomSound}>
-                    Clear sound
-                  </button>
-                  <button
-                    type="button"
-                    className="app__control-btn"
-                    onClick={() => queueAlertDings(1, { configOverride: editingConfig })}
-                  >
-                    <FontAwesomeIcon icon={faPlay} />
-                    Test
-                  </button>
+              <div className="app__config-audio-group app__config-row--full">
+                <h4 className="app__config-audio-group-title">Regular Orders</h4>
+                <div className="app__config-audio-group-grid">
+                  <label className="app__config-row">
+                    <span>Sound preset</span>
+                    <select
+                      value={editingConfig.soundPreset}
+                      onChange={(event) => {
+                        const nextPreset = normalizeSoundPreset(event.target.value);
+                        setConfigDraft(previous => sanitizeDashboardConfig({
+                          ...(previous || config),
+                          soundPreset: nextPreset,
+                        }));
+                      }}
+                    >
+                      <option value="alarm_pulse">Alarm Pulse (default)</option>
+                      <option value="classic_ding">Classic Ding</option>
+                      <option value="bright_beep">Bright Beep</option>
+                      <option value="custom_upload">Custom Uploaded Sound</option>
+                    </select>
+                  </label>
+                  <div className="app__config-row">
+                    <span>Audio file</span>
+                    <div className="app__config-inline-actions">
+                      <input
+                        ref={soundUploadRef}
+                        type="file"
+                        accept=".wav,.mp3,.ogg,.m4a,audio/*"
+                        onChange={(event) => {
+                          void handleCustomSoundUpload(event);
+                        }}
+                      />
+                      <button type="button" className="app__control-btn" onClick={clearCustomSound}>
+                        Clear sound
+                      </button>
+                      <button
+                        type="button"
+                        className="app__control-btn"
+                        onClick={() => queueAlertDings(1, { configOverride: editingConfig })}
+                      >
+                        <FontAwesomeIcon icon={faPlay} />
+                        Test
+                      </button>
+                    </div>
+                    <div className="app__config-help">Accepted formats: .wav, .mp3, .ogg, .m4a. Max 4 MB. Short clips are recommended.</div>
+                  </div>
                 </div>
-                <div className="app__config-help">Accepted formats: .wav, .mp3, .ogg, .m4a. Max 4 MB. Short clips are recommended.</div>
               </div>
-              <label className="app__config-row app__config-row--full">
-                <span>Delivery-service sound preset</span>
-                <select
-                  value={editingConfig.marketplaceSoundPreset}
-                  onChange={(event) => {
-                    const nextPreset = normalizeSoundPreset(event.target.value);
-                    setConfigDraft(previous => sanitizeDashboardConfig({
-                      ...(previous || config),
-                      marketplaceSoundPreset: nextPreset,
-                    }));
-                  }}
-                >
-                  <option value="alarm_pulse">Alarm Pulse (default)</option>
-                  <option value="classic_ding">Classic Ding</option>
-                  <option value="bright_beep">Bright Beep</option>
-                  <option value="custom_upload">Custom Uploaded Sound</option>
-                </select>
-              </label>
-              <div className="app__config-row app__config-row--full">
-                <span>Delivery-service audio file</span>
-                <div className="app__config-inline-actions">
-                  <input
-                    ref={marketplaceSoundUploadRef}
-                    type="file"
-                    accept=".wav,.mp3,.ogg,.m4a,audio/*"
-                    onChange={(event) => {
-                      void handleMarketplaceCustomSoundUpload(event);
-                    }}
-                  />
-                  <button type="button" className="app__control-btn" onClick={clearMarketplaceCustomSound}>
-                    Clear sound
-                  </button>
-                  <button
-                    type="button"
-                    className="app__control-btn"
-                    onClick={() => queueAlertDings(1, {
-                      configOverride: buildSoundConfigForAlertKind(editingConfig, 'marketplace'),
-                    })}
-                  >
-                    <FontAwesomeIcon icon={faPlay} />
-                    Test
-                  </button>
+              <div className="app__config-audio-group app__config-row--full">
+                <h4 className="app__config-audio-group-title">Delivery Service</h4>
+                <div className="app__config-audio-group-grid">
+                  <label className="app__config-row">
+                    <span>Sound preset</span>
+                    <select
+                      value={editingConfig.marketplaceSoundPreset}
+                      onChange={(event) => {
+                        const nextPreset = normalizeSoundPreset(event.target.value);
+                        setConfigDraft(previous => sanitizeDashboardConfig({
+                          ...(previous || config),
+                          marketplaceSoundPreset: nextPreset,
+                        }));
+                      }}
+                    >
+                      <option value="alarm_pulse">Alarm Pulse (default)</option>
+                      <option value="classic_ding">Classic Ding</option>
+                      <option value="bright_beep">Bright Beep</option>
+                      <option value="custom_upload">Custom Uploaded Sound</option>
+                    </select>
+                  </label>
+                  <div className="app__config-row">
+                    <span>Audio file</span>
+                    <div className="app__config-inline-actions">
+                      <input
+                        ref={marketplaceSoundUploadRef}
+                        type="file"
+                        accept=".wav,.mp3,.ogg,.m4a,audio/*"
+                        onChange={(event) => {
+                          void handleMarketplaceCustomSoundUpload(event);
+                        }}
+                      />
+                      <button type="button" className="app__control-btn" onClick={clearMarketplaceCustomSound}>
+                        Clear sound
+                      </button>
+                      <button
+                        type="button"
+                        className="app__control-btn"
+                        onClick={() => queueAlertDings(1, {
+                          configOverride: buildSoundConfigForAlertKind(editingConfig, 'marketplace'),
+                        })}
+                      >
+                        <FontAwesomeIcon icon={faPlay} />
+                        Test
+                      </button>
+                    </div>
+                    <div className="app__config-help">Accepted formats: .wav, .mp3, .ogg, .m4a. Max 4 MB. Short clips are recommended.</div>
+                  </div>
                 </div>
-                <div className="app__config-help">Accepted formats: .wav, .mp3, .ogg, .m4a. Max 4 MB. Short clips are recommended.</div>
               </div>
             </div>
           </section>
 
-          </section>
+              </>
+              ) : null}
+            </div>
 
-          <div className="app__config-actions">
-            <button type="button" className="app__control-btn" onClick={cancelConfigChanges}>
-              Cancel
-            </button>
-            <button type="button" className="app__control-btn" onClick={resetConfigDefaults}>
-              Reset defaults
-            </button>
-            <button
-              type="button"
-              className="app__control-btn app__control-btn--primary"
-              onClick={saveConfigChanges}
-              disabled={!hasConfigChanges}
-            >
-              <FontAwesomeIcon icon={faFloppyDisk} />
-              Save Config
-            </button>
-          </div>
-        </section>
+            <div className="app__config-actions">
+              <button type="button" className="app__control-btn" onClick={cancelConfigChanges}>
+                Cancel
+              </button>
+              <button type="button" className="app__control-btn" onClick={resetConfigDefaults}>
+                Reset defaults
+              </button>
+              <button
+                type="button"
+                className="app__control-btn app__control-btn--primary"
+                onClick={saveConfigChanges}
+                disabled={!hasConfigChanges}
+              >
+                <FontAwesomeIcon icon={faFloppyDisk} />
+                Save Config
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
 
-      {!isConfigOpen ? (
-        <>
       {feedErrorLabel ? <div className="app__error">{feedErrorLabel}</div> : null}
 
       {!isDashboardMode ? (
@@ -6291,23 +7185,14 @@ export default function App() {
               <FontAwesomeIcon icon={faGear} /> Config
             </button>
           </div>
-          <div className="app__rotation-meta app__meta" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            <span>Total Orders: {totalOrderCount}</span>
-            <span>New Orders: {uncreatedTicketCount}</span>
-            {/* <span>Updated: {lastUpdated || '...'}</span> */}
-            {/* <span className="badge badge--kpi">Completion Rate: {selectedDayOrderTotal ? Math.round((selectedDayOrderCompleted / selectedDayOrderTotal) * 100) : 0}%</span> */}
-            <span className="badge badge--kpi">In Progress: {filteredActiveOrders.length}</span>
-            <span className="badge badge--kpi">Completed: {selectedDayOrderCompleted}</span>
-            <span className="badge badge--kpi">Exceptions: {selectedDayExceptionCount}</span>
-          </div>
         </div>
       ) : null}
 
-      <main className={`board-page${error ? ' board-page--disabled' : ''}`}>
+      <main className={`board-page${error ? ' board-page--disabled' : ''}${selectedDeliveryMapPin ? ' board-page--popup-open' : ''}`}>
         {loading ? (
           <div className="board-loading-overlay" role="status" aria-live="polite" aria-label="Loading board">
             <span className="board-loading-overlay__spinner" aria-hidden="true" />
-            <span className="board-loading-overlay__label">Loading board...</span>
+            <span className="board-loading-overlay__label">Loading Orders</span>
           </div>
         ) : null}
         {activePage?.id === 'alerts_active' ? (
@@ -6349,6 +7234,15 @@ export default function App() {
                             ) : null}
                             {showNewOrderTotalPill ? (
                               <span className="badge badge--total">{ticket.orderAmount || '--'}</span>
+                            ) : null}
+                            {showNewOrderTotalPill && config.minOrderThreshold > 0 && (() => {
+                              const cents = amountToCents(ticket.orderAmount);
+                              return cents !== null && cents < config.minOrderThreshold * 100;
+                            })() ? (
+                              <span className="badge badge--below-threshold" title={`Below minimum order threshold (${config.currencySymbol}${config.minOrderThreshold})`}>
+                                <FontAwesomeIcon icon={faTriangleExclamation} className="badge__icon" />
+                                Review
+                              </span>
                             ) : null}
                             {ticket.distanceMilesLabel ? (
                               <span className="badge badge--distance">{ticket.distanceMilesLabel}</span>
@@ -6427,15 +7321,18 @@ export default function App() {
                       aria-label={isActiveSearchOpen ? 'Close active order search' : 'Open active order search'}
                       title={isActiveSearchOpen ? 'Close search' : 'Search active orders'}
                       onClick={() => {
-                        if (isActiveSearchOpen) {
+                        if (activeOrderSearchQuery) {
                           setActiveOrderSearchQuery('');
+                          return;
+                        }
+                        if (isActiveSearchOpen) {
                           setIsActiveSearchOpen(false);
                           return;
                         }
                         setIsActiveSearchOpen(true);
                       }}
                     >
-                      <FontAwesomeIcon icon={faMagnifyingGlass} />
+                      <FontAwesomeIcon icon={activeOrderSearchQuery ? faXmark : faMagnifyingGlass} />
                     </button>
                     {isActiveSearchOpen ? (
                       <input
@@ -6463,7 +7360,13 @@ export default function App() {
                   filteredActiveOrders.map(card => {
                     const statusPill = singleStatusPill(card);
                     const footerZip = deriveCardFooterZip(card);
-                    const pickupSale = isPickupSaleType(card.orderType);
+                    const pickupSale = isPickupOrCodOrderType(card.orderType)
+                      || hasPickupKeyword(card.addressLine, card.recipientName)
+                      // Fallback: no recipient, no address, no city → store pickup.
+                      // Intentionally includes "Wire In" orders: wire-ins always have recipient data;
+                      // a wire-in with empty name/address/city is a customer picking up at the store.
+                      || (!card.recipientName.trim() && !card.addressLine.trim() && !card.cityStateZip.trim()
+                          && !isLocalOrderType(card.orderType));
                     const displayRecipientName = pickupSale
                       ? 'PICKUP'
                       : formatDisplayRecipientName(card.recipientName || 'Unknown Recipient');
@@ -6516,15 +7419,655 @@ export default function App() {
               </footer>
             </section>
           </div>
-        ) : (
-          <div className="board-page__placeholder">
-            <div className="board-page__placeholder-title">Page 2</div>
-            <div className="board-page__placeholder-copy">Scaffold page ready for future modules.</div>
+        ) : activePage?.id === 'page2' ? (
+          <div className="page2">
+            {isRefreshingActiveOrders ? (
+              <div className="board-loading-overlay board-loading-overlay--inline" role="status" aria-live="polite" aria-label="Loading order data">
+                <span className="board-loading-overlay__spinner" aria-hidden="true" />
+                <span className="board-loading-overlay__label">Loading Orders</span>
+              </div>
+            ) : null}
+            {/* Row 1: Order Status (left) + Financials (right) side-by-side panes */}
+            <div className="page2__kpi-panes">
+
+              {/* Left pane — Order Status */}
+              <div className="page2__kpi-pane">
+                <div className="page2__pane-title">Order Status</div>
+                <div className="page2__pane-grid page2__pane-grid--status">
+                  {/* Delivered — spans all 3 cols */}
+                  <div className="page2__cell page2__cell--span page2__cell--delivered">
+                    <span className="page2__cell-value">
+                      {todayStageCounts.delivered}
+                      {selectedDayOrderTotal > 0 && <span className="page2__cell-denom">/{selectedDayOrderTotal}</span>}
+                    </span>
+                    <span className="page2__cell-label">Delivered</span>
+                  </div>
+                  {/* Row 2 */}
+                  <div className="page2__cell page2__cell--on-truck">
+                    <span className="page2__cell-value">{todayStageCounts.queued + todayStageCounts.designed + todayStageCounts.staged + todayStageCounts.onTruck}</span>
+                    <span className="page2__cell-label">In Progress</span>
+                  </div>
+                  <div className={`page2__cell${todayStageCounts.exceptions > 0 ? ' page2__cell--exception' : ''}`}>
+                    <span className="page2__cell-value">{todayStageCounts.exceptions}</span>
+                    <span className="page2__cell-label">Exceptions</span>
+                  </div>
+                  <div className={`page2__cell${todayStageCounts.canceled > 0 ? ' page2__cell--canceled' : ''}`}>
+                    <span className="page2__cell-value">{todayStageCounts.canceled}</span>
+                    <span className="page2__cell-label">Canceled</span>
+                  </div>
+                  {/* Row 3 */}
+                  <div className={`page2__cell${todayStageCounts.marketplace > 0 ? ' page2__cell--marketplace' : ''}`}>
+                    <span className="page2__cell-value">{todayStageCounts.marketplace}</span>
+                    <span className="page2__cell-label">Marketplace</span>
+                  </div>
+                  <div className="page2__cell page2__cell--next-day">
+                    <span className="page2__cell-value">{nextDaySummaryCount}</span>
+                    <span className="page2__cell-label">Next Day</span>
+                  </div>
+                  <div className={`page2__cell page2__cell--completion${selectedDayCompletionIsComplete ? ' page2__cell--delivered' : ''}`}>
+                    <span className="page2__cell-value">{selectedDayCompletionPercent}%</span>
+                    <span className="page2__cell-label">{selectedDayOrderCompleted}/{selectedDayOrderTotal} Complete</span>
+                    <div className="page2__cell-progress">
+                      <div
+                        className={`page2__cell-progress-fill${selectedDayCompletionIsComplete ? ' page2__cell-progress-fill--complete' : ''}`}
+                        style={{ width: `${selectedDayCompletionPercent}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right pane — Financials */}
+              <div className="page2__kpi-pane">
+                <div className="page2__pane-title">
+                  Financials
+                  <button
+                    type="button"
+                    className={`page2__mask-toggle${financialsMasked ? ' page2__mask-toggle--active' : ''}`}
+                    onClick={() => setFinancialsMasked(v => !v)}
+                    title={financialsMasked ? 'Unmask financials' : 'Mask financials'}
+                  >
+                    {financialsMasked ? 'Unmask' : 'Mask'}
+                  </button>
+                </div>
+                <div className="page2__pane-grid page2__pane-grid--financials">
+                  {/* Quadrant: 2×2 equal cells */}
+                  <div className="page2__cell page2__cell--revenue">
+                    <span className="page2__cell-value page2__cell-value--currency">
+                      {todayFinancials.revenue > 0
+                        ? financialsMasked ? '$##,###' : `$${todayFinancials.revenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                        : '—'}
+                    </span>
+                    <span className="page2__cell-label">
+                      Revenue
+                      {lastYearStats && lastYearStats.revenue > 0 && todayFinancials.revenue > 0 && (() => {
+                        const pct = Math.round(((todayFinancials.revenue - lastYearStats.revenue) / lastYearStats.revenue) * 100);
+                        return <span className={`kpi-card__yoy${pct >= 0 ? ' kpi-card__yoy--up' : ' kpi-card__yoy--down'}`}><FontAwesomeIcon icon={pct >= 0 ? faArrowUp : faArrowDown} className="kpi-card__yoy-arrow" />{pct >= 0 ? `+${pct}%` : `${pct}%`} YoY</span>;
+                      })()}
+                    </span>
+                  </div>
+                  <div className="page2__cell page2__cell--avg">
+                    <span className="page2__cell-value page2__cell-value--currency">
+                      {todayFinancials.avgTicket > 0
+                        ? financialsMasked ? '$###' : `$${todayFinancials.avgTicket.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                        : '—'}
+                    </span>
+                    <span className="page2__cell-label">
+                      Avg Ticket
+                      {lastYearStats && lastYearStats.avgTicket > 0 && todayFinancials.avgTicket > 0 && (() => {
+                        const pct = Math.round(((todayFinancials.avgTicket - lastYearStats.avgTicket) / lastYearStats.avgTicket) * 100);
+                        return <span className={`kpi-card__yoy${pct >= 0 ? ' kpi-card__yoy--up' : ' kpi-card__yoy--down'}`}><FontAwesomeIcon icon={pct >= 0 ? faArrowUp : faArrowDown} className="kpi-card__yoy-arrow" />{pct >= 0 ? `+${pct}%` : `${pct}%`} YoY</span>;
+                      })()}
+                    </span>
+                  </div>
+                  <div className="page2__cell page2__cell--largest">
+                    <span className="page2__cell-value page2__cell-value--currency">
+                      {todayFinancials.largestOrder > 0
+                        ? financialsMasked ? '$###.##' : `$${todayFinancials.largestOrder.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : '—'}
+                    </span>
+                    <span className="page2__cell-label">Largest Order</span>
+                  </div>
+                  <div className="page2__cell">
+                    <span className="page2__cell-value">
+                      {todayFinancials.wireInCount}
+                      {todayFinancials.wireInCount > 0 && todayFinancials.wireInRevenue > 0 && (
+                        <span className="page2__cell-denom">
+                          {financialsMasked ? ' · $##,###' : ` · $${todayFinancials.wireInRevenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+                        </span>
+                      )}
+                    </span>
+                    <span className="page2__cell-label">
+                      Wire-In
+                      {lastYearStats && (() => {
+                        const pct = lastYearStats.count > 0 ? Math.round(((selectedDayOrderTotal - lastYearStats.count) / lastYearStats.count) * 100) : null;
+                        return pct !== null
+                          ? <span className={`kpi-card__yoy${pct >= 0 ? ' kpi-card__yoy--up' : ' kpi-card__yoy--down'}`}><FontAwesomeIcon icon={pct >= 0 ? faArrowUp : faArrowDown} className="kpi-card__yoy-arrow" />{pct >= 0 ? `+${pct}%` : `${pct}%`} orders YoY</span>
+                          : null;
+                      })()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Row 3: Order intake chart — fills remaining space */}
+            <div className="page2__chart-panel">
+              <div className="page2__chart-header">
+                <span className="page2__chart-title">Order Intake</span>
+                <span className="page2__chart-legend">
+                  <span className="page2__chart-legend-item">
+                    <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#4caf86" strokeWidth="2" strokeDasharray="4 2" /><circle cx="12" cy="5" r="3" fill="#4caf86" /></svg>
+                    Per Hour
+                  </span>
+                  <span className="page2__chart-legend-item">
+                    <svg width="36" height="10">
+                      <line x1="0" y1="5" x2="18" y2="5" stroke="#1a5585" strokeWidth="2.5" />
+                      <line x1="18" y1="5" x2="36" y2="5" stroke="#6db0ef" strokeWidth="2.5" strokeDasharray="4 2" />
+                      <circle cx="18" cy="5" r="3" fill="#1a5585" stroke="#fff" strokeWidth="1" />
+                    </svg>
+                    Cumulative
+                  </span>
+                  {lastYearSaleDates.length > 0 && (
+                    <span className="page2__chart-legend-item">
+                      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#c8a800" strokeWidth="2" strokeDasharray="4 3" /></svg>
+                      {new Date().getFullYear() - 1} Total
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="page2__chart-body">
+              {chartLineData.todayCumulativePoints.every(p => p.cumulative === 0) && !lastYearSaleDates.length ? (
+                <div className="page2__chart-empty">No orders recorded yet today</div>
+              ) : (
+                <svg
+                  viewBox={`0 0 ${CHART_VW} ${CHART_VH}`}
+                  width="100%"
+                  height="100%"
+                  preserveAspectRatio="none"
+                  aria-label="Orders placed today by hour and cumulative"
+                  className="page2__chart-svg"
+                >
+                  {/* Horizontal gridlines + left y-axis labels (cumulative scale) */}
+                  {[0, 0.25, 0.5, 0.75, 1].map(f => {
+                    const y = CHART_MT + Math.round(CHART_PH * (1 - f));
+                    const val = Math.round(chartLineData.yMaxCumulative * f);
+                    return (
+                      <g key={f}>
+                        <line x1={CHART_ML} y1={y} x2={CHART_ML + CHART_PW} y2={y} stroke={f === 0 ? '#9ea8b7' : '#dde4ec'} strokeWidth={f === 0 ? 1.5 : 1} />
+                        <text x={CHART_ML - 5} y={y} fontSize="11" fill="#6a7e96" textAnchor="end" dominantBaseline="middle">{val}</text>
+                      </g>
+                    );
+                  })}
+                  {/* X-axis: every 2 hours, midnight to midnight */}
+                  {CHART_VISIBLE_HOURS.filter(h => h % 2 === 0).map(hour => {
+                    const x = CHART_ML + Math.round((hour / 23) * CHART_PW);
+                    const label = hour === 0 ? '12a' : hour < 12 ? `${hour}a` : hour === 12 ? '12p' : `${hour - 12}p`;
+                    const isActive = chartLineData.todayHourlyPoints.some(p => p.hour === hour && p.count > 0);
+                    return (
+                      <text key={hour} x={x} y={CHART_MT + CHART_PH + 17} fontSize="10" textAnchor="middle" fill={isActive ? '#334e6e' : '#b0bec8'} fontWeight={isActive ? '600' : '400'}>
+                        {label}
+                      </text>
+                    );
+                  })}
+                  {/* Last year total — horizontal reference line */}
+                  {lastYearSaleDates.length > 0 && (() => {
+                    const lyTotal = lastYearSaleDates.length;
+                    const lyYear = new Date().getFullYear() - 1;
+                    const lyY = CHART_MT + Math.round(CHART_PH * (1 - lyTotal / chartLineData.yMaxCumulative));
+                    const clampedY = Math.max(lyY, CHART_MT + 1);
+                    return (
+                      <g>
+                        <line x1={CHART_ML} y1={clampedY} x2={CHART_ML + CHART_PW} y2={clampedY} stroke="#c8a800" strokeWidth="1.5" strokeDasharray="6 4" />
+                        <text x={CHART_ML + CHART_PW + 4} y={clampedY - 5} fontSize="11" fill="#7a5800" dominantBaseline="auto" fontWeight="700" stroke="white" strokeWidth="3" paintOrder="stroke">
+                          {lyTotal}
+                        </text>
+                        <text x={CHART_ML + CHART_PW + 4} y={clampedY + 4} fontSize="9" fill="#a07820" dominantBaseline="hanging" fontWeight="600" stroke="white" strokeWidth="2.5" paintOrder="stroke">
+                          ({lyYear})
+                        </text>
+                      </g>
+                    );
+                  })()}
+                  {/* Current time — vertical red marker */}
+                  {(() => {
+                    const nowFrac = tickerNow.getHours() + tickerNow.getMinutes() / 60;
+                    const nowX = CHART_ML + Math.round((nowFrac / 23) * CHART_PW);
+                    return (
+                      <line
+                        x1={nowX} y1={CHART_MT}
+                        x2={nowX} y2={CHART_MT + CHART_PH}
+                        stroke="#e53935"
+                        strokeWidth="1.5"
+                        strokeDasharray="3 2"
+                        opacity="0.7"
+                      />
+                    );
+                  })()}
+                  {/* Today hourly line — solid green for past/now, dashed light green for future */}
+                  {(() => {
+                    const nowHour = tickerNow.getHours();
+                    const pastNowPts = chartLineData.todayHourlyPoints;
+                    const futurePts = chartLineData.fullDayHourlyPoints.filter(p => p.hour > nowHour);
+                    // Bridge: last past/now point + first future so the line is continuous
+                    const bridgePt = pastNowPts.length > 0 && futurePts.length > 0
+                      ? [pastNowPts[pastNowPts.length - 1], futurePts[0]]
+                      : null;
+                    return (
+                      <>
+                        {/* Future hours: dashed light green */}
+                        {futurePts.length > 0 && bridgePt && (
+                          <polyline
+                            points={[...bridgePt, ...futurePts.slice(1)].map(p => `${p.x},${p.y}`).join(' ')}
+                            fill="none" stroke="#a8d5b8" strokeWidth="2"
+                            strokeDasharray="5 3"
+                            strokeLinejoin="round" strokeLinecap="round"
+                          />
+                        )}
+                        {/* Past/now hours: solid green */}
+                        {pastNowPts.length > 1 && (
+                          <polyline
+                            points={pastNowPts.map(p => `${p.x},${p.y}`).join(' ')}
+                            fill="none" stroke="#4caf86" strokeWidth="2"
+                            strokeLinejoin="round" strokeLinecap="round"
+                          />
+                        )}
+                      </>
+                    );
+                  })()}
+                  {chartLineData.todayHourlyPoints.filter(p => p.count > 0).map(p => {
+                    const labelY = Math.min(p.y + 14, CHART_MT + CHART_PH - 3);
+                    return (
+                      <g key={`hr-${p.hour}`}>
+                        <circle cx={p.x} cy={p.y} r={3.5} fill="#4caf86" stroke="#fff" strokeWidth="1.5" />
+                        <text x={p.x} y={labelY} fontSize="10" textAnchor="middle" dominantBaseline="auto" fill="#2e8a60" fontWeight="700" stroke="white" strokeWidth="3" paintOrder="stroke">
+                          {p.count}
+                        </text>
+                      </g>
+                    );
+                  })}
+                  {/* Cumulative line — dark blue up to now, dashed light blue for future */}
+                  {(() => {
+                    const nowHour = tickerNow.getHours();
+                    const allPts = chartLineData.todayCumulativePoints;
+                    // Past+current = everything up to and including the current hour (dark blue)
+                    const pastPts = allPts.filter(p => p.hour <= nowHour);
+                    const anchorPt = pastPts[pastPts.length - 1];
+                    // Future: full-day points strictly after current hour (dashed light blue)
+                    const futurePts = chartLineData.fullDayCumulativePoints.filter(p => p.hour > nowHour);
+                    const futureBridge = anchorPt && futurePts.length > 0
+                      ? [anchorPt, ...futurePts]
+                      : null;
+                    return (
+                      <>
+                        {/* Future hours: dashed light blue — orders already on the books ahead */}
+                        {futureBridge && futureBridge.length > 1 && (
+                          <polyline
+                            points={futureBridge.map(p => `${p.x},${p.y}`).join(' ')}
+                            fill="none" stroke="#6db0ef" strokeWidth="2"
+                            strokeDasharray="6 3"
+                            strokeLinejoin="round" strokeLinecap="round"
+                            opacity="0.7"
+                          />
+                        )}
+                        {/* Past + current hour: dark blue — grows as the red line advances */}
+                        {pastPts.length > 1 && (
+                          <polyline
+                            points={pastPts.map(p => `${p.x},${p.y}`).join(' ')}
+                            fill="none" stroke="#1a5585" strokeWidth="2.5"
+                            strokeLinejoin="round" strokeLinecap="round"
+                          />
+                        )}
+                      </>
+                    );
+                  })()}
+                  {chartLineData.todayCumulativePoints.filter(p => p.cumulative > 0).map((p, idx, arr) => {
+                    const nowHour = tickerNow.getHours();
+                    const isLast = idx === arr.length - 1;
+                    const isPastOrNow = p.hour <= nowHour;
+                    const showLabel = isLast || (idx > 0 && arr[idx - 1].cumulative !== p.cumulative);
+                    const labelY = Math.max(p.y - 9, CHART_MT + 13);
+                    const dotColor = isPastOrNow ? '#1a5585' : '#6db0ef';
+                    return (
+                      <g key={`cum-${p.hour}`}>
+                        <circle cx={p.x} cy={p.y} r={isLast ? 5 : 3.5} fill={dotColor} stroke="#fff" strokeWidth="1.5" />
+                        {showLabel && (
+                          <text x={p.x} y={labelY} fontSize={isLast ? '13' : '11'} textAnchor="middle" dominantBaseline="auto" fill={dotColor} fontWeight={isLast ? '800' : '600'} stroke="white" strokeWidth="3" paintOrder="stroke">
+                            {p.cumulative}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
+              )}
+              </div>
+            </div>
+
           </div>
-        )}
+        ) : activePage?.id === 'delivery_map' ? (
+          <div className="delivery-map-page">
+            {(isRefreshingActiveOrders || deliveryMapLoading) ? (
+              <div className="board-loading-overlay board-loading-overlay--inline" role="status" aria-live="polite" aria-label="Loading delivery map">
+                <span className="board-loading-overlay__spinner" aria-hidden="true" />
+                <span className="board-loading-overlay__label">Loading Map</span>
+              </div>
+            ) : null}
+            <div className="delivery-map-page__panel">
+              <div className="delivery-map-page__header">
+                <span>Delivery Map</span>
+                <span>{selectedDayCountLabel}: {positionedDeliveryMapPins.length}/{selectedDayDeliveryMapOrders.length} mapped</span>
+              </div>
+              {deliveryMapUrl && positionedDeliveryMapPins.length ? (
+                <div className="delivery-map-page__map" onClick={() => setSelectedDeliveryMapPinId('')}>
+                  <img src={deliveryMapUrl} alt={`Delivery map for ${selectedDayCountLabel}`} />
+                  {positionedDeliveryMapPins.map((pin, index) => (
+                    <button
+                      key={`${pin.id}-${index}`}
+                      type="button"
+                      className={`delivery-map-page__pin${selectedDeliveryMapPinId === pin.id ? ' delivery-map-page__pin--active' : ''}`}
+                      style={{ left: `${pin.xPercent}%`, top: `${pin.yPercent}%` }}
+                      title={`${pin.label}\n${pin.address}`}
+                      aria-label={`${pin.label}, ${pin.address}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedDeliveryMapPinId(previous => previous === pin.id ? '' : pin.id);
+                      }}
+                    >
+                      <span>{index + 1}</span>
+                    </button>
+                  ))}
+                  {selectedDeliveryMapPin ? (
+                    <div
+                      className="delivery-map-page__popup"
+                      style={{
+                        left: `${Math.max(18, Math.min(82, selectedDeliveryMapPin.xPercent))}%`,
+                        top: `${Math.max(18, Math.min(76, selectedDeliveryMapPin.yPercent))}%`,
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        className="delivery-map-page__popup-close"
+                        aria-label="Close delivery details"
+                        onClick={() => setSelectedDeliveryMapPinId('')}
+                      >
+                        <FontAwesomeIcon icon={faXmark} />
+                      </button>
+                      <div className="delivery-map-page__popup-title">{selectedDeliveryMapPin.label}</div>
+                      {selectedDeliveryMapPin.orderRef ? (
+                        <div className="delivery-map-page__popup-row">
+                          <strong>Order</strong>
+                          <span>{selectedDeliveryMapPin.orderRef}</span>
+                        </div>
+                      ) : null}
+                      <div className="delivery-map-page__popup-row">
+                        <strong>Status</strong>
+                        <span>{selectedDeliveryMapPin.statusLabel}</span>
+                      </div>
+                      <div className="delivery-map-page__popup-row">
+                        <strong>Date</strong>
+                        <span>{selectedDeliveryMapPin.deliveryDate}</span>
+                      </div>
+                      <div className="delivery-map-page__popup-address">{selectedDeliveryMapPin.address}</div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="delivery-map-page__empty">
+                  <FontAwesomeIcon icon={faTruck} aria-hidden="true" />
+                  <span>{deliveryMapError || 'No mappable deliveries for the selected date.'}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : activePage?.id === 'weather' ? (
+          <div className="weather-page">
+            {weatherForecastLoading && !weatherForecastData ? (
+              <div className="weather-page__loading">
+                <span className="board-loading-overlay__spinner" aria-hidden="true" />
+                <span>Loading weather…</span>
+              </div>
+            ) : !weatherForecastData ? (
+              <div className="weather-page__error">
+                Unable to load weather data. Check the ZIP code in Settings.
+              </div>
+            ) : (() => {
+              const { current, today, tomorrow, hourly, location } = weatherForecastData;
+              const curDisplay = weatherCodeDisplay(current.weatherCode, current.isDay);
+              const todayDisplay = weatherCodeDisplay(today.weatherCode, true);
+              const tomorrowDisplay = weatherCodeDisplay(tomorrow.weatherCode, true);
+              const windDir = degreesToCompass(current.windDirection);
+              const ccefSrc = (code: number, isDay: boolean) => `/weather-icons/ccef/${ccefIconName(code, isDay)}`;
+              const cd = weatherChartData;
+              return (
+                <>
+                  <div className="weather-page__main">
+                    {/* Conditions panel: header cap + inner card grid */}
+                    <div className="weather-page__conditions-panel">
+                      <div className="weather-page__panel-title">Current Condition + Forecast</div>
+                      <div className="weather-page__conditions-sections">
+                        {/* Left pane — current conditions, full height */}
+                        <div className="wx-section wx-section--current">
+                          <div className="wx-section__location">{location.label}</div>
+                          <div className="wx-section__current-body">
+                            <img className="wx-section__icon-lg" src={ccefSrc(current.weatherCode, current.isDay)} alt={curDisplay.label} />
+                            <div className="wx-section__current-text">
+                              <div className="wx-section__temp">{current.temp}°F</div>
+                              <div className="wx-section__condition">{curDisplay.label}</div>
+                              <ul className="wx-section__details">
+                                <li>Feels like {current.feelsLike}°</li>
+                                <li>Humidity {current.humidity}%</li>
+                                <li>Wind {current.windSpeed} mph {windDir}</li>
+                                {current.precipitation > 0 && <li>Precip {current.precipitation}"</li>}
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+                        {/* Vertical divider between left and right panes */}
+                        <div className="wx-section-divider wx-section-divider--vertical" />
+                        {/* Right pane — Today on top, Tomorrow on bottom */}
+                        <div className="wx-section__right-col">
+                          <div className="wx-section wx-section--forecast">
+                            <div className="wx-section__forecast-inner">
+                              <div className="wx-section__forecast-text">
+                                <div className="wx-section__day-label">Today</div>
+                                <div className="wx-section__hi-lo">
+                                  <span className="wx-section__hi">H {today.high}°</span>
+                                  <span className="wx-section__lo">L {today.low}°</span>
+                                </div>
+                                <div className="wx-section__condition">{todayDisplay.label}</div>
+                                <ul className="wx-section__details">
+                                  <li>💧 {today.precipProbability}% chance of rain</li>
+                                  {today.precipSum > 0 && <li>{today.precipSum}" precip</li>}
+                                </ul>
+                              </div>
+                              <img className="wx-section__icon-md" src={ccefSrc(today.weatherCode, true)} alt={todayDisplay.label} />
+                            </div>
+                          </div>
+                          {/* Horizontal divider between Today and Tomorrow */}
+                          <div className="wx-section-divider" />
+                          <div className="wx-section wx-section--forecast">
+                            <div className="wx-section__forecast-inner">
+                              <div className="wx-section__forecast-text">
+                                <div className="wx-section__day-label">Tomorrow</div>
+                                <div className="wx-section__hi-lo">
+                                  <span className="wx-section__hi">H {tomorrow.high}°</span>
+                                  <span className="wx-section__lo">L {tomorrow.low}°</span>
+                                </div>
+                                <div className="wx-section__condition">{tomorrowDisplay.label}</div>
+                                <ul className="wx-section__details">
+                                  <li>💧 {tomorrow.precipProbability}% chance of rain</li>
+                                  {tomorrow.precipSum > 0 && <li>{tomorrow.precipSum}" precip</li>}
+                                </ul>
+                              </div>
+                              <img className="wx-section__icon-md" src={ccefSrc(tomorrow.weatherCode, true)} alt={tomorrowDisplay.label} />
+                            </div>
+                          </div>
+                        </div>
+                      </div>{/* end conditions-sections */}
+                    </div>{/* end conditions-panel */}
+                    <div className="weather-page__radar-panel">
+                      <div className="weather-page__panel-title">
+                        {`Radar — ${location.label}`}
+                        {radarFrames.length > 0 && (
+                          <span className="weather-page__radar-frame-indicator">
+                            {` ${radarFrameIdx + 1}/${radarFrames.length}`}
+                          </span>
+                        )}
+                      </div>
+                      {(() => {
+                        const zoom = 8;
+                        const { x: cx, y: cy } = latLonToTile(location.lat, location.lon, zoom);
+                        // 3×2 tile grid centered on location — landscape-friendly, cells closer to square
+                        const tiles = [
+                          { tx: cx - 1, ty: cy - 1 }, { tx: cx, ty: cy - 1 }, { tx: cx + 1, ty: cy - 1 },
+                          { tx: cx - 1, ty: cy },     { tx: cx, ty: cy },     { tx: cx + 1, ty: cy },
+                        ];
+                        const currentFrame = radarFrames[radarFrameIdx];
+                        return (
+                          <div className="weather-page__radar-map">
+                            {tiles.map(({ tx, ty }) => {
+                              // RainViewer free API caps at zoom 7; use the zoom-7 parent tile
+                              // and CSS offset to show the correct quadrant at zoom-8 detail
+                              const rx = Math.floor(tx / 2);
+                              const ry = Math.floor(ty / 2);
+                              const qx = tx % 2;
+                              const qy = ty % 2;
+                              return (
+                              <div key={`${tx}-${ty}`} className="weather-page__radar-cell">
+                                <img
+                                  className="weather-page__radar-base"
+                                  src={`https://tile.openstreetmap.org/${zoom}/${tx}/${ty}.png`}
+                                  alt=""
+                                />
+                                {currentFrame && (
+                                  <img
+                                    key={currentFrame.timestamp}
+                                    className="weather-page__radar-overlay"
+                                    src={`${currentFrame.host}${currentFrame.tilePath}/512/7/${rx}/${ry}/2/1_1.png`}
+                                    alt=""
+                                    style={{ width: '200%', height: '200%', left: `${-qx * 100}%`, top: `${-qy * 100}%` }}
+                                  />
+                                )}
+                              </div>
+                              );
+                            })}
+                            <div className="weather-page__radar-attrib">© OpenStreetMap · RainViewer</div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  {/* Hourly forecast chart — full width at bottom */}
+                  <div className="weather-page__hourly-panel">
+                    <div className="weather-page__panel-title">Hourly Forecast</div>
+                    {cd ? (
+                      <svg
+                        viewBox={`0 0 ${cd.W} ${cd.H}`}
+                        width="100%"
+                        height="100%"
+                        preserveAspectRatio="none"
+                        className="weather-page__chart-svg"
+                        aria-label="Hourly temperature and precipitation forecast"
+                      >
+                        <defs>
+                          <linearGradient id="wxTempGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#e05010" stopOpacity="0.3" />
+                            <stop offset="100%" stopColor="#5090c8" stopOpacity="0.05" />
+                          </linearGradient>
+                        </defs>
+                        {[0, 0.25, 0.5, 0.75, 1].map(f => (
+                          <line key={`gl-${f}`}
+                            x1={cd.ML} y1={cd.MT + f * cd.PH}
+                            x2={cd.ML + cd.PW} y2={cd.MT + f * cd.PH}
+                            stroke="#8090a0" strokeWidth="0.5" strokeDasharray="4 4" opacity="0.4"
+                          />
+                        ))}
+                        {hourly.map((h, i) => {
+                          const barH = (h.precipProbability / 100) * cd.PH;
+                          return (
+                            <rect key={`pb-${i}`}
+                              x={cd.xOf(i) - cd.barW / 2}
+                              y={cd.MT + cd.PH - barH}
+                              width={cd.barW}
+                              height={barH}
+                              fill="#5090c8"
+                              opacity="0.22"
+                              rx="2"
+                            />
+                          );
+                        })}
+                        <polygon points={cd.areaPolygon} fill="url(#wxTempGrad)" />
+                        <polyline
+                          points={cd.tempPolyline}
+                          fill="none"
+                          stroke="#e05010"
+                          strokeWidth="2.5"
+                          strokeLinejoin="round"
+                        />
+                        {cd.points.map((p, i) => {
+                          const isEdge = i === 0 || i === cd.n - 1;
+                          const showLabel = isEdge || i % Math.ceil(cd.n / 6) === 0;
+                          return (
+                            <g key={`dt-${i}`}>
+                              <circle cx={p.x} cy={p.y} r={isEdge ? 4.5 : 3} fill={isEdge ? '#b03000' : '#e05010'} stroke="#fff" strokeWidth="1.5" />
+                              {showLabel && (
+                                <text x={p.x} y={Math.max(p.y - 7, cd.MT + 11)}
+                                  fontSize="11" textAnchor="middle" fill="#982800"
+                                  fontWeight="700" stroke="white" strokeWidth="3" paintOrder="stroke"
+                                >
+                                  {p.h.temp}°
+                                </text>
+                              )}
+                            </g>
+                          );
+                        })}
+                        {hourly.map((h, i) => {
+                          const cx = cd.xOf(i);
+                          const period = h.hour >= 12 ? 'pm' : 'am';
+                          const displayH = h.hour % 12 || 12;
+                          const iconFile = ccefIconName(h.weatherCode, h.hour >= 6 && h.hour < 20);
+                          const iconSize = 28;
+                          return (
+                            <g key={`hl-${i}`}>
+                              <image
+                                href={`/weather-icons/ccef/${iconFile}`}
+                                x={cx - iconSize / 2} y={cd.H - cd.MB + 2}
+                                width={iconSize} height={iconSize}
+                              />
+                              <text x={cx} y={cd.H - 4}
+                                fontSize="11" textAnchor="middle" fill="#4a6080" fontWeight="600"
+                              >
+                                {`${displayH}${period}`}
+                              </text>
+                            </g>
+                          );
+                        })}
+                        {[0, 0.5, 1].map(f => {
+                          const t = Math.round(cd.minTemp + f * cd.tempRange);
+                          return (
+                            <text key={`tl-${f}`}
+                              x={cd.ML - 5} y={cd.MT + (1 - f) * cd.PH + 4}
+                              fontSize="11" textAnchor="end" fill="#807060" fontWeight="600"
+                            >
+                              {t}°
+                            </text>
+                          );
+                        })}
+                        <rect x={cd.ML + cd.PW - 80} y={cd.MT + 2} width="12" height="10" fill="#5090c8" opacity="0.3" rx="2" />
+                        <text x={cd.ML + cd.PW - 64} y={cd.MT + 10} fontSize="10" fill="#4070a0">Precip %</text>
+                      </svg>
+                    ) : (
+                      <div className="weather-page__chart-empty">No hourly data</div>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        ) : null}
       </main>
-        </>
-      ) : null}
 
       <div className="app__ticker" aria-label="Dashboard ticker">
         <div className="app__ticker-clock" aria-label="Current time and date">
@@ -6540,8 +8083,8 @@ export default function App() {
           <span className="app__ticker-date">{tickerDateLabel}</span>
         </div>
         <div className="app__ticker-track" aria-hidden="true" style={tickerScrollDurationStyle}>
-          <span className="app__ticker-copy">{tickerScrollText}</span>
-          <span className="app__ticker-copy">{tickerScrollText}</span>
+          <span className="app__ticker-copy">{loading ? LOADING_TICKER_TEXT : tickerScrollText}</span>
+          <span className="app__ticker-copy">{loading ? LOADING_TICKER_TEXT : tickerScrollText}</span>
         </div>
       </div>
     </div>

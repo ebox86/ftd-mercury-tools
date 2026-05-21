@@ -50,6 +50,15 @@ export const DEFAULT_CONFIG: FaxParserConfig = {
   },
 };
 
+export const DEFAULT_FIELD_MAP: Record<string, string> = {
+  'Bill Name':             'Customer Name',
+  'Recipient Name':        'For the Passing Of',
+  'Card Message':          'Card Message',
+  'Product Code 1':        'Product Item Number',
+  'Delivery Instructions': 'Delivery Time',
+  'Additional Information':'For the Passing Of',
+};
+
 export function loadConfig(): FaxParserConfig {
   const configPath = getConfigPath();
   if (!fs.existsSync(configPath)) {

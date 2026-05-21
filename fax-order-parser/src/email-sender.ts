@@ -1,7 +1,58 @@
 import crypto from 'crypto';
 import * as nodemailer from 'nodemailer';
 import { FaxOrderFields } from './index';
-import { EmailConfig } from './config';
+import { EmailConfig, DEFAULT_FIELD_MAP } from './config';
+
+// ── OCR field resolution ───────────────────────────────────────────────────────
+
+/** Maps human-readable OCR source labels to FaxOrderFields property names. */
+const SOURCE_TO_KEY: Record<string, keyof FaxOrderFields> = {
+  'Customer Name':       'customerName',
+  'For the Passing Of':  'forThePassingOf',
+  'Delivery Location':   'deliveryLocation',
+  'Card Message':        'cardMessage',
+  'Order Number':        'orderNumber',
+  'Customer Phone':      'customerPhone',
+  'Customer Address':    'customerAddress',
+  'Product Item Number': 'productItemNumber',
+  'Product Description': 'productDescription',
+  'Product Price':       'productPrice',
+  'Delivery Charge':     'deliveryCharge',
+  'Delivery Date':       'deliveryDate',
+  'Delivery Time':       'deliveryTime',
+  'Total Payable':       'totalPayable',
+  'Vendor Name':         'vendorName',
+};
+
+/**
+ * WOI fields that must have an OCR value for Mercury to accept the order.
+ * If any are missing after OCR (and no manual override fills them), the file
+ * is quarantined in the pending queue for human review.
+ */
+export const REQUIRED_WOI_FIELDS = ['Bill Name', 'Recipient Name', 'Product Code 1'] as const;
+
+/** Returns the names of required WOI fields that have no resolved OCR value. */
+export function getMissingRequiredFields(
+  fields: FaxOrderFields,
+  fieldMap: Record<string, string>,
+): string[] {
+  return (REQUIRED_WOI_FIELDS as readonly string[]).filter(woiField => {
+    const val = resolveField(woiField, fields, fieldMap);
+    return !val || val.trim() === '';
+  });
+}
+
+function resolveField(
+  woiField: string,
+  fields: FaxOrderFields,
+  fieldMap: Record<string, string>,
+): string {
+  const label = fieldMap[woiField];
+  if (!label || label === '(none)') return '';
+  const key = SOURCE_TO_KEY[label];
+  if (!key) return '';
+  return (fields[key] as string | undefined) ?? '';
+}
 
 // ── Phone parsing ──────────────────────────────────────────────────────────────
 interface ParsedPhone { areaCode: string; prefix: string; number: string; extension: string; }
@@ -23,11 +74,31 @@ interface ParsedAddress { address1: string; address2: string; city: string; stat
 function parseAddress(addr: string | undefined): ParsedAddress {
   const empty: ParsedAddress = { address1: '', address2: '', city: '', state: '', zip: '' };
   if (!addr) return empty;
-  // "123 Main St, Anytown, IL 60515" or "123 Main St, Anytown IL 60515"
-  const m = addr.match(/^(.+?),\s*(.+?),?\s*([A-Z]{2})\s*(\d{5}(?:-\d{4})?)\s*$/i);
-  if (m) {
-    return { address1: m[1].trim(), address2: '', city: m[2].trim(), state: m[3].toUpperCase(), zip: m[4] };
+
+  // Pattern 1: standard "123 Main St, Anytown, IL 60515" or "123 Main St, Anytown IL 60515"
+  const mComma = addr.match(/^(.+?),\s*(.+?),?\s*([A-Z]{2})\s*(\d{5}(?:-\d{4})?)\s*$/i);
+  if (mComma) {
+    return { address1: mComma[1].trim(), address2: '', city: mComma[2].trim(), state: mComma[3].toUpperCase(), zip: mComma[4] };
   }
+
+  // Pattern 2: OCR period instead of comma between street and city.
+  // "2615 Carriage House Drive. Allison Park, PA 15101"
+  // Extract state+zip from the end, then split the remainder at its last separator.
+  const mEnd = addr.match(/^(.+?)[.,]\s*([A-Za-z]{2})\s*(\d{5}(?:-\d{4})?)\s*$/i);
+  if (mEnd) {
+    const streetCity = mEnd[1];
+    const splitAt = Math.max(streetCity.lastIndexOf('.'), streetCity.lastIndexOf(','));
+    if (splitAt > 0) {
+      return {
+        address1: streetCity.slice(0, splitAt).trim(),
+        address2: '',
+        city: streetCity.slice(splitAt + 1).trim(),
+        state: mEnd[2].toUpperCase(),
+        zip: mEnd[3],
+      };
+    }
+  }
+
   // Best-effort fallback
   return { address1: addr.trim(), address2: '', city: '', state: '', zip: '' };
 }
@@ -64,11 +135,31 @@ function parseDate(dateStr: string | undefined): ParsedDate {
 // ── Recipient address parsing ──────────────────────────────────────────────────
 interface ParsedRecipient extends ParsedAddress { name: string; company: string; }
 
+// Words that indicate an occasion/service type rather than a person's name.
+// When these appear at the start of a delivery location, the real destination
+// is the venue that follows "at", not a personal delivery address.
+const OCCASION_WORDS = /^(?:For the |At the |the )?(Visitation|Reception|Service|Funeral|Wake|Mass|Memorial Service|Graveside Service)\s+at\s+/i;
+
 function parseRecipient(location: string | undefined): ParsedRecipient {
   const empty: ParsedRecipient = { name: '', address1: '', address2: '', city: '', state: '', zip: '', company: '' };
   if (!location) return empty;
 
-  // "John Smith at 123 Main St, City, ST 12345"
+  // Venue/occasion delivery: "Visitation at John A Freyvogel Sons, Inc (Centre Ave, Main St), ..."
+  // Extract the venue as Recipient Company and the intersection/street from parentheses as Address1.
+  const occasionMatch = location.match(OCCASION_WORDS);
+  if (occasionMatch) {
+    const rest = location.replace(OCCASION_WORDS, '');
+    // Company = text before first '(' or before a standalone comma (strip leading "the")
+    // Include ", Inc", ", LLC", ", Ltd" etc. as part of the company name
+    const companyMatch = rest.match(/^(?:the\s+)?([^(]+?(?:,\s*(?:Inc|LLC|Ltd|Corp|Co)\.?)?)(?:\s*\(|,(?!\s*(?:Inc|LLC|Ltd|Corp|Co))|$)/i);
+    const company = companyMatch ? companyMatch[1].trim() : rest.trim();
+    // Address1 = content inside parentheses, if present (usually an intersection)
+    const parenMatch = rest.match(/\(([^)]+)\)/);
+    const address1 = parenMatch ? parenMatch[1].trim() : '';
+    return { name: '', company, address1, address2: '', city: '', state: '', zip: '' };
+  }
+
+  // Personal delivery: "John Smith at 123 Main St, City, ST 12345"
   const atMatch = location.match(/^(.+?)\s+at\s+(.+)$/i);
   if (atMatch) {
     const addr = parseAddress(atMatch[2]);
@@ -157,7 +248,10 @@ function isGarbageText(text: string): boolean {
 }
 
 // ── WOI email body formatter ───────────────────────────────────────────────────
-export function formatWoiEmail(fields: FaxOrderFields): string {
+export function formatWoiEmail(
+  fields: FaxOrderFields,
+  fieldMap: Record<string, string> = DEFAULT_FIELD_MAP,
+): string {
   const billPhone = parsePhone(fields.customerPhone);
   const billAddr = parseAddress(fields.customerAddress);
   const recipient = parseRecipient(fields.deliveryLocation);
@@ -166,8 +260,20 @@ export function formatWoiEmail(fields: FaxOrderFields): string {
   // Occasion code: 1 = Sympathy when "for the passing of" is present, else 0
   const occasionCode = fields.forThePassingOf ? '1' : '0';
 
+  const billName    = sanitizeWoiText(resolveField('Bill Name', fields, fieldMap), 50);
+  const recipName   = sanitizeWoiText(resolveField('Recipient Name', fields, fieldMap), 70);
+  const cardMsg     = sanitizeWoiText(resolveField('Card Message', fields, fieldMap), 600);
+  const delivInstr  = sanitizeWoiText(resolveField('Delivery Instructions', fields, fieldMap), 250);
+  const addlInfo    = sanitizeWoiText(resolveField('Additional Information', fields, fieldMap), 1000);
+  const prodCode    = sanitizeWoiText(resolveField('Product Code 1', fields, fieldMap), 10);
+  const rawDesc     = fields.productDescription ?? '';
+  // Spec: if description field is unused or looks like OCR garbage, use the product code in both fields
+  const prodDesc    = (rawDesc && !isGarbageText(rawDesc))
+    ? sanitizeWoiText(rawDesc, 350) || prodCode
+    : prodCode;
+
   const lines = [
-    `Bill Name: ${fields.customerName ?? ''}`,
+    `Bill Name: ${billName}`,
     `Bill Address1: ${billAddr.address1}`,
     `Bill Address2: ${billAddr.address2}`,
     `Bill City: ${billAddr.city}`,
@@ -179,13 +285,13 @@ export function formatWoiEmail(fields: FaxOrderFields): string {
     `Bill Phone Number: ${billPhone.number}`,
     `Bill Phone Extension: ${billPhone.extension}`,
     `Bill Phone2 Area Code: `,
-    `Bill Phone2 Extension: `,
-    `Bill Phone2 Number: `,
     `Bill Phone2 Prefix: `,
+    `Bill Phone2 Number: `,
+    `Bill Phone2 Extension: `,
     `Bill Fax Area Code: `,
     `Bill Fax Prefix: `,
     `Bill Fax Number: `,
-    `Recipient Name: ${recipient.name || (fields.customerName ?? '')}`,
+    `Recipient Name: ${recipName}`,
     `Recipient Address1: ${recipient.address1}`,
     `Recipient Address2: ${recipient.address2}`,
     `Recipient City: ${recipient.city}`,
@@ -198,14 +304,14 @@ export function formatWoiEmail(fields: FaxOrderFields): string {
     `Recipient Phone Extension: `,
     `Recipient Company: ${recipient.company}`,
     `E-mail Address: `,
-    `Delivery Instructions: ${fields.deliveryTime ?? ''}`,
+    `Delivery Instructions: ${delivInstr}`,
     `Delivery (Month): ${delDate.month}`,
     `Delivery (Day): ${delDate.day}`,
     `Delivery (Year): ${delDate.year}`,
-    `Card Message: ${fields.cardMessage ?? ''}`,
+    `Card Message: ${cardMsg}`,
     `Occasion Code: ${occasionCode}`,
-    `Product Code1: ${fields.productItemNumber ?? ''}`,
-    `Product Description1: ${fields.productDescription ?? fields.productItemNumber ?? ''}`,
+    `Product Code1: ${prodCode}`,
+    `Product Description1: ${prodDesc}`,
     `Product Amount1: ${fields.productPrice ?? ''}`,
     `Product Qty1: 1`,
     `Delivery Charge: ${fields.deliveryCharge ?? ''}`,
@@ -215,16 +321,12 @@ export function formatWoiEmail(fields: FaxOrderFields): string {
     `Tax Amount: `,
     `Discount Amount: `,
     `Total Order Amount: ${fields.totalPayable ?? ''}`,
-    `Additional Information: ${fields.forThePassingOf ?? ''}`,
-    `CC Cardholder: `,
-    `CC Company: `,
-    `CC Number: `,
-    `CC Expiration (Month): `,
-    `CC Expiration (Year): `,
-    `CC CVV Code: `,
+    `Additional Information: ${addlInfo}`,
   ];
 
-  return lines.join('\n');
+  // Trim trailing whitespace from every line — prevents quoted-printable encoding
+  // of trailing spaces as =20, which Mercury's WOI parser may not decode.
+  return lines.map(l => l.trimEnd()).join('\n');
 }
 
 // ── Email sender ───────────────────────────────────────────────────────────────
@@ -252,10 +354,26 @@ export async function sendWoiEmail(
     },
   });
 
+  // Build a raw 7-bit email to avoid quoted-printable encoding.
+  // Mercury's WOI parser does key: value line parsing on the raw body;
+  // QP-encoded trailing spaces (=20) and soft line-breaks (=\n) in the
+  // card message break that parsing.
+  const rawMessage = [
+    `From: <${emailConfig.senderAddress}>`,
+    `To: <${emailConfig.recipientAddress}>`,
+    `Subject: ${emailConfig.subjectLine}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/plain; charset=us-ascii`,
+    `Content-Transfer-Encoding: 7bit`,
+    ``,
+    body,
+  ].join('\r\n');
+
   await transport.sendMail({
-    from: emailConfig.senderAddress,
-    to: emailConfig.recipientAddress,
-    subject: emailConfig.subjectLine,
-    text: body,
+    envelope: {
+      from: emailConfig.senderAddress,
+      to:   emailConfig.recipientAddress,
+    },
+    raw: rawMessage,
   });
 }

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Florist\\\\Documents\\\\projects\\\\ftd-mercury-tools\" -Recurse -Name)"
+    ]
+  }
+}
