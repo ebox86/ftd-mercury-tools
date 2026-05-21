@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+export type EmailEncryptionAlgorithm = 'DES' | 'RC2' | 'Rijndael' | 'TripleDES';
+
 export interface EmailConfig {
   senderAddress: string;
   senderPassword: string;
@@ -8,6 +10,8 @@ export interface EmailConfig {
   smtpHost: string;
   smtpPort: number;
   subjectLine: string;
+  encryptionPassword?: string;
+  encryptionAlgorithm?: EmailEncryptionAlgorithm;
 }
 
 export interface FaxParserConfig {
@@ -41,6 +45,8 @@ export const DEFAULT_CONFIG: FaxParserConfig = {
     smtpHost: 'smtp.gmail.com',
     smtpPort: 587,
     subjectLine: 'Online Order',
+    encryptionPassword: '',
+    encryptionAlgorithm: 'TripleDES',
   },
 };
 

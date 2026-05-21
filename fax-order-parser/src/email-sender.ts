@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import * as nodemailer from 'nodemailer';
 import { FaxOrderFields } from './index';
 import { EmailConfig, DEFAULT_FIELD_MAP } from './config';
@@ -187,6 +188,54 @@ function sanitizeWoiText(value: string, maxLength: number): string {
 }
 
 /**
+ * Normalize a user-supplied password into a fixed-length key or IV.
+ * If the password is too long, it is truncated; if too short, it is right-padded with '*'.
+ */
+function normalizePassword(password: string, length: number): Buffer {
+  const raw = Buffer.from(password, 'utf8');
+  if (raw.length >= length) {
+    return raw.slice(0, length);
+  }
+  const result = Buffer.alloc(length, '*');
+  raw.copy(result, 0, 0, raw.length);
+  return result;
+}
+
+function getCipherOptions(algorithm: EmailConfig['encryptionAlgorithm'] = 'TripleDES') {
+  switch (algorithm) {
+    case 'DES': return { cipherName: 'des-cbc', keyLength: 8, ivLength: 8 };
+    case 'RC2': return { cipherName: 'rc2-cbc', keyLength: 16, ivLength: 8 };
+    case 'Rijndael': return { cipherName: 'aes-256-cbc', keyLength: 32, ivLength: 16 };
+    case 'TripleDES': return { cipherName: 'des-ede3-cbc', keyLength: 24, ivLength: 8 };
+    default: return { cipherName: 'des-ede3-cbc', keyLength: 24, ivLength: 8 };
+  }
+}
+
+function encryptWoiBody(body: string, password: string, algorithm: EmailConfig['encryptionAlgorithm'] = 'TripleDES'): string {
+  const { cipherName, keyLength, ivLength } = getCipherOptions(algorithm);
+  const key = normalizePassword(password, keyLength);
+  const iv = normalizePassword(password, ivLength);
+
+  const runCipher = (name: string, keyBuffer: Buffer, ivBuffer: Buffer) => {
+    const cipher = crypto.createCipheriv(name, keyBuffer, ivBuffer);
+    return Buffer.concat([cipher.update(Buffer.from(body, 'utf8')), cipher.final()]);
+  };
+
+  try {
+    const encrypted = runCipher(cipherName, key, iv);
+    return encrypted.toString('base64');
+  } catch (err) {
+    if (algorithm === 'TripleDES') {
+      const fallbackKey = normalizePassword(password, 8);
+      const fallbackIv = normalizePassword(password, 8);
+      const encrypted = runCipher('des-cbc', fallbackKey, fallbackIv);
+      return encrypted.toString('base64');
+    }
+    throw err;
+  }
+}
+
+/**
  * Heuristic: returns true when a string looks like OCR noise rather than real text.
  * A description is considered garbage when fewer than 40% of its tokens are
  * purely alphabetic words of 4+ characters.
@@ -286,7 +335,14 @@ export async function sendWoiEmail(
   emailConfig: EmailConfig,
   fieldMap: Record<string, string> = DEFAULT_FIELD_MAP,
 ): Promise<void> {
-  const body = formatWoiEmail(fields, fieldMap);
+  let body = formatWoiEmail(fields, fieldMap);
+  if (emailConfig.encryptionPassword?.trim()) {
+    body = encryptWoiBody(
+      body,
+      emailConfig.encryptionPassword,
+      emailConfig.encryptionAlgorithm ?? 'TripleDES',
+    );
+  }
 
   const transport = nodemailer.createTransport({
     host: emailConfig.smtpHost,

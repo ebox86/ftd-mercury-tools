@@ -66,6 +66,10 @@ jobs:
         with:
           node-version: "20.19.0"
 
+      - name: Stamp kiosk app version
+        working-directory: mercury-orders-tv-dashboard/kiosk-app
+        run: npm version "${{ steps.meta.outputs.version }}" --no-git-tag-version --allow-same-version
+
       - name: Install kiosk dependencies
         working-directory: mercury-orders-tv-dashboard/kiosk-app
         run: npm ci
@@ -162,8 +166,28 @@ jobs:
           $publisherUrl = "https://github.com/${{ github.repository }}"
           $mapboxToken = "$env:MAPBOX_TOKEN"
           if ([string]::IsNullOrWhiteSpace($mapboxToken)) {
-            Write-Warning "MAPBOX_TOKEN secret is empty; installer will be built without an embedded token."
+            throw "MAPBOX_TOKEN secret is empty; production installers require an embedded Mapbox token for address lookup."
           }
+
+          if ($mapboxToken -match '(?i)^(MAPBOX_TOKEN|MAPBOX_ACCESS_TOKEN)\s*=\s*(.*)$') {
+            $mapboxToken = $Matches[2].Trim()
+          }
+          if (($mapboxToken.StartsWith('"') -and $mapboxToken.EndsWith('"')) -or ($mapboxToken.StartsWith("'") -and $mapboxToken.EndsWith("'"))) {
+            $mapboxToken = $mapboxToken.Substring(1, $mapboxToken.Length - 2).Trim()
+          }
+
+          $testQuery = [System.Uri]::EscapeDataString("1600 Pennsylvania Ave NW Washington DC")
+          $testUri = "https://api.mapbox.com/geocoding/v5/mapbox.places/$testQuery.json?country=US&limit=1&access_token=$mapboxToken"
+          try {
+            $mapboxTest = Invoke-RestMethod -Uri $testUri -Method Get -TimeoutSec 15
+          } catch {
+            throw "MAPBOX_TOKEN secret was provided, but Mapbox rejected the release-workflow validation request: $($_.Exception.Message)"
+          }
+          if (-not $mapboxTest.features -or $mapboxTest.features.Count -lt 1) {
+            throw "MAPBOX_TOKEN secret validation returned no geocoding results."
+          }
+          Write-Host "MAPBOX_TOKEN secret validated for release build."
+
           .\mercury-orders-tv-dashboard\tools\build-installer.ps1 `
             -Version "${{ steps.meta.outputs.version }}" `
             -Publisher "ebox86.com" `

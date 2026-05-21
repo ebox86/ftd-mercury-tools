@@ -52,8 +52,16 @@ Settings are stored in `C:\ProgramData\FTD\FaxOrderParser\config.json`.
 | `email.senderPassword` | _(empty — must be set in config app)_ | Gmail App Password |
 | `email.recipientAddress` | `ftdpos71440@oliverflowers.com` | WOI inbox |
 | `email.subjectLine` | `Online Order` | Must match Mercury Administration → WOI subject |
+| `email.encryptionPassword` | _(empty)_ | Optional WOI body encryption password |
+| `email.encryptionAlgorithm` | `TripleDES` | Optional encryption algorithm for WOI body (CBC/PKCS7) |
 | `email.smtpHost` | `smtp.gmail.com` | SMTP host |
 | `email.smtpPort` | `587` | SMTP port |
+
+## WOI Email Encryption
+
+If `email.encryptionPassword` is configured, the WOI body will be encrypted and encoded as Base64 before sending. Supported algorithms are `TripleDES`, `DES`, `RC2`, and `Rijndael` (AES-256) using CBC mode with PKCS7 padding.
+
+Passwords are normalized to the required key and IV lengths by truncating long values or right-padding shorter values with asterisks (`*`).
 
 ## Building the Installer
 
