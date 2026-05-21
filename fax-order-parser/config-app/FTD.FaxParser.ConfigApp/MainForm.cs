@@ -171,8 +171,7 @@ internal sealed class MainForm : Form
     // Watch folder row
     _watchFolderBox = new TextBox { Width = 520 };
     var openBtn = SmallButton("📂");
-    openBtn.ToolTipText = "Open in Explorer";
-    openBtn.Click += (_, _) =>
+    openBtn.Button.Click += (_, _) =>
     {
       var f = _watchFolderBox.Text.Trim();
       if (!string.IsNullOrEmpty(f) && Directory.Exists(f))
