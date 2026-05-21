@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.ComponentModel;
+using System.Security.Principal;
 using System.Windows.Forms;
 
 namespace FTD.FaxParser.ConfigApp;
@@ -145,7 +147,7 @@ internal sealed class MainForm : Form
     var tc = new TabControl
     {
       Dock      = DockStyle.Fill,
-      Alignment = TabAlignment.Bottom,
+      Alignment = TabAlignment.Top,
       SizeMode  = TabSizeMode.Fixed,
       ItemSize  = new Size(120, 30),
     };
@@ -526,9 +528,15 @@ internal sealed class MainForm : Form
 
   // ── Service control ───────────────────────────────────────────────────────────
 
-  private void RefreshServiceStatus()
+  private string RefreshServiceStatus()
   {
     var status = QueryServiceState();
+    SetServiceBadgeStatus(status);
+    return status;
+  }
+
+  private void SetServiceBadgeStatus(string status)
+  {
     _serviceBadge.Text = $"Service: {status}";
     _serviceBadge.BackColor = status switch
     {
@@ -567,16 +575,49 @@ internal sealed class MainForm : Form
 
   private void RunServiceCommand(string command)
   {
+    var refreshed = false;
+
     try
     {
-      using var proc = Process.Start(new ProcessStartInfo("sc.exe", $"{command} \"{ServiceName}\"")
+      var result = RunScServiceCommand(command, elevated: !IsElevated());
+      var expectedStatus = command.Equals("start", StringComparison.OrdinalIgnoreCase)
+        ? "running"
+        : "stopped";
+
+      var status = WaitForServiceState(expectedStatus, TimeSpan.FromSeconds(8));
+      SetServiceBadgeStatus(status);
+      refreshed = true;
+
+      if (!IsExpectedServiceCommandExit(command, result.ExitCode))
       {
-        RedirectStandardOutput = true,
-        RedirectStandardError  = true,
-        UseShellExecute        = false,
-        CreateNoWindow         = true,
-      })!;
-      proc.WaitForExit(15_000);
+        var details = string.IsNullOrWhiteSpace(result.Output)
+          ? $"sc.exe exited with code {result.ExitCode}."
+          : result.Output.Trim();
+
+        SetFooterStatus($"Service {command} failed.", isError: true);
+        MessageBox.Show(
+          $"Could not {command} the service.\n\n{details}",
+          "Service command failed",
+          MessageBoxButtons.OK,
+          MessageBoxIcon.Error);
+      }
+      else if (!status.Equals(expectedStatus, StringComparison.OrdinalIgnoreCase))
+      {
+        SetFooterStatus($"Service is still {status}.", isError: true);
+        MessageBox.Show(
+          $"Windows accepted the {command} request, but the service is now {status}.",
+          "Service did not reach expected state",
+          MessageBoxButtons.OK,
+          MessageBoxIcon.Warning);
+      }
+      else
+      {
+        SetFooterStatus($"Service {ServiceCommandPastTense(command)}.", isError: false);
+      }
+    }
+    catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+    {
+      SetFooterStatus("Service command canceled.", isError: true);
     }
     catch (Exception ex)
     {
@@ -586,10 +627,74 @@ internal sealed class MainForm : Form
     finally
     {
       // Brief wait for Windows to settle before querying state
-      System.Threading.Thread.Sleep(800);
-      RefreshServiceStatus();
+      if (!refreshed)
+      {
+        System.Threading.Thread.Sleep(800);
+        RefreshServiceStatus();
+      }
     }
   }
+
+  private static string WaitForServiceState(string expectedStatus, TimeSpan timeout)
+  {
+    var deadline = DateTimeOffset.UtcNow.Add(timeout);
+    var status = QueryServiceState();
+
+    while (!status.Equals(expectedStatus, StringComparison.OrdinalIgnoreCase) &&
+           DateTimeOffset.UtcNow < deadline)
+    {
+      System.Threading.Thread.Sleep(300);
+      status = QueryServiceState();
+    }
+
+    return status;
+  }
+
+  private static ServiceCommandResult RunScServiceCommand(string command, bool elevated)
+  {
+    var outputPath = Path.Combine(Path.GetTempPath(), "ftd-fax-parser-service-command.log");
+    try { if (File.Exists(outputPath)) File.Delete(outputPath); } catch { /* non-fatal */ }
+
+    var psi = new ProcessStartInfo("cmd.exe",
+      $"/c sc.exe {command} \"{ServiceName}\" > \"{outputPath}\" 2>&1")
+    {
+      UseShellExecute = elevated,
+      CreateNoWindow = !elevated,
+      WindowStyle = ProcessWindowStyle.Hidden,
+    };
+
+    if (elevated)
+      psi.Verb = "runas";
+
+    using var proc = Process.Start(psi)
+      ?? throw new InvalidOperationException("Could not launch sc.exe.");
+
+    if (!proc.WaitForExit(30_000))
+    {
+      try { proc.Kill(entireProcessTree: true); } catch { /* non-fatal */ }
+      return new ServiceCommandResult(-1, "Timed out waiting for sc.exe.");
+    }
+
+    var output = string.Empty;
+    try { if (File.Exists(outputPath)) output = File.ReadAllText(outputPath); } catch { /* non-fatal */ }
+    return new ServiceCommandResult(proc.ExitCode, output);
+  }
+
+  private static bool IsExpectedServiceCommandExit(string command, int exitCode) =>
+    exitCode == 0 ||
+    (command.Equals("start", StringComparison.OrdinalIgnoreCase) && exitCode == 1056) ||
+    (command.Equals("stop", StringComparison.OrdinalIgnoreCase) && exitCode == 1062);
+
+  private static string ServiceCommandPastTense(string command) =>
+    command.Equals("start", StringComparison.OrdinalIgnoreCase) ? "started" : "stopped";
+
+  private static bool IsElevated()
+  {
+    using var identity = WindowsIdentity.GetCurrent();
+    return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+  }
+
+  private sealed record ServiceCommandResult(int ExitCode, string Output);
 
   // ── Footer status message ─────────────────────────────────────────────────────
 
