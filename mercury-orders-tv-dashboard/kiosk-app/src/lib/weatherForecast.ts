@@ -1,39 +1,4 @@
-interface OpenMeteoGeocodeResult {
-  latitude?: number;
-  longitude?: number;
-  name?: string;
-  admin1?: string;
-  country_code?: string;
-}
-
-interface OpenMeteoForecastResponse {
-  current?: {
-    temperature_2m?: number;
-    apparent_temperature?: number;
-    relative_humidity_2m?: number;
-    weather_code?: number;
-    wind_speed_10m?: number;
-    wind_direction_10m?: number;
-    precipitation?: number;
-    is_day?: number;
-  };
-  daily?: {
-    time?: string[];
-    weather_code?: number[];
-    temperature_2m_max?: number[];
-    temperature_2m_min?: number[];
-    precipitation_sum?: number[];
-    precipitation_probability_max?: number[];
-    sunrise?: string[];
-    sunset?: string[];
-  };
-  hourly?: {
-    time?: string[];
-    temperature_2m?: number[];
-    precipitation_probability?: number[];
-    weather_code?: number[];
-  };
-}
+import { buildRequestUrl } from './api';
 
 export interface DayForecast {
   high: number;
@@ -54,7 +19,14 @@ export interface HourlySlice {
 }
 
 export interface WeatherForecastData {
-  location: { label: string; lat: number; lon: number };
+  zip?: string;
+  cachedAt?: string;
+  cacheStatus?: string;
+  stale?: boolean;
+  warning?: string;
+  provider?: string;
+  providerFallbackReason?: string;
+  location: { label: string; lat: number; lon: number; source?: string };
   current: {
     temp: number;
     feelsLike: number;
@@ -142,28 +114,6 @@ export function degreesToCompass(deg: number): string {
   return dirs[Math.round(deg / 22.5) % 16];
 }
 
-function encodeQuery(params: Record<string, string | number | boolean>): string {
-  const q = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) q.set(k, String(v));
-  return q.toString();
-}
-
-function buildLocationLabel(result: OpenMeteoGeocodeResult): string {
-  const city = String(result.name || '').trim();
-  const region = String(result.admin1 || '').trim();
-  if (city && region) return `${city}, ${region}`;
-  return city || region || 'Unknown location';
-}
-
-function parseSunTime(isoDateTime: string | undefined): string {
-  if (!isoDateTime) return '--';
-  const timePart = isoDateTime.split('T')[1] || '';
-  const [h, m] = timePart.split(':').map(Number);
-  if (!Number.isFinite(h) || !Number.isFinite(m)) return '--';
-  const period = h >= 12 ? 'pm' : 'am';
-  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${period}`;
-}
-
 export interface RadarFrame {
   timestamp: number;
   tilePath: string;
@@ -194,110 +144,20 @@ export function latLonToTile(lat: number, lon: number, zoom: number): { x: numbe
   return { x, y };
 }
 
-async function fetchNWSRadarStation(lat: number, lon: number, signal?: AbortSignal): Promise<string | null> {
-  try {
-    const resp = await fetch(
-      `https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`,
-      { headers: { Accept: 'application/json', 'User-Agent': 'FTD-Mercury-Dashboard/1.0 (florist-dashboard)' }, signal },
-    );
-    if (!resp.ok) return null;
-    const data = await resp.json() as { properties?: { radarStation?: string } };
-    return String(data?.properties?.radarStation || '').trim() || null;
-  } catch {
-    return null;
-  }
-}
-
 export async function fetchWeatherForecast(
   zip: string,
   signal?: AbortSignal,
 ): Promise<WeatherForecastData | null> {
-  const geoResp = await fetch(
-    `https://geocoding-api.open-meteo.com/v1/search?${encodeQuery({ name: zip, count: 10, language: 'en', format: 'json' })}`,
-    { headers: { Accept: 'application/json' }, signal },
-  );
-  if (!geoResp.ok) return null;
-
-  const geoData = await geoResp.json() as { results?: OpenMeteoGeocodeResult[] };
-  const location = geoData.results?.find(r => String(r.country_code || '').toUpperCase() === 'US')
-    ?? geoData.results?.[0];
-  if (!location || typeof location.latitude !== 'number' || typeof location.longitude !== 'number') return null;
-
-  const lat = location.latitude;
-  const lon = location.longitude;
-
-  const [forecastResp, radarStation] = await Promise.all([
-    fetch(
-      `https://api.open-meteo.com/v1/forecast?${encodeQuery({
-        latitude: lat,
-        longitude: lon,
-        current: 'temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation,is_day',
-        hourly: 'temperature_2m,precipitation_probability,weather_code',
-        daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset',
-        temperature_unit: 'fahrenheit',
-        wind_speed_unit: 'mph',
-        timezone: 'auto',
-        forecast_days: 2,
-      })}`,
-      { headers: { Accept: 'application/json' }, signal },
-    ),
-    fetchNWSRadarStation(lat, lon, signal),
-  ]);
-
-  if (!forecastResp.ok) return null;
-  const forecast = await forecastResp.json() as OpenMeteoForecastResponse;
-  const cur = forecast.current;
-  if (!cur) return null;
-
-  const buildDay = (idx: number): DayForecast => ({
-    high: Math.round(Number(forecast.daily?.temperature_2m_max?.[idx] ?? 0)),
-    low: Math.round(Number(forecast.daily?.temperature_2m_min?.[idx] ?? 0)),
-    weatherCode: Number(forecast.daily?.weather_code?.[idx] ?? 0),
-    precipSum: Math.round(Number(forecast.daily?.precipitation_sum?.[idx] ?? 0) * 10) / 10,
-    precipProbability: Number(forecast.daily?.precipitation_probability_max?.[idx] ?? 0),
-    sunrise: parseSunTime(forecast.daily?.sunrise?.[idx]),
-    sunset: parseSunTime(forecast.daily?.sunset?.[idx]),
-  });
-
-  // Collect next 12 hours starting from the current hour
-  const nowDateStr = new Date().toISOString().split('T')[0];
-  const nowHour = new Date().getHours();
-  const hourlyTimes = forecast.hourly?.time ?? [];
-  const hourlyTemps = forecast.hourly?.temperature_2m ?? [];
-  const hourlyPrecip = forecast.hourly?.precipitation_probability ?? [];
-  const hourlyCodes = forecast.hourly?.weather_code ?? [];
-  const hourly: HourlySlice[] = [];
-
-  for (let i = 0; i < hourlyTimes.length && hourly.length < 12; i++) {
-    const iso = hourlyTimes[i];
-    const [datePart, timePart] = iso.split('T');
-    const h = parseInt(timePart?.split(':')[0] ?? '0', 10);
-    // Skip past hours from today
-    if (datePart === nowDateStr && h < nowHour) continue;
-    hourly.push({
-      isoTime: iso,
-      hour: h,
-      temp: Math.round(Number(hourlyTemps[i] ?? 0)),
-      precipProbability: Number(hourlyPrecip[i] ?? 0),
-      weatherCode: Number(hourlyCodes[i] ?? 0),
+  try {
+    const query = new URLSearchParams({ zip }).toString();
+    const resp = await fetch(buildRequestUrl(`/api/workflow/weather/forecast?${query}`), {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal,
     });
+    if (!resp.ok) return null;
+    return await resp.json() as WeatherForecastData;
+  } catch {
+    return null;
   }
-
-  return {
-    location: { label: buildLocationLabel(location), lat, lon },
-    current: {
-      temp: Math.round(Number(cur.temperature_2m ?? 0)),
-      feelsLike: Math.round(Number(cur.apparent_temperature ?? 0)),
-      humidity: Math.round(Number(cur.relative_humidity_2m ?? 0)),
-      windSpeed: Math.round(Number(cur.wind_speed_10m ?? 0)),
-      windDirection: Number(cur.wind_direction_10m ?? 0),
-      weatherCode: Number(cur.weather_code ?? 0),
-      isDay: Number(cur.is_day ?? 1) !== 0,
-      precipitation: Math.round(Number(cur.precipitation ?? 0) * 100) / 100,
-    },
-    today: buildDay(0),
-    tomorrow: buildDay(1),
-    hourly,
-    radarStation,
-  };
 }

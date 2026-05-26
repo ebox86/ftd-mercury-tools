@@ -133,6 +133,13 @@ const mapboxRouteCacheTtlMs = Number(process.env.MAPBOX_ROUTE_CACHE_TTL_MS || 6 
 const mapboxAddressCacheTtlMs = Number(process.env.MAPBOX_ADDRESS_CACHE_TTL_MS || 6 * 60 * 60 * 1000);
 const mapboxDistanceFallbackToHaversine = !/^(0|false|no)$/i.test(String(process.env.MAPBOX_FALLBACK_TO_HAVERSINE || 'true').trim());
 const liveMainStoreCoordCache = { expiresAt: 0, point: null };
+const weatherForecastCachePath = join(dashboardConfigDir, 'weather-forecast-cache.json');
+const weatherTimeoutMs = Number(process.env.WEATHER_TIMEOUT_MS || 10000);
+const weatherForecastCacheTtlMs = Number(process.env.WEATHER_FORECAST_CACHE_TTL_MS || 15 * 60 * 1000);
+const weatherForecastStaleTtlMs = Number(process.env.WEATHER_FORECAST_STALE_TTL_MS || 12 * 60 * 60 * 1000);
+const weatherForecastCache = new Map();
+const weatherForecastInFlight = new Map();
+let weatherForecastCacheLoaded = false;
 
 function xmlEscape(value) {
   return String(value)
@@ -1978,6 +1985,454 @@ async function getMapboxStaticMapImage(params = {}) {
   };
 }
 
+function normalizeWeatherZipValue(raw = '') {
+  const match = String(raw || '').match(/\b(\d{5})(?:-\d{4})?\b/);
+  return match?.[1] || '15212';
+}
+
+function buildWeatherLocationLabel(location = {}) {
+  const city = normalizeSpace(location.name || '');
+  const region = normalizeSpace(location.admin1 || location.state || '');
+  if (city && region) return `${city}, ${region}`;
+  return city || region || 'Local forecast';
+}
+
+function parseWeatherSunTime(isoDateTime) {
+  if (!isoDateTime) return '--';
+  const timePart = String(isoDateTime || '').split('T')[1] || '';
+  const [rawHour, rawMinute] = timePart.split(':');
+  const hour = Number(rawHour);
+  const minute = Number(rawMinute);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return '--';
+  const period = hour >= 12 ? 'pm' : 'am';
+  return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${period}`;
+}
+
+function weatherNumber(raw, fallback = 0) {
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function weatherCodeFromText(raw = '') {
+  const text = String(raw || '').toLowerCase();
+  if (/thunder|storm/.test(text)) return 95;
+  if (/snow|sleet|flurr/.test(text)) return 71;
+  if (/freezing|ice/.test(text)) return 66;
+  if (/shower/.test(text)) return 80;
+  if (/rain/.test(text)) return 61;
+  if (/drizzle/.test(text)) return 51;
+  if (/fog|mist|haze/.test(text)) return 45;
+  if (/overcast|cloudy/.test(text)) return 3;
+  if (/partly/.test(text)) return 2;
+  if (/mostly/.test(text)) return 1;
+  if (/sunny|clear|fair/.test(text)) return 0;
+  return 3;
+}
+
+function windSpeedMph(raw = '') {
+  const matches = String(raw || '').match(/\d+(?:\.\d+)?/g) || [];
+  const speeds = matches.map(Number).filter(Number.isFinite);
+  if (speeds.length === 0) return 0;
+  return Math.round(Math.max(...speeds));
+}
+
+function compassToDegrees(raw = '') {
+  const dir = String(raw || '').trim().toUpperCase();
+  const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  const idx = dirs.indexOf(dir);
+  return idx >= 0 ? idx * 22.5 : 0;
+}
+
+function precipProbabilityFromNws(period = {}) {
+  return weatherNumber(period?.probabilityOfPrecipitation?.value, 0);
+}
+
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || 10000));
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...(options.headers || {}) },
+      ...options,
+      signal: controller.signal,
+    });
+    const bodyText = await response.text();
+    if (!response.ok) {
+      throw new Error(`${url} failed (${response.status}): ${bodyText.slice(0, 240)}`);
+    }
+    try {
+      return JSON.parse(bodyText);
+    } catch {
+      throw new Error(`${url} returned invalid JSON.`);
+    }
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
+async function resolveWeatherLocation(zip) {
+  const geocodeUrl = `https://geocoding-api.open-meteo.com/v1/search?${new URLSearchParams({
+    name: zip,
+    count: '10',
+    language: 'en',
+    format: 'json',
+    countryCode: 'US',
+  }).toString()}`;
+
+  try {
+    const geocode = await fetchJsonWithTimeout(geocodeUrl, {}, weatherTimeoutMs);
+    const results = Array.isArray(geocode?.results) ? geocode.results : [];
+    const match = results.find(result => String(result?.country_code || '').toUpperCase() === 'US') || results[0];
+    const latitude = Number(match?.latitude);
+    const longitude = Number(match?.longitude);
+    if (hasUsableCoords(latitude, longitude)) {
+      return {
+        latitude,
+        longitude,
+        name: match?.name,
+        admin1: match?.admin1,
+        source: 'open_meteo_geocoding',
+      };
+    }
+  } catch {
+    // Fall through to ZIP lookup fallback.
+  }
+
+  const zipLookupUrl = `https://api.zippopotam.us/us/${encodeURIComponent(zip)}`;
+  const zipLookup = await fetchJsonWithTimeout(zipLookupUrl, {}, weatherTimeoutMs);
+  const place = Array.isArray(zipLookup?.places) ? zipLookup.places[0] : null;
+  const latitude = Number(place?.latitude);
+  const longitude = Number(place?.longitude);
+  if (!hasUsableCoords(latitude, longitude)) {
+    throw new Error(`No usable US weather location found for ZIP ${zip}.`);
+  }
+  return {
+    latitude,
+    longitude,
+    name: place?.['place name'] || zipLookup?.['post code'] || zip,
+    admin1: place?.state || place?.['state abbreviation'] || '',
+    source: 'zippopotam_us',
+  };
+}
+
+async function fetchNwsRadarStationLive(lat, lon) {
+  try {
+    const data = await fetchJsonWithTimeout(
+      `https://api.weather.gov/points/${Number(lat).toFixed(4)},${Number(lon).toFixed(4)}`,
+      {
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'FTD-Mercury-Dashboard/1.0 (florist-dashboard)',
+        },
+      },
+      weatherTimeoutMs,
+    );
+    return normalizeSpace(data?.properties?.radarStation || '') || null;
+  } catch {
+    return null;
+  }
+}
+
+function buildNwsDayForecast(periods = [], dayIndex = 0) {
+  const groups = new Map();
+  for (const period of periods) {
+    const dateKey = normalizeSpace(period?.startTime || '').slice(0, 10);
+    if (!dateKey) continue;
+    if (!groups.has(dateKey)) groups.set(dateKey, []);
+    groups.get(dateKey).push(period);
+  }
+
+  const dateKey = Array.from(groups.keys()).sort()[dayIndex] || Array.from(groups.keys()).sort()[0] || '';
+  const dayPeriods = groups.get(dateKey) || [];
+  const daytimePeriods = dayPeriods.filter(period => Boolean(period?.isDaytime));
+  const nighttimePeriods = dayPeriods.filter(period => !period?.isDaytime);
+  const highSource = daytimePeriods.length > 0 ? daytimePeriods : dayPeriods;
+  const lowSource = nighttimePeriods.length > 0 ? nighttimePeriods : dayPeriods;
+  const displayPeriod = daytimePeriods[0] || dayPeriods[0] || {};
+  const highTemps = highSource.map(period => weatherNumber(period?.temperature)).filter(Number.isFinite);
+  const lowTemps = lowSource.map(period => weatherNumber(period?.temperature)).filter(Number.isFinite);
+  const precipValues = dayPeriods.map(precipProbabilityFromNws).filter(Number.isFinite);
+
+  return {
+    high: highTemps.length > 0 ? Math.round(Math.max(...highTemps)) : 0,
+    low: lowTemps.length > 0 ? Math.round(Math.min(...lowTemps)) : 0,
+    weatherCode: weatherCodeFromText(displayPeriod?.shortForecast || displayPeriod?.detailedForecast || ''),
+    precipSum: 0,
+    precipProbability: precipValues.length > 0 ? Math.max(...precipValues) : 0,
+    sunrise: '--',
+    sunset: '--',
+  };
+}
+
+function buildNwsForecastPayload(zip, location, point, dailyForecast, hourlyForecast) {
+  const dailyPeriods = Array.isArray(dailyForecast?.properties?.periods) ? dailyForecast.properties.periods : [];
+  const hourlyPeriods = Array.isArray(hourlyForecast?.properties?.periods) ? hourlyForecast.properties.periods : [];
+  if (hourlyPeriods.length === 0 && dailyPeriods.length === 0) {
+    throw new Error('NWS forecast response did not include forecast periods.');
+  }
+
+  const current = hourlyPeriods[0] || dailyPeriods[0] || {};
+  const hourly = hourlyPeriods.slice(0, 12).map((period) => {
+    const iso = normalizeSpace(period?.startTime || '');
+    const hour = Number((iso.split('T')[1] || '').split(':')[0]);
+    return {
+      isoTime: iso,
+      hour: Number.isFinite(hour) ? hour : 0,
+      temp: Math.round(weatherNumber(period?.temperature)),
+      precipProbability: precipProbabilityFromNws(period),
+      weatherCode: weatherCodeFromText(period?.shortForecast || period?.detailedForecast || ''),
+    };
+  });
+
+  return {
+    zip,
+    location: {
+      label: buildWeatherLocationLabel(location),
+      lat: Number(location.latitude),
+      lon: Number(location.longitude),
+      source: location.source || 'unknown',
+    },
+    current: {
+      temp: Math.round(weatherNumber(current?.temperature)),
+      feelsLike: Math.round(weatherNumber(current?.temperature)),
+      humidity: 0,
+      windSpeed: windSpeedMph(current?.windSpeed),
+      windDirection: compassToDegrees(current?.windDirection),
+      weatherCode: weatherCodeFromText(current?.shortForecast || current?.detailedForecast || ''),
+      isDay: current?.isDaytime !== false,
+      precipitation: 0,
+    },
+    today: buildNwsDayForecast(dailyPeriods, 0),
+    tomorrow: buildNwsDayForecast(dailyPeriods, 1),
+    hourly,
+    radarStation: normalizeSpace(point?.properties?.radarStation || '') || null,
+    provider: 'nws',
+  };
+}
+
+async function fetchWeatherForecastFromNws(zip, location) {
+  const lat = Number(location.latitude);
+  const lon = Number(location.longitude);
+  const point = await fetchJsonWithTimeout(
+    `https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`,
+    {
+      headers: {
+        Accept: 'application/geo+json,application/json',
+        'User-Agent': 'FTD-Mercury-Dashboard/1.0 (florist-dashboard)',
+      },
+    },
+    weatherTimeoutMs,
+  );
+  const forecastUrl = normalizeSpace(point?.properties?.forecast || '');
+  const hourlyUrl = normalizeSpace(point?.properties?.forecastHourly || '');
+  if (!forecastUrl || !hourlyUrl) {
+    throw new Error('NWS points response did not include forecast URLs.');
+  }
+  const [dailyForecast, hourlyForecast] = await Promise.all([
+    fetchJsonWithTimeout(forecastUrl, {
+      headers: {
+        Accept: 'application/geo+json,application/json',
+        'User-Agent': 'FTD-Mercury-Dashboard/1.0 (florist-dashboard)',
+      },
+    }, weatherTimeoutMs),
+    fetchJsonWithTimeout(hourlyUrl, {
+      headers: {
+        Accept: 'application/geo+json,application/json',
+        'User-Agent': 'FTD-Mercury-Dashboard/1.0 (florist-dashboard)',
+      },
+    }, weatherTimeoutMs),
+  ]);
+  return buildNwsForecastPayload(zip, location, point, dailyForecast, hourlyForecast);
+}
+
+function buildWeatherForecastPayload(zip, location, forecast, radarStation) {
+  const current = forecast?.current || {};
+  const daily = forecast?.daily || {};
+  const hourlyData = forecast?.hourly || {};
+  const currentHourKey = normalizeSpace(current.time || '').slice(0, 13);
+
+  const buildDay = (idx) => ({
+    high: Math.round(weatherNumber(daily.temperature_2m_max?.[idx])),
+    low: Math.round(weatherNumber(daily.temperature_2m_min?.[idx])),
+    weatherCode: weatherNumber(daily.weather_code?.[idx]),
+    precipSum: Math.round(weatherNumber(daily.precipitation_sum?.[idx]) * 10) / 10,
+    precipProbability: weatherNumber(daily.precipitation_probability_max?.[idx]),
+    sunrise: parseWeatherSunTime(daily.sunrise?.[idx]),
+    sunset: parseWeatherSunTime(daily.sunset?.[idx]),
+  });
+
+  const hourlyTimes = Array.isArray(hourlyData.time) ? hourlyData.time : [];
+  const hourlyTemps = Array.isArray(hourlyData.temperature_2m) ? hourlyData.temperature_2m : [];
+  const hourlyPrecip = Array.isArray(hourlyData.precipitation_probability) ? hourlyData.precipitation_probability : [];
+  const hourlyCodes = Array.isArray(hourlyData.weather_code) ? hourlyData.weather_code : [];
+  const hourly = [];
+
+  for (let i = 0; i < hourlyTimes.length && hourly.length < 12; i += 1) {
+    const iso = normalizeSpace(hourlyTimes[i]);
+    if (!iso) continue;
+    if (currentHourKey && iso.slice(0, 13) < currentHourKey) continue;
+    const hour = Number((iso.split('T')[1] || '').split(':')[0]);
+    hourly.push({
+      isoTime: iso,
+      hour: Number.isFinite(hour) ? hour : 0,
+      temp: Math.round(weatherNumber(hourlyTemps[i])),
+      precipProbability: weatherNumber(hourlyPrecip[i]),
+      weatherCode: weatherNumber(hourlyCodes[i]),
+    });
+  }
+
+  return {
+    zip,
+    location: {
+      label: buildWeatherLocationLabel(location),
+      lat: Number(location.latitude),
+      lon: Number(location.longitude),
+      source: location.source || 'unknown',
+    },
+    current: {
+      temp: Math.round(weatherNumber(current.temperature_2m)),
+      feelsLike: Math.round(weatherNumber(current.apparent_temperature)),
+      humidity: Math.round(weatherNumber(current.relative_humidity_2m)),
+      windSpeed: Math.round(weatherNumber(current.wind_speed_10m)),
+      windDirection: weatherNumber(current.wind_direction_10m),
+      weatherCode: weatherNumber(current.weather_code),
+      isDay: weatherNumber(current.is_day, 1) !== 0,
+      precipitation: Math.round(weatherNumber(current.precipitation) * 100) / 100,
+    },
+    today: buildDay(0),
+    tomorrow: buildDay(1),
+    hourly,
+    radarStation,
+    provider: 'open_meteo',
+  };
+}
+
+async function fetchWeatherForecastLive(zip) {
+  const location = await resolveWeatherLocation(zip);
+  const lat = Number(location.latitude);
+  const lon = Number(location.longitude);
+  const forecastUrl = `https://api.open-meteo.com/v1/forecast?${new URLSearchParams({
+    latitude: String(lat),
+    longitude: String(lon),
+    current: 'temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation,is_day',
+    hourly: 'temperature_2m,precipitation_probability,weather_code',
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset',
+    temperature_unit: 'fahrenheit',
+    wind_speed_unit: 'mph',
+    timezone: 'auto',
+    forecast_days: '2',
+  }).toString()}`;
+
+  try {
+    const [forecast, radarStation] = await Promise.all([
+      fetchJsonWithTimeout(forecastUrl, {}, weatherTimeoutMs),
+      fetchNwsRadarStationLive(lat, lon),
+    ]);
+
+    if (!forecast?.current) {
+      throw new Error('Weather forecast response did not include current conditions.');
+    }
+    return buildWeatherForecastPayload(zip, location, forecast, radarStation);
+  } catch (openMeteoError) {
+    try {
+      const nwsPayload = await fetchWeatherForecastFromNws(zip, location);
+      return {
+        ...nwsPayload,
+        providerFallbackReason: String(openMeteoError?.message || openMeteoError),
+      };
+    } catch (nwsError) {
+      throw new Error(
+        `Open-Meteo failed: ${String(openMeteoError?.message || openMeteoError)}; `
+        + `NWS fallback failed: ${String(nwsError?.message || nwsError)}`,
+      );
+    }
+  }
+}
+
+function ensureWeatherForecastCacheLoaded() {
+  if (weatherForecastCacheLoaded) return;
+  weatherForecastCacheLoaded = true;
+  if (!existsSync(weatherForecastCachePath)) return;
+  try {
+    const raw = readFileSync(weatherForecastCachePath, 'utf8');
+    const parsed = JSON.parse(String(raw || '').replace(/^\uFEFF/, ''));
+    const entries = parsed?.entries && typeof parsed.entries === 'object' ? parsed.entries : {};
+    for (const [rawZip, entry] of Object.entries(entries)) {
+      const zip = normalizeWeatherZipValue(rawZip);
+      const fetchedAt = Number(entry?.fetchedAt || 0);
+      if (!zip || !Number.isFinite(fetchedAt) || !entry?.payload) continue;
+      weatherForecastCache.set(zip, { fetchedAt, payload: entry.payload });
+    }
+  } catch {
+    weatherForecastCache.clear();
+  }
+}
+
+function writeWeatherForecastCacheFile() {
+  try {
+    const now = Date.now();
+    const maxAgeMs = Math.max(weatherForecastStaleTtlMs, weatherForecastCacheTtlMs);
+    const entries = {};
+    for (const [zip, entry] of weatherForecastCache.entries()) {
+      if (maxAgeMs > 0 && now - Number(entry.fetchedAt || 0) > maxAgeMs) continue;
+      entries[zip] = entry;
+    }
+    mkdirSync(dashboardConfigDir, { recursive: true });
+    writeFileSync(weatherForecastCachePath, `${JSON.stringify({ entries }, null, 2)}\n`, 'utf8');
+  } catch (error) {
+    console.warn(`Unable to write weather forecast cache: ${String(error?.message || error)}`);
+  }
+}
+
+function weatherPayloadFromCacheEntry(entry, cacheStatus, stale = false, warning = '') {
+  return {
+    ...entry.payload,
+    cachedAt: new Date(Number(entry.fetchedAt || Date.now())).toISOString(),
+    cacheStatus,
+    stale,
+    ...(warning ? { warning } : {}),
+  };
+}
+
+async function getWeatherForecastCached(zip, bypass = false) {
+  ensureWeatherForecastCacheLoaded();
+  const cached = weatherForecastCache.get(zip);
+  const now = Date.now();
+  const freshTtlMs = Math.max(0, Number(weatherForecastCacheTtlMs) || 0);
+  const staleTtlMs = Math.max(freshTtlMs, Number(weatherForecastStaleTtlMs) || 0);
+
+  if (!bypass && cached && freshTtlMs > 0 && now - Number(cached.fetchedAt || 0) <= freshTtlMs) {
+    return weatherPayloadFromCacheEntry(cached, 'HIT', false);
+  }
+
+  if (!bypass && weatherForecastInFlight.has(zip)) {
+    return weatherForecastInFlight.get(zip);
+  }
+
+  const pending = (async () => {
+    try {
+      const payload = await fetchWeatherForecastLive(zip);
+      const entry = { payload, fetchedAt: Date.now() };
+      weatherForecastCache.set(zip, entry);
+      writeWeatherForecastCacheFile();
+      return weatherPayloadFromCacheEntry(entry, cached ? 'REFRESH' : 'MISS', false);
+    } catch (error) {
+      if (cached && staleTtlMs > 0 && now - Number(cached.fetchedAt || 0) <= staleTtlMs) {
+        return weatherPayloadFromCacheEntry(cached, 'STALE', true, String(error?.message || error));
+      }
+      throw error;
+    }
+  })();
+
+  if (!bypass) weatherForecastInFlight.set(zip, pending);
+  try {
+    return await pending;
+  } finally {
+    if (!bypass) weatherForecastInFlight.delete(zip);
+  }
+}
+
 async function getLiveDistanceEstimate(params = {}) {
   const ticketId = String(params.ticketId || '').trim();
   const requestCoords = extractCoordsFromRow(
@@ -2578,6 +3033,11 @@ async function routeJson(req, res, url, pathname) {
         routeCacheTtlMs: Math.max(0, Math.floor(mapboxRouteCacheTtlMs)),
         addressCacheTtlMs: Math.max(0, Math.floor(mapboxAddressCacheTtlMs)),
         fallbackToHaversine: mapboxDistanceFallbackToHaversine,
+      },
+      weather: {
+        timeoutMs: Math.max(1000, Math.floor(Number(weatherTimeoutMs) || 0)),
+        forecastCacheTtlMs: Math.max(0, Math.floor(Number(weatherForecastCacheTtlMs) || 0)),
+        forecastStaleTtlMs: Math.max(0, Math.floor(Number(weatherForecastStaleTtlMs) || 0)),
       }
     });
   }
@@ -2841,6 +3301,23 @@ async function routeJson(req, res, url, pathname) {
       return sendJson(res, 502, {
         error: String(error?.message || error),
         endpoint: 'mapbox-static-map-base',
+      });
+    }
+  }
+
+  if (pathname === '/api/workflow/weather/forecast') {
+    const zip = normalizeWeatherZipValue(resolveParam(url, '', ['zip', 'postalCode', 'weatherZip'], '15212'));
+    try {
+      const payload = await getWeatherForecastCached(zip, isCacheBypassRequested(url));
+      return sendJson(res, 200, payload, {
+        'Cache-Control': 'no-store',
+        'X-Weather-Cache': String(payload.cacheStatus || 'UNKNOWN'),
+      });
+    } catch (error) {
+      return sendJson(res, 502, {
+        error: String(error?.message || error),
+        endpoint: 'weather-forecast',
+        zip,
       });
     }
   }
@@ -3137,6 +3614,11 @@ async function routeJson(req, res, url, pathname) {
         addressCacheTtlMs: Math.max(0, Math.floor(mapboxAddressCacheTtlMs)),
         fallbackToHaversine: mapboxDistanceFallbackToHaversine,
       },
+      weather: {
+        timeoutMs: Math.max(1000, Math.floor(Number(weatherTimeoutMs) || 0)),
+        forecastCacheTtlMs: Math.max(0, Math.floor(Number(weatherForecastCacheTtlMs) || 0)),
+        forecastStaleTtlMs: Math.max(0, Math.floor(Number(weatherForecastStaleTtlMs) || 0)),
+      },
       jsonEndpoints: [
         '/health',
         '/api/workflow/focus',
@@ -3148,6 +3630,7 @@ async function routeJson(req, res, url, pathname) {
         '/api/workflow/ticket-status/:ticketId',
         '/api/workflow/order-details/:ticketId',
         '/api/workflow/distance/estimate',
+        '/api/workflow/weather/forecast?zip=15212',
         '/api/workflow/order-lifecycle/:ticketId',
         '/api/workflow/order-lifecycle/by-service-msg/:serviceMsgNum',
         '/api/workflow/delivery/zone-summary',

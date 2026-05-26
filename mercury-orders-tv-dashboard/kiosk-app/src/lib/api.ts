@@ -62,7 +62,7 @@ export function setWorkflowBaseUrlOverride(raw: string): void {
   runtimeBaseUrlOverride = normalizeBaseUrl(raw);
 }
 
-function buildRequestUrl(path: string): string {
+export function buildRequestUrl(path: string): string {
   const baseUrl = effectiveBaseUrl();
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   if (!baseUrl) return normalizedPath;
