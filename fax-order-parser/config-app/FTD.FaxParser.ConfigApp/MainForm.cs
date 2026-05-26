@@ -41,10 +41,17 @@ internal sealed class MainForm : Form
   private ComboBox       _fileFormatCombo      = null!;
   private TextBox        _processedSubfolderBox = null!;
 
+  // ── Local relay controls ──────────────────────────────────────────────────────
+
+  private CheckBox       _relayEnabledCheck    = null!;
+  private NumericUpDown  _relaySmtpPortSpinner = null!;
+  private NumericUpDown  _relayPop3PortSpinner = null!;
+
   // ── Email tab controls ────────────────────────────────────────────────────────
 
   private TextBox        _senderAddressBox     = null!;
   private TextBox        _senderPasswordBox    = null!;
+  private TextBox        _smtpUsernameBox      = null!;
   private TextBox        _recipientAddressBox  = null!;
   private TextBox        _subjectLineBox       = null!;
   private TextBox        _smtpHostBox          = null!;
@@ -346,7 +353,7 @@ internal sealed class MainForm : Form
 
     // File format
     _fileFormatCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
-    _fileFormatCombo.Items.AddRange(new object[] { "PDF", "TIF / TIFF" });
+    _fileFormatCombo.Items.AddRange(new object[] { "PDF", "JPG / TIFF" });
     _fileFormatCombo.SelectedIndex = 0;
     panel.Controls.Add(FieldLabel("Incoming File Format"));
     panel.Controls.Add(_fileFormatCombo);
@@ -356,6 +363,66 @@ internal sealed class MainForm : Form
     panel.Controls.Add(FieldLabel("Processed Subfolder Name"));
     panel.Controls.Add(_processedSubfolderBox);
     panel.Controls.Add(HintLabel("Processed files are moved here (relative to the watch folder)."));
+
+    // Local relay group
+    var relayGroup = new GroupBox
+    {
+      Text   = "Built-in Local Mail Relay  (replaces hMailServer)",
+      Width  = 600,
+      Height = 130,
+      Margin = new Padding(0, 14, 0, 0),
+    };
+
+    _relayEnabledCheck = new CheckBox
+    {
+      Text     = "Enable built-in SMTP / POP3 relay",
+      AutoSize = true,
+      Location = new Point(10, 22),
+      Font     = new Font("Segoe UI", 9f, FontStyle.Bold),
+    };
+
+    _relaySmtpPortSpinner = new NumericUpDown
+    {
+      Minimum  = 1, Maximum = 65535, Value = 2525,
+      Width    = 75, Location = new Point(160, 50),
+    };
+    _relayPop3PortSpinner = new NumericUpDown
+    {
+      Minimum  = 1, Maximum = 65535, Value = 1110,
+      Width    = 75, Location = new Point(310, 50),
+    };
+
+    var smtpPortLabel = new Label { Text = "SMTP port:",  AutoSize = true, Location = new Point(10,  54) };
+    var pop3PortLabel = new Label { Text = "POP3 port:",  AutoSize = true, Location = new Point(164, 54) };
+
+    var relayHint = new Label
+    {
+      Text      = "When enabled: set email SMTP host → 127.0.0.1 and port → SMTP port above.\r\n" +
+                  "In Mercury Administration → WOI: set POP3 host → 127.0.0.1 and port → POP3 port above.",
+      AutoSize  = false,
+      Width     = 570,
+      Height    = 34,
+      Location  = new Point(10, 88),
+      Font      = new Font("Segoe UI", 7.5f),
+      ForeColor = Color.Gray,
+    };
+
+    relayGroup.Controls.AddRange(new Control[]
+    {
+      _relayEnabledCheck,
+      smtpPortLabel, _relaySmtpPortSpinner,
+      pop3PortLabel, _relayPop3PortSpinner,
+      relayHint,
+    });
+
+    _relayEnabledCheck.CheckedChanged += (_, _) =>
+    {
+      var on = _relayEnabledCheck.Checked;
+      _relaySmtpPortSpinner.Enabled = on;
+      _relayPop3PortSpinner.Enabled = on;
+    };
+
+    panel.Controls.Add(relayGroup);
 
     page.Controls.Add(panel);
     return page;
@@ -378,11 +445,16 @@ internal sealed class MainForm : Form
 
     _senderAddressBox    = new TextBox { Width = 420 };
     _senderPasswordBox   = new TextBox { Width = 320, UseSystemPasswordChar = true };
+    _smtpUsernameBox     = new TextBox { Width = 420 };
     _recipientAddressBox = new TextBox { Width = 420 };
     _subjectLineBox      = new TextBox { Width = 360 };
 
-    panel.Controls.Add(FieldLabel("Sender Email Address"));
+    panel.Controls.Add(FieldLabel("Sender Email Address (From)"));
     panel.Controls.Add(_senderAddressBox);
+
+    panel.Controls.Add(FieldLabel("SMTP Username (if different from sender)"));
+    panel.Controls.Add(_smtpUsernameBox);
+    panel.Controls.Add(HintLabel("For Brevo: use the login shown on the SMTP & API page (e.g. ac294d001@smtp-brevo.com). Leave blank to use Sender Address."));
 
     panel.Controls.Add(FieldLabel("Sender Password / App Password"));
     panel.Controls.Add(_senderPasswordBox);
@@ -500,7 +572,7 @@ internal sealed class MainForm : Form
     };
     pendingHeader.Layout += (_, _) =>
       _processSelectedBtn.Location = new Point(pendingHeader.ClientSize.Width - _processSelectedBtn.Width - 4, 4);
-    _processSelectedBtn.Click += (_, _) => ProcessSelectedFiles();
+    _processSelectedBtn.Click += async (_, _) => { _processSelectedBtn.Enabled = false; try { await ProcessSelectedFilesAsync(); } finally { _processSelectedBtn.Enabled = true; } };
 
     var previewBtn = new Button
     {
@@ -512,7 +584,7 @@ internal sealed class MainForm : Form
     };
     pendingHeader.Layout += (_, _) =>
       previewBtn.Location = new Point(pendingHeader.ClientSize.Width - _processSelectedBtn.Width - previewBtn.Width - 14, 4);
-    previewBtn.Click += (_, _) => PreviewFileFields();
+    previewBtn.Click += async (_, _) => { previewBtn.Enabled = false; try { await PreviewFileFieldsAsync(); } finally { previewBtn.Enabled = true; } };
 
     var scanBtn = new Button
     {
@@ -627,6 +699,13 @@ internal sealed class MainForm : Form
       new DataGridViewTextBoxColumn { HeaderText = "Note",      Name = "Note",      FillWeight = 19 },
     });
 
+    _logGrid.CellDoubleClick += (_, e) =>
+    {
+      if (e.RowIndex < 0 || e.RowIndex >= _logGrid.Rows.Count) return;
+      if (_logGrid.Rows[e.RowIndex].Tag is OrderLogEntry entry)
+        ShowOrderDetailDialog(entry);
+    };
+
     // AddRange z-order: items dock in reverse — grid fills, toolbar docks top, separator docks top, pendingPanel docks top
     page.Controls.AddRange(new Control[] { _logGrid, toolbar, separator, pendingPanel });
     return page;
@@ -736,6 +815,7 @@ internal sealed class MainForm : Form
 
     _senderAddressBox.Text    = cfg.Email.SenderAddress;
     _senderPasswordBox.Text   = cfg.Email.SenderPassword;
+    _smtpUsernameBox.Text     = cfg.Email.SmtpUsername;
     _recipientAddressBox.Text = cfg.Email.RecipientAddress;
     _subjectLineBox.Text      = cfg.Email.SubjectLine;
     _smtpHostBox.Text         = cfg.Email.SmtpHost;
@@ -744,6 +824,12 @@ internal sealed class MainForm : Form
     _encryptionPasswordBox.Text = cfg.Email.EncryptionPassword;
     var algoIndex = _encryptionAlgorithmCombo.Items.IndexOf(cfg.Email.EncryptionAlgorithm);
     _encryptionAlgorithmCombo.SelectedIndex = algoIndex >= 0 ? algoIndex : 0;
+
+    _relayEnabledCheck.Checked    = cfg.LocalRelay.Enabled;
+    _relaySmtpPortSpinner.Value   = Math.Clamp(cfg.LocalRelay.SmtpPort, 1, 65535);
+    _relayPop3PortSpinner.Value   = Math.Clamp(cfg.LocalRelay.Pop3Port,  1, 65535);
+    _relaySmtpPortSpinner.Enabled = cfg.LocalRelay.Enabled;
+    _relayPop3PortSpinner.Enabled = cfg.LocalRelay.Enabled;
   }
 
   private void SaveConfig()
@@ -758,12 +844,19 @@ internal sealed class MainForm : Form
       {
         SenderAddress    = _senderAddressBox.Text.Trim(),
         SenderPassword   = _senderPasswordBox.Text,
+        SmtpUsername     = _smtpUsernameBox.Text.Trim(),
         RecipientAddress = _recipientAddressBox.Text.Trim(),
         SubjectLine      = _subjectLineBox.Text.Trim(),
         SmtpHost         = _smtpHostBox.Text.Trim(),
         SmtpPort         = (int)_smtpPortSpinner.Value,
         EncryptionPassword  = _encryptionPasswordBox.Text,
         EncryptionAlgorithm = _encryptionAlgorithmCombo.SelectedItem?.ToString() ?? "TripleDES",
+      },
+      LocalRelay = new LocalRelayConfig
+      {
+        Enabled  = _relayEnabledCheck.Checked,
+        SmtpPort = (int)_relaySmtpPortSpinner.Value,
+        Pop3Port = (int)_relayPop3PortSpinner.Value,
       },
     };
 
@@ -807,6 +900,7 @@ internal sealed class MainForm : Form
       var emailCell = _logGrid.Rows[rowIndex].Cells["Email"];
       emailCell.Style.ForeColor = e.EmailSent ? Color.ForestGreen : Color.Firebrick;
       emailCell.Style.Font      = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+      _logGrid.Rows[rowIndex].Tag = e;
     }
   }
 
@@ -997,7 +1091,7 @@ internal sealed class MainForm : Form
     }
 
     var patterns = cfg.FileFormat == "TIF"
-      ? new[] { "*.tif", "*.tiff" }
+      ? new[] { "*.tif", "*.tiff", "*.jpg", "*.jpeg" }
       : new[] { "*.pdf" };
 
     var processedPath = Path.Combine(folder, processed) + Path.DirectorySeparatorChar;
@@ -1025,7 +1119,782 @@ internal sealed class MainForm : Form
         : $"{files.Count} file{(files.Count != 1 ? "s" : "")} waiting";
   }
 
-  private void PreviewFileFields()
+  // ── Field definitions for visual editor ──────────────────────────────────────
+
+  private static readonly (string Key, string Label, Color Color)[] FieldDefs =
+  [
+    ("customerName",       "Bill Name",          Color.FromArgb(220, 50,  50)),
+    ("customerPhone",      "Bill Phone",         Color.FromArgb(230, 120, 30)),
+    ("customerAddress",    "Bill Address",       Color.FromArgb(180, 160, 0)),
+    ("orderNumber",        "Order #",            Color.FromArgb(40,  160, 40)),
+    ("productItemNumber",  "Product Code",       Color.FromArgb(0,   160, 100)),
+    ("productPrice",       "Product Price",      Color.FromArgb(0,   120, 210)),
+    ("deliveryCharge",     "Delivery Charge",    Color.FromArgb(80,  80,  210)),
+    ("totalPayable",       "Total Amount",       Color.FromArgb(140, 60,  200)),
+    ("deliveryDate",       "Delivery Date",      Color.FromArgb(200, 60,  140)),
+    ("forThePassingOf",    "For the Passing Of", Color.FromArgb(180, 100, 0)),
+    ("cardMessage",        "Card Message",       Color.FromArgb(0,   170, 170)),
+    ("productDescription", "Product Desc.",      Color.FromArgb(100, 100, 100)),
+  ];
+
+  // ── Image bounds panel ────────────────────────────────────────────────────────
+
+  private sealed class ImageBoundsPanel : Panel
+  {
+    private Image? _image;
+    private int _imgW, _imgH;
+
+    private readonly Dictionary<string, PointF[]>   _boxes  = new();
+    private readonly Dictionary<string, Color>      _colors = new();
+    private readonly List<string>                   _order  = new();
+    private readonly Dictionary<string, string>     _labels = new();
+
+    public string? SelectedField { get; set; }
+    public event EventHandler? BoxesChanged;
+    public event EventHandler? ZoomChanged;
+    public event EventHandler? HistoryChanged;
+    public event EventHandler? SelectionChanged;
+
+    public enum Tool { Select, Pan }
+    public Tool ActiveTool { get; set; } = Tool.Select;
+    public float ZoomLevel  => _zoom;
+    public bool  CanUndo    => _undoStack.Count > 0;
+    public bool  CanRedo    => _redoStack.Count > 0;
+
+    private enum DragHandle { None, Body, Drawing, N, NE, E, SE, S, SW, W, NW }
+    private DragHandle _drag       = DragHandle.None;
+    private Point      _dragPt;
+    private PointF[]   _dragPoly   = [];
+    private RectangleF _dragBounds;
+
+    private float _zoom = 1f;
+    private float _panX, _panY;
+    private bool  _isPanning;
+    private Point _panStart;
+    private float _panStartX, _panStartY;
+
+    private readonly Stack<Dictionary<string, PointF[]>> _undoStack = new();
+    private readonly Stack<Dictionary<string, PointF[]>> _redoStack = new();
+
+    private const int HR         = 5;   // handle radius in panel pixels
+    private const int MaxHistory = 50;
+
+    public ImageBoundsPanel()
+    {
+      DoubleBuffered = true;
+      BackColor      = Color.FromArgb(45, 45, 45);
+      TabStop        = true;
+      MouseEnter    += (_, _) => { if (!Focused) Focus(); };
+    }
+
+    public void LoadImage(string filePath)
+    {
+      try
+      {
+        var img = Image.FromFile(filePath);
+        // For multi-frame TIFF, select first frame
+        if (img.FrameDimensionsList.Length > 0)
+        {
+          var fd = new System.Drawing.Imaging.FrameDimension(img.FrameDimensionsList[0]);
+          img.SelectActiveFrame(fd, 0);
+        }
+        _image?.Dispose();
+        _image = img;
+        _imgW  = img.Width;
+        _imgH  = img.Height;
+        Invalidate();
+      }
+      catch { /* image format not supported */ }
+    }
+
+    public void SetBoxes(Dictionary<string, PointF[]> boxes, Dictionary<string, Color> colors, List<string> order, Dictionary<string, string>? labels = null)
+    {
+      _boxes.Clear();  foreach (var kv in boxes)  _boxes[kv.Key]  = kv.Value;
+      _colors.Clear(); foreach (var kv in colors) _colors[kv.Key] = kv.Value;
+      _order.Clear();  _order.AddRange(order);
+      _labels.Clear(); if (labels != null) foreach (var kv in labels) _labels[kv.Key] = kv.Value;
+      Invalidate();
+    }
+
+    public Dictionary<string, PointF[]> GetBoxes() =>
+      _boxes.ToDictionary(kv => kv.Key, kv => kv.Value.ToArray());
+
+    // ── Zoom / pan ─────────────────────────────────────────────────────────────
+
+    private void ZoomAt(float factor, Point anchor)
+    {
+      if (_image == null) return;
+      var imgPt = ToImg(anchor);
+      _zoom = Math.Clamp(_zoom * factor, 0.05f, 32f);
+      float scale = GetBaseScale() * _zoom;
+      _panX = anchor.X - (ClientSize.Width  - _imgW * scale) / 2f - imgPt.X * scale;
+      _panY = anchor.Y - (ClientSize.Height - _imgH * scale) / 2f - imgPt.Y * scale;
+      ZoomChanged?.Invoke(this, EventArgs.Empty);
+      Invalidate();
+    }
+
+    public void ZoomIn()    => ZoomAt(1.25f, new Point(ClientSize.Width / 2, ClientSize.Height / 2));
+    public void ZoomOut()   => ZoomAt(0.80f, new Point(ClientSize.Width / 2, ClientSize.Height / 2));
+    public void ResetZoom() { _zoom = 1f; _panX = 0f; _panY = 0f; ZoomChanged?.Invoke(this, EventArgs.Empty); Invalidate(); }
+
+    // ── Undo / redo ────────────────────────────────────────────────────────────
+
+    public bool HasBox(string key) => _boxes.ContainsKey(key);
+
+    public void ClearSelection()
+    {
+      SelectedField = null;
+      SelectionChanged?.Invoke(this, EventArgs.Empty);
+      Invalidate();
+    }
+
+    private void PushUndoState()
+    {
+      if (_undoStack.Count >= MaxHistory)
+      {
+        var arr = _undoStack.ToArray();
+        _undoStack.Clear();
+        for (int i = arr.Length - 2; i >= 0; i--) _undoStack.Push(arr[i]);
+      }
+      _undoStack.Push(_boxes.ToDictionary(kv => kv.Key, kv => kv.Value.ToArray()));
+      _redoStack.Clear();
+      HistoryChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void Undo()
+    {
+      if (_undoStack.Count == 0) return;
+      _redoStack.Push(_boxes.ToDictionary(kv => kv.Key, kv => kv.Value.ToArray()));
+      var prev = _undoStack.Pop();
+      _boxes.Clear(); foreach (var kv in prev) _boxes[kv.Key] = kv.Value;
+      HistoryChanged?.Invoke(this, EventArgs.Empty);
+      BoxesChanged?.Invoke(this, EventArgs.Empty);
+      Invalidate();
+    }
+
+    public void Redo()
+    {
+      if (_redoStack.Count == 0) return;
+      _undoStack.Push(_boxes.ToDictionary(kv => kv.Key, kv => kv.Value.ToArray()));
+      var next = _redoStack.Pop();
+      _boxes.Clear(); foreach (var kv in next) _boxes[kv.Key] = kv.Value;
+      HistoryChanged?.Invoke(this, EventArgs.Empty);
+      BoxesChanged?.Invoke(this, EventArgs.Empty);
+      Invalidate();
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+      if (e.Control && !e.Shift && e.KeyCode == Keys.Z) { Undo(); e.Handled = true; }
+      else if (e.Control && (e.KeyCode == Keys.Y || (e.Shift && e.KeyCode == Keys.Z))) { Redo(); e.Handled = true; }
+      base.OnKeyDown(e);
+    }
+
+    protected override bool IsInputKey(Keys keyData)
+    {
+      return (keyData & ~Keys.Modifiers) is Keys.Z or Keys.Y || base.IsInputKey(keyData);
+    }
+
+    // ── Coordinate transforms ──────────────────────────────────────────────────
+
+    private float GetBaseScale() =>
+      _image == null ? 1f :
+      Math.Min((float)ClientSize.Width / _imgW, (float)ClientSize.Height / _imgH);
+
+    private RectangleF DispRect()
+    {
+      if (_image == null) return RectangleF.Empty;
+      float s = GetBaseScale() * _zoom;
+      float w = _imgW * s, h = _imgH * s;
+      return new RectangleF((ClientSize.Width - w) / 2f + _panX, (ClientSize.Height - h) / 2f + _panY, w, h);
+    }
+
+    private PointF[] ToDispPoly(PointF[] pts)
+    {
+      var d = DispRect(); if (d.IsEmpty) return pts;
+      float sx = d.Width / _imgW, sy = d.Height / _imgH;
+      var out2 = new PointF[pts.Length];
+      for (int i = 0; i < pts.Length; i++)
+        out2[i] = new PointF(d.X + pts[i].X * sx, d.Y + pts[i].Y * sy);
+      return out2;
+    }
+
+    private PointF ToImg(Point p)
+    {
+      var d = DispRect(); if (d.IsEmpty) return PointF.Empty;
+      return new PointF((p.X - d.X) * _imgW / d.Width, (p.Y - d.Y) * _imgH / d.Height);
+    }
+
+    private PointF[] MakeImgPoly(PointF a, PointF b)
+    {
+      float x = Math.Max(0, Math.Min(a.X, b.X));
+      float y = Math.Max(0, Math.Min(a.Y, b.Y));
+      float w = Math.Max(4, Math.Abs(b.X - a.X));
+      float h = Math.Max(4, Math.Abs(b.Y - a.Y));
+      w = Math.Min(w, _imgW - x); h = Math.Min(h, _imgH - y);
+      return [new(x, y), new(x + w, y), new(x + w, y + h), new(x, y + h)];
+    }
+
+    // ── Polygon helpers ────────────────────────────────────────────────────────
+
+    internal static RectangleF PolygonBounds(PointF[] pts)
+    {
+      if (pts.Length == 0) return RectangleF.Empty;
+      float x0 = pts[0].X, y0 = pts[0].Y, x1 = pts[0].X, y1 = pts[0].Y;
+      foreach (var p in pts) { x0 = Math.Min(x0, p.X); y0 = Math.Min(y0, p.Y); x1 = Math.Max(x1, p.X); y1 = Math.Max(y1, p.Y); }
+      return RectangleF.FromLTRB(x0, y0, x1, y1);
+    }
+
+    private static bool PolygonContains(PointF[] poly, PointF pt)
+    {
+      bool inside = false;
+      int n = poly.Length;
+      for (int i = 0, j = n - 1; i < n; j = i++)
+      {
+        var a = poly[i]; var b = poly[j];
+        if ((a.Y > pt.Y) != (b.Y > pt.Y) &&
+            pt.X < (b.X - a.X) * (pt.Y - a.Y) / (b.Y - a.Y) + a.X)
+          inside = !inside;
+      }
+      return inside;
+    }
+
+    private static PointF[] TranslatePoly(PointF[] pts, float dx, float dy)
+    {
+      var out2 = new PointF[pts.Length];
+      for (int i = 0; i < pts.Length; i++) out2[i] = new PointF(pts[i].X + dx, pts[i].Y + dy);
+      return out2;
+    }
+
+    private static PointF[] ScalePoly(PointF[] pts, RectangleF from, RectangleF to)
+    {
+      if (from.Width < 1 || from.Height < 1) return (PointF[])pts.Clone();
+      var out2 = new PointF[pts.Length];
+      for (int i = 0; i < pts.Length; i++)
+        out2[i] = new PointF(
+          to.X + (pts[i].X - from.X) / from.Width  * to.Width,
+          to.Y + (pts[i].Y - from.Y) / from.Height * to.Height);
+      return out2;
+    }
+
+    // ── Hit testing ────────────────────────────────────────────────────────────
+
+    private static PointF[] Handles(RectangleF r) =>
+    [
+      new(r.Left + r.Width / 2, r.Top),    // N
+      new(r.Right, r.Top),                  // NE
+      new(r.Right, r.Top + r.Height / 2),  // E
+      new(r.Right, r.Bottom),              // SE
+      new(r.Left + r.Width / 2, r.Bottom), // S
+      new(r.Left, r.Bottom),              // SW
+      new(r.Left, r.Top + r.Height / 2),  // W
+      new(r.Left, r.Top),                  // NW
+    ];
+
+    private static readonly DragHandle[] HandleMap =
+      [DragHandle.N, DragHandle.NE, DragHandle.E, DragHandle.SE, DragHandle.S, DragHandle.SW, DragHandle.W, DragHandle.NW];
+
+    private (string? field, DragHandle h) HitTest(Point p)
+    {
+      var pt = new PointF(p.X, p.Y);
+      for (int fi = _order.Count - 1; fi >= 0; fi--)
+      {
+        var f = _order[fi];
+        if (!_boxes.TryGetValue(f, out var imgPts) || imgPts.Length == 0) continue;
+        var disp = ToDispPoly(imgPts);
+        var db   = PolygonBounds(disp); if (db.IsEmpty) continue;
+
+        var hpts = Handles(db);
+        for (int hi = 0; hi < hpts.Length; hi++)
+          if (Math.Abs(p.X - hpts[hi].X) <= HR + 2 && Math.Abs(p.Y - hpts[hi].Y) <= HR + 2)
+            return (f, HandleMap[hi]);
+
+        if (disp.Length >= 3 ? PolygonContains(disp, pt) : db.Contains(pt))
+          return (f, DragHandle.Body);
+      }
+      return (null, DragHandle.None);
+    }
+
+    // ── Mouse ──────────────────────────────────────────────────────────────────
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+      if (e.Button != MouseButtons.Left || _image == null) { base.OnMouseDown(e); return; }
+
+      if (ActiveTool == Tool.Pan)
+      {
+        _isPanning = true;
+        _panStart  = e.Location;
+        _panStartX = _panX;
+        _panStartY = _panY;
+        Cursor     = Cursors.SizeAll;
+        base.OnMouseDown(e);
+        return;
+      }
+
+      var (field, h) = HitTest(e.Location);
+      _dragPt = e.Location;
+      if (h != DragHandle.None)
+      {
+        PushUndoState();
+        SelectedField = field;
+        _drag       = h;
+        _dragPoly   = _boxes.TryGetValue(field!, out var dpts) ? dpts.ToArray() : [];
+        _dragBounds = PolygonBounds(_dragPoly);
+      }
+      else if (SelectedField != null)
+      {
+        PushUndoState();
+        _drag     = DragHandle.Drawing;
+        _dragPoly = [];
+      }
+      Invalidate();
+      base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+      if (ActiveTool == Tool.Pan)
+      {
+        Cursor = _isPanning ? Cursors.SizeAll : Cursors.Hand;
+        if (_isPanning)
+        {
+          _panX = _panStartX + (e.X - _panStart.X);
+          _panY = _panStartY + (e.Y - _panStart.Y);
+          Invalidate();
+        }
+        base.OnMouseMove(e);
+        return;
+      }
+
+      if (_drag == DragHandle.None)
+      {
+        Cursor = HitTest(e.Location).h switch
+        {
+          DragHandle.Body              => Cursors.SizeAll,
+          DragHandle.N or DragHandle.S    => Cursors.SizeNS,
+          DragHandle.E or DragHandle.W    => Cursors.SizeWE,
+          DragHandle.NE or DragHandle.SW  => Cursors.SizeNESW,
+          DragHandle.NW or DragHandle.SE  => Cursors.SizeNWSE,
+          _                       => Cursors.Cross,
+        };
+        base.OnMouseMove(e); return;
+      }
+
+      var d   = DispRect();
+      float dxi = (e.X - _dragPt.X) * _imgW / d.Width;
+      float dyi = (e.Y - _dragPt.Y) * _imgH / d.Height;
+
+      PointF[]? nb = null;
+      if (_drag == DragHandle.Drawing)
+      {
+        nb = MakeImgPoly(ToImg(_dragPt), ToImg(e.Location));
+      }
+      else if (_drag == DragHandle.Body)
+      {
+        var bnd = _dragBounds;
+        float cx = Math.Max(-bnd.X, Math.Min(_imgW - bnd.Right,  dxi));
+        float cy = Math.Max(-bnd.Y, Math.Min(_imgH - bnd.Bottom, dyi));
+        nb = TranslatePoly(_dragPoly, cx, cy);
+      }
+      else
+      {
+        float x = _dragBounds.Left, y = _dragBounds.Top, r = _dragBounds.Right, b = _dragBounds.Bottom;
+        if (_drag is DragHandle.N  or DragHandle.NW or DragHandle.NE) y = Math.Min(b - 4, y + dyi);
+        if (_drag is DragHandle.S  or DragHandle.SW or DragHandle.SE) b = Math.Max(y + 4, b + dyi);
+        if (_drag is DragHandle.W  or DragHandle.NW or DragHandle.SW) x = Math.Min(r - 4, x + dxi);
+        if (_drag is DragHandle.E  or DragHandle.NE or DragHandle.SE) r = Math.Max(x + 4, r + dxi);
+        x = Math.Max(0, x); y = Math.Max(0, y);
+        r = Math.Min(_imgW, r); b = Math.Min(_imgH, b);
+        nb = ScalePoly(_dragPoly, _dragBounds, RectangleF.FromLTRB(x, y, r, b));
+      }
+
+      if (SelectedField != null && nb != null)
+      { _boxes[SelectedField] = nb; Invalidate(); }
+
+      base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+      if (_isPanning) { _isPanning = false; Cursor = Cursors.Hand; }
+      if (_drag != DragHandle.None) { _drag = DragHandle.None; BoxesChanged?.Invoke(this, EventArgs.Empty); }
+      base.OnMouseUp(e);
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+      ZoomAt(e.Delta > 0 ? 1.2f : 1f / 1.2f, e.Location);
+      base.OnMouseWheel(e);
+    }
+
+    // ── Paint ──────────────────────────────────────────────────────────────────
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+      base.OnPaint(e);
+      var g = e.Graphics;
+
+      if (_image == null)
+      {
+        using var sb = new SolidBrush(Color.Gray);
+        g.DrawString("No image — PDF preview not supported; use TIF or JPG.", Font, sb, new PointF(10, 10));
+        return;
+      }
+
+      g.DrawImage(_image, DispRect());
+
+      foreach (var field in _order)
+      {
+        if (!_boxes.TryGetValue(field, out var imgPts) || imgPts.Length == 0) continue;
+        var disp = ToDispPoly(imgPts);
+        var db   = PolygonBounds(disp); if (db.IsEmpty) continue;
+        bool sel = field == SelectedField;
+        var col = _colors.TryGetValue(field, out var c) ? c : Color.Red;
+
+        using (var fb = new SolidBrush(Color.FromArgb(sel ? 55 : 25, col)))
+        {
+          if (disp.Length >= 3) g.FillPolygon(fb, disp);
+          else g.FillRectangle(fb, db);
+        }
+
+        using var pen = new Pen(col, sel ? 2.5f : 1.5f);
+        if (!sel) pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+        if (disp.Length >= 3) g.DrawPolygon(pen, disp);
+        else g.DrawRectangle(pen, db.X, db.Y, db.Width, db.Height);
+
+        if (sel)
+          foreach (var hp in Handles(db))
+          {
+            var hr = new RectangleF(hp.X - HR, hp.Y - HR, HR * 2, HR * 2);
+            using var hf = new SolidBrush(Color.White); g.FillEllipse(hf, hr);
+            using var hb = new Pen(col, 1.5f);          g.DrawEllipse(hb, hr);
+          }
+
+        var lbl  = _labels.TryGetValue(field, out var lb) ? lb : field;
+        var lsz  = g.MeasureString(lbl, Font);
+        float lx = db.X + 2, ly = db.Y - lsz.Height - 1;
+        if (ly < 0) ly = db.Y + 2;
+        using var bg = new SolidBrush(Color.FromArgb(170, Color.Black));
+        g.FillRectangle(bg, lx - 1, ly - 1, lsz.Width + 2, lsz.Height + 2);
+        using var lc = new SolidBrush(col);
+        g.DrawString(lbl, Font, lc, lx, ly);
+      }
+    }
+  }
+
+  // ── Visual fields tab builder ─────────────────────────────────────────────────
+
+  private TabPage BuildVisualFieldsTab(
+    string imagePath,
+    Dictionary<string, PointF[]> detectedBounds,
+    Dictionary<string, FieldBoundsConfig> savedBounds)
+  {
+    var tab = new TabPage("Visual Fields");
+
+    var imgPanel = new ImageBoundsPanel { Dock = DockStyle.Fill };
+
+    // Try loading the image (TIF / JPG supported; PDF will show the fallback message)
+    var ext = System.IO.Path.GetExtension(imagePath).ToLowerInvariant();
+    if (ext is ".tif" or ".tiff" or ".jpg" or ".jpeg" or ".png")
+      imgPanel.LoadImage(imagePath);
+
+    // Build initial box set: saved bounds take priority over detected
+    var colors = new Dictionary<string, Color>();
+    var order  = new List<string>();
+    var boxes  = new Dictionary<string, PointF[]>();
+    int? imgW = null, imgH = null;
+
+    // Get image dims for normalised → pixel conversion
+    try
+    {
+      if (ext is ".tif" or ".tiff" or ".jpg" or ".jpeg" or ".png")
+        using (var tmp = Image.FromFile(imagePath)) { imgW = tmp.Width; imgH = tmp.Height; }
+    }
+    catch { /* ignore */ }
+
+    foreach (var (key, label, col) in FieldDefs)
+    {
+      colors[key] = col;
+      order.Add(key);
+
+      if (savedBounds.TryGetValue(key, out var sb) && imgW.HasValue && imgH.HasValue)
+      {
+        var pts = sb.GetPoints();
+        boxes[key] = pts.Select(p => new PointF((float)(p.X * imgW.Value), (float)(p.Y * imgH.Value))).ToArray();
+      }
+      else if (detectedBounds.TryGetValue(key, out var db))
+      {
+        boxes[key] = db;
+      }
+    }
+
+    var labels = FieldDefs.ToDictionary(fd => fd.Key, fd => fd.Label);
+    imgPanel.SetBoxes(boxes, colors, order, labels);
+
+    // Left sidebar: field selector
+    var sidebar = new Panel { Width = 180, Dock = DockStyle.Left, BackColor = Color.FromArgb(35, 35, 35) };
+
+    var fieldList = new ListBox
+    {
+      Dock            = DockStyle.Fill,
+      BackColor       = Color.FromArgb(35, 35, 35),
+      ForeColor       = Color.White,
+      BorderStyle     = BorderStyle.None,
+      DrawMode        = DrawMode.OwnerDrawFixed,
+      ItemHeight      = 22,
+      Font            = new Font("Segoe UI", 8.5f),
+      SelectionMode   = SelectionMode.One,
+    };
+    foreach (var (key, label, _) in FieldDefs) fieldList.Items.Add((key, label));
+
+    fieldList.DrawItem += (_, e) =>
+    {
+      if (e.Index < 0) return;
+      var (key, label) = ((string, string))fieldList.Items[e.Index];
+      var  col    = colors.TryGetValue(key, out var c) ? c : Color.Gray;
+      bool sel    = (e.State & DrawItemState.Selected) != 0;
+      bool mapped = imgPanel.HasBox(key);
+
+      var bgColor = sel    ? Color.FromArgb(55, 55, 55)
+                  : mapped ? Color.FromArgb(35, 35, 35)
+                  :          Color.FromArgb(52, 36, 16); // warm amber tint for unmapped
+
+      using var bg = new SolidBrush(bgColor);
+      e.Graphics.FillRectangle(bg, e.Bounds);
+
+      if (mapped)
+      {
+        using var dot = new SolidBrush(col);
+        e.Graphics.FillEllipse(dot, e.Bounds.Left + 6, e.Bounds.Top + 7, 8, 8);
+        using var txt = new SolidBrush(Color.White);
+        e.Graphics.DrawString(label, e.Font!, txt, e.Bounds.Left + 20, e.Bounds.Top + 4);
+      }
+      else
+      {
+        // Hollow dot + amber text + "!" prefix to indicate needs mapping
+        using var dotPen = new Pen(Color.FromArgb(255, 175, 50), 1.5f);
+        e.Graphics.DrawEllipse(dotPen, e.Bounds.Left + 6, e.Bounds.Top + 7, 8, 8);
+        using var txt = new SolidBrush(Color.FromArgb(255, 175, 50));
+        e.Graphics.DrawString($"! {label}", e.Font!, txt, e.Bounds.Left + 20, e.Bounds.Top + 4);
+      }
+    };
+
+    fieldList.SelectedIndexChanged += (_, _) =>
+    {
+      if (fieldList.SelectedItem is (string key, string))
+      {
+        imgPanel.SelectedField = key;
+        imgPanel.Invalidate();
+      }
+    };
+
+    imgPanel.BoxesChanged      += (_, _) => fieldList.Invalidate();
+    imgPanel.SelectionChanged  += (_, _) => fieldList.SelectedIndex = -1;
+
+    var saveBtn = new Button
+    {
+      Text      = "Save Field Bounds",
+      Dock      = DockStyle.Bottom,
+      Height    = 30,
+      FlatStyle = FlatStyle.System,
+      Font      = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+    };
+
+    saveBtn.Click += (_, _) =>
+    {
+      try
+      {
+        var currentBoxes = imgPanel.GetBoxes();
+        var cfg = AppConfig.Load(ConfigPath);
+        cfg.FieldBounds ??= new();
+
+        if (imgW.HasValue && imgH.HasValue)
+        {
+          foreach (var (key, pts) in currentBoxes)
+          {
+            if (pts.Length == 0) continue;
+            var b = ImageBoundsPanel.PolygonBounds(pts);
+            if (b.Width < 4 || b.Height < 4) continue;
+            cfg.FieldBounds[key] = new FieldBoundsConfig
+            {
+              Points = pts.Select(p => new PointConfig
+              {
+                X = Math.Round(p.X / imgW.Value, 5),
+                Y = Math.Round(p.Y / imgH.Value, 5),
+              }).ToList()
+            };
+          }
+          cfg.Save(ConfigPath);
+          MessageBox.Show("Field bounds saved.", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        else
+        {
+          MessageBox.Show("Cannot save — image dimensions unknown.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+      }
+      catch (Exception ex)
+      {
+        MessageBox.Show($"Save failed: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+      }
+    };
+
+    var hintLabel = new Label
+    {
+      Text      = "Select a field → drag/resize its box on the image.",
+      Dock      = DockStyle.Top,
+      Height    = 22,
+      Font      = new Font("Segoe UI", 7.5f, FontStyle.Italic),
+      ForeColor = Color.Silver,
+      TextAlign = ContentAlignment.MiddleCenter,
+      BackColor = Color.FromArgb(35, 35, 35),
+    };
+
+    sidebar.Controls.Add(fieldList);
+    sidebar.Controls.Add(saveBtn);
+    sidebar.Controls.Add(hintLabel);
+
+    var toolbar  = BuildImageToolbar(imgPanel);
+    var rightPane = new Panel { Dock = DockStyle.Fill };
+    rightPane.Controls.Add(imgPanel);   // Fill — added first
+    rightPane.Controls.Add(toolbar);    // Top  — docked above
+
+    tab.Controls.Add(rightPane);
+    tab.Controls.Add(sidebar);
+    return tab;
+  }
+
+  // ── Image toolbox ─────────────────────────────────────────────────────────────
+
+  private static Panel BuildImageToolbar(ImageBoundsPanel target)
+  {
+    const int H = 26, Y = 4;
+
+    var tb = new Panel
+    {
+      Dock      = DockStyle.Top,
+      Height    = H + Y * 2,
+      BackColor = Color.FromArgb(28, 28, 28),
+    };
+
+    tb.Paint += (_, e) =>
+    {
+      using var pen = new Pen(Color.FromArgb(60, 60, 60));
+      e.Graphics.DrawLine(pen, 0, tb.Height - 1, tb.Width, tb.Height - 1);
+    };
+
+    Color activeClr   = Color.FromArgb(31, 97, 141);
+    Color inactiveClr = Color.FromArgb(55, 55, 55);
+    Color disabledClr = Color.FromArgb(42, 42, 42);
+    Color borderClr   = Color.FromArgb(75, 75, 75);
+
+    Button Btn(string text, int x, int w) => new Button
+    {
+      Text      = text,
+      Width     = w,
+      Height    = H,
+      Location  = new Point(x, Y),
+      FlatStyle = FlatStyle.Flat,
+      BackColor = inactiveClr,
+      ForeColor = Color.White,
+      Font      = new Font("Segoe UI", 8.5f),
+      Cursor    = Cursors.Hand,
+      FlatAppearance = { BorderColor = borderClr, BorderSize = 1 },
+    };
+
+    Panel Sep(int x) => new Panel
+    {
+      Width     = 1,
+      Height    = H,
+      Location  = new Point(x, Y),
+      BackColor = Color.FromArgb(75, 75, 75),
+    };
+
+    // ── Tool buttons ──────────────────────────────────────────────────────────
+    var selectBtn = Btn("Select",  8,  54);   // no icon — just clear text
+    var panBtn    = Btn("✋ Pan",  66,  54);
+
+    // ── History buttons ───────────────────────────────────────────────────────
+    var undoBtn = Btn("↩ Undo", 128, 62);
+    var redoBtn = Btn("↪ Redo", 194, 62);
+
+    // ── Zoom buttons ──────────────────────────────────────────────────────────
+    var zoomInBtn  = Btn("+",   264, 28);
+    var zoomOutBtn = Btn("−",   296, 28);
+    var fitBtn     = Btn("Fit", 328, 38);
+
+    // ── Done button ───────────────────────────────────────────────────────────
+    var doneBtn = Btn("✓ Done", 374, 68);
+    doneBtn.BackColor = Color.FromArgb(30, 90, 50);
+    doneBtn.FlatAppearance.BorderColor = Color.FromArgb(45, 120, 70);
+
+    // ── Zoom label ────────────────────────────────────────────────────────────
+    var zoomLabel = new Label
+    {
+      Text      = "100%",
+      Width     = 48,
+      Height    = H,
+      Location  = new Point(446, Y),
+      ForeColor = Color.FromArgb(160, 160, 160),
+      Font      = new Font("Segoe UI", 8f),
+      TextAlign = ContentAlignment.MiddleLeft,
+      BackColor = Color.Transparent,
+    };
+
+    // ── Separators ────────────────────────────────────────────────────────────
+    var sep1 = Sep(124);
+    var sep2 = Sep(260);
+    var sep3 = Sep(370);
+
+    // ── Logic ─────────────────────────────────────────────────────────────────
+
+    void RefreshToolButtons()
+    {
+      selectBtn.BackColor = target.ActiveTool == ImageBoundsPanel.Tool.Select ? activeClr : inactiveClr;
+      panBtn.BackColor    = target.ActiveTool == ImageBoundsPanel.Tool.Pan    ? activeClr : inactiveClr;
+    }
+
+    void RefreshHistoryButtons()
+    {
+      undoBtn.Enabled   = target.CanUndo;
+      redoBtn.Enabled   = target.CanRedo;
+      undoBtn.BackColor = target.CanUndo ? inactiveClr : disabledClr;
+      redoBtn.BackColor = target.CanRedo ? inactiveClr : disabledClr;
+    }
+
+    void RefreshZoomLabel() =>
+      zoomLabel.Text = $"{(int)Math.Round(target.ZoomLevel * 100)}%";
+
+    selectBtn.Click += (_, _) => { target.ActiveTool = ImageBoundsPanel.Tool.Select; RefreshToolButtons(); };
+    panBtn.Click    += (_, _) => { target.ActiveTool = ImageBoundsPanel.Tool.Pan;    RefreshToolButtons(); };
+
+    undoBtn.Click += (_, _) => target.Undo();
+    redoBtn.Click += (_, _) => target.Redo();
+
+    zoomInBtn.Click  += (_, _) => target.ZoomIn();
+    zoomOutBtn.Click += (_, _) => target.ZoomOut();
+    fitBtn.Click     += (_, _) => target.ResetZoom();
+
+    doneBtn.Click += (_, _) => target.ClearSelection();
+
+    target.ZoomChanged    += (_, _) => RefreshZoomLabel();
+    target.HistoryChanged += (_, _) => RefreshHistoryButtons();
+
+    RefreshToolButtons();
+    RefreshHistoryButtons();
+    RefreshZoomLabel();
+
+    tb.Controls.AddRange(new Control[]
+    {
+      selectBtn, panBtn, sep1,
+      undoBtn, redoBtn, sep2,
+      zoomInBtn, zoomOutBtn, fitBtn, sep3,
+      doneBtn, zoomLabel,
+    });
+    return tb;
+  }
+
+  private async Task PreviewFileFieldsAsync()
   {
     if (!File.Exists(NodeExePath))
     {
@@ -1052,8 +1921,7 @@ internal sealed class MainForm : Form
       return;
     }
 
-    SetFooterStatus($"Running OCR on {Path.GetFileName(selected)}...", isError: false);
-    Application.DoEvents();
+    SetFooterStatus($"Running OCR on {Path.GetFileName(selected)}… (this may take 20–40 seconds)", isError: false);
 
     try
     {
@@ -1069,9 +1937,12 @@ internal sealed class MainForm : Form
       psi.ArgumentList.Add($"--extract-only={selected}");
 
       using var proc = Process.Start(psi)!;
-      var stdout = proc.StandardOutput.ReadToEnd();
-      var stderr = proc.StandardError.ReadToEnd();
-      proc.WaitForExit();
+      // Read stdout and stderr concurrently — avoids deadlock if either buffer fills
+      var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+      var stderrTask = proc.StandardError.ReadToEndAsync();
+      await proc.WaitForExitAsync();
+      var stdout = await stdoutTask;
+      var stderr = await stderrTask;
 
       if (proc.ExitCode != 0)
       {
@@ -1081,9 +1952,24 @@ internal sealed class MainForm : Form
         return;
       }
 
-      var envelope = System.Text.Json.JsonDocument.Parse(stdout);
-      var root     = envelope.RootElement;
-      var rawText  = root.TryGetProperty("rawText", out var rt) ? rt.GetString() ?? string.Empty : stdout;
+      System.Text.Json.JsonDocument envelope;
+      try
+      {
+        // Strip any leading non-JSON text (e.g. Node startup messages) before the first '{'
+        var jsonStart = stdout.IndexOf('{');
+        var jsonText  = jsonStart >= 0 ? stdout[jsonStart..] : stdout;
+        envelope = System.Text.Json.JsonDocument.Parse(jsonText);
+      }
+      catch (Exception parseEx)
+      {
+        MessageBox.Show($"Could not parse OCR output:\n{parseEx.Message}\n\nRaw output:\n{stdout[..Math.Min(500, stdout.Length)]}",
+          "OCR Parse Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        SetFooterStatus("OCR output parse failed — see error dialog.", isError: true);
+        return;
+      }
+
+      var root    = envelope.RootElement;
+      var rawText = root.TryGetProperty("rawText", out var rt) ? rt.GetString() ?? string.Empty : stdout;
 
       var fields = new Dictionary<string, string?>();
       if (root.TryGetProperty("fields", out var fObj))
@@ -1091,7 +1977,20 @@ internal sealed class MainForm : Form
           fields[prop.Name] = prop.Value.ValueKind == System.Text.Json.JsonValueKind.Null
             ? null : prop.Value.GetString();
 
-      ShowFieldPreviewDialog(Path.GetFileName(selected), selected, fields, rawText);
+      var detectedBounds = new Dictionary<string, PointF[]>();
+      if (root.TryGetProperty("detectedBounds", out var dbObj))
+        foreach (var prop in dbObj.EnumerateObject())
+        {
+          var pts = new List<PointF>();
+          foreach (var ptEl in prop.Value.EnumerateArray())
+            if (ptEl.TryGetProperty("x", out var px) && ptEl.TryGetProperty("y", out var py))
+              pts.Add(new PointF(px.GetSingle(), py.GetSingle()));
+          if (pts.Count > 0) detectedBounds[prop.Name] = pts.ToArray();
+        }
+
+      var imagePath = root.TryGetProperty("filePath", out var fp) ? fp.GetString() ?? selected : selected;
+
+      await ShowFieldPreviewDialogAsync(Path.GetFileName(selected), imagePath, fields, rawText, detectedBounds);
       SetFooterStatus(string.Empty, isError: false);
     }
     catch (Exception ex)
@@ -1100,30 +1999,12 @@ internal sealed class MainForm : Form
     }
   }
 
-  private void ShowFieldPreviewDialog(string fileName, string filePath, Dictionary<string, string?> fields, string rawText)
+  private async Task ShowFieldPreviewDialogAsync(
+    string fileName, string filePath,
+    Dictionary<string, string?> fields, string rawText,
+    Dictionary<string, PointF[]>? detectedBounds = null)
   {
-    var woiMap = new (string WoiLabel, string JsonKey, bool Required)[]
-    {
-      ("Bill Name",              "customerName",       true),
-      ("Bill Address",           "customerAddress",    false),
-      ("Bill Phone",             "customerPhone",      false),
-      ("For the Passing Of",     "forThePassingOf",    true),
-      ("Delivery Location",      "deliveryLocation",   false),
-      ("Delivery Date",          "deliveryDate",       true),
-      ("Delivery Time",          "deliveryTime",       false),
-      ("Card Message",           "cardMessage",        false),
-      ("Product Code / Item #",  "productItemNumber",  true),
-      ("Product Description",    "productDescription", false),
-      ("Product Price",          "productPrice",       false),
-      ("Delivery Charge",        "deliveryCharge",     false),
-      ("Total Payable",          "totalPayable",       false),
-      ("Order Number",           "orderNumber",        false),
-      ("Order Placed Date",      "orderPlacedDate",    false),
-      ("Vendor Name",            "vendorName",         false),
-      ("Vendor Tel",             "vendorTel",          false),
-      ("Vendor Fax",             "vendorFax",          false),
-      ("Vendor SMS",             "vendorSms",          false),
-    };
+    var woiMap = WoiFieldMap;
 
     var hasEmptyRequired = woiMap
       .Where(m => m.Required)
@@ -1207,21 +2088,25 @@ internal sealed class MainForm : Form
     {
       Dock        = DockStyle.Fill,
       Multiline   = true,
-      ScrollBars  = ScrollBars.Both,
+      ScrollBars  = ScrollBars.Vertical,
       ReadOnly    = true,
       Font        = new Font("Consolas", 8.5f),
       BackColor   = Color.FromArgb(30, 30, 30),
       ForeColor   = Color.FromArgb(212, 212, 212),
       BorderStyle = BorderStyle.None,
-      WordWrap    = false,
+      WordWrap    = true,
       Text        = rawText,
     };
     var rawPage = new TabPage("Raw OCR Text");
     rawPage.Controls.Add(rawBox);
 
+    var savedBounds = AppConfig.Load(ConfigPath).FieldBounds ?? new();
+    var visualTab   = BuildVisualFieldsTab(filePath, detectedBounds ?? new(), savedBounds);
+
     var tabs = new TabControl { Dock = DockStyle.Fill };
     tabs.TabPages.Add(fieldsPage);
     tabs.TabPages.Add(rawPage);
+    tabs.TabPages.Add(visualTab);
 
     string? overridesFilePath = null;
 
@@ -1297,12 +2182,281 @@ internal sealed class MainForm : Form
 
     if (overridesFilePath is not null)
     {
-      ProcessFileWithOverrides(filePath, overridesFilePath);
+      await ProcessFileWithOverridesAsync(filePath, overridesFilePath);
       try { File.Delete(overridesFilePath); } catch { /* non-fatal */ }
     }
   }
 
-  private void ProcessSelectedFiles()
+  // ── Order detail dialog (double-click on log row) ────────────────────────────
+
+  private static readonly (string WoiLabel, string JsonKey, bool Required)[] WoiFieldMap =
+  [
+    ("Bill Name",             "customerName",       false),  // always FREYVOGEL WEBSITE
+    ("Bill Address",          "customerAddress",    false),
+    ("Bill Phone",            "customerPhone",      false),
+    ("For the Passing Of",    "forThePassingOf",    true),
+    ("Delivery Location",     "deliveryLocation",   false),
+    ("Delivery Date",         "deliveryDate",       true),
+    ("Delivery Time",         "deliveryTime",       false),
+    ("Card Message",          "cardMessage",        false),
+    ("Product Code / Item #", "productItemNumber",  true),
+    ("Product Description",   "productDescription", false),
+    ("Product Price",         "productPrice",       false),
+    ("Delivery Charge",       "deliveryCharge",     false),
+    ("Total Payable",         "totalPayable",       false),
+    ("Order Number",          "orderNumber",        false),
+    ("Order Placed Date",     "orderPlacedDate",    false),
+    ("Vendor Name",           "vendorName",         false),
+    ("Vendor Tel",            "vendorTel",          false),
+    ("Vendor Fax",            "vendorFax",          false),
+    ("Vendor SMS",            "vendorSms",          false),
+  ];
+
+  private void ShowOrderDetailDialog(OrderLogEntry entry)
+  {
+    var ts = DateTimeOffset.TryParse(entry.Timestamp, out var dto)
+      ? dto.LocalDateTime.ToString("f")
+      : entry.Timestamp;
+
+    var dlg = new Form
+    {
+      Text            = $"Order Detail — {entry.FileName}",
+      Size            = new Size(620, 580),
+      MinimumSize     = new Size(480, 420),
+      StartPosition   = FormStartPosition.CenterParent,
+      FormBorderStyle = FormBorderStyle.Sizable,
+      BackColor       = Color.White,
+      Font            = new Font("Segoe UI", 9f),
+    };
+
+    // ── Info bar ──────────────────────────────────────────────────────────────
+    var statusColor = entry.EmailSent
+      ? Color.FromArgb(220, 245, 228) : Color.FromArgb(255, 235, 235);
+    var statusFg = entry.EmailSent
+      ? Color.FromArgb(30, 120, 60) : Color.FromArgb(160, 30, 30);
+    var statusText = entry.EmailSent ? "✓  Email sent" : "✗  Email not sent";
+    if (!string.IsNullOrWhiteSpace(entry.Error))
+      statusText += $"  —  {entry.Error}";
+
+    var infoBar = new Label
+    {
+      Text      = $"{ts}   ·   {entry.FileName}   ·   {statusText}",
+      Dock      = DockStyle.Top,
+      Height    = 36,
+      Padding   = new Padding(10, 10, 10, 0),
+      Font      = new Font("Segoe UI", 8.5f, FontStyle.Regular),
+      ForeColor = statusFg,
+      BackColor = statusColor,
+    };
+
+    // ── Fields grid ───────────────────────────────────────────────────────────
+    var grid = new DataGridView
+    {
+      Dock                    = DockStyle.Fill,
+      ReadOnly                = true,
+      AllowUserToAddRows      = false,
+      AllowUserToDeleteRows   = false,
+      AllowUserToResizeRows   = false,
+      RowHeadersVisible       = false,
+      BackgroundColor         = Color.White,
+      BorderStyle             = BorderStyle.None,
+      AutoSizeColumnsMode     = DataGridViewAutoSizeColumnsMode.Fill,
+      SelectionMode           = DataGridViewSelectionMode.FullRowSelect,
+      Font                    = new Font("Segoe UI", 9f),
+      GridColor               = Color.FromArgb(224, 228, 232),
+      CellBorderStyle         = DataGridViewCellBorderStyle.SingleHorizontal,
+    };
+    grid.ColumnHeadersDefaultCellStyle.BackColor = AccentColor;
+    grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+    grid.ColumnHeadersDefaultCellStyle.Font      = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+    grid.EnableHeadersVisualStyles               = false;
+    grid.ColumnHeadersHeight                     = 28;
+    grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 249, 250);
+    grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "WOI Field",     Name = "Field", FillWeight = 36, ReadOnly = true });
+    grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Parsed Value",  Name = "Value", FillWeight = 64 });
+
+    var storedFields = entry.Fields ?? new Dictionary<string, string>();
+
+    foreach (var (label, key, required) in WoiFieldMap)
+    {
+      storedFields.TryGetValue(key, out var val);
+      var rowIndex = grid.Rows.Add(label, val ?? string.Empty);
+      var row = grid.Rows[rowIndex];
+      row.Cells["Field"].Style.BackColor = Color.FromArgb(240, 242, 245);
+      row.Cells["Field"].Style.ForeColor = Color.FromArgb(60, 60, 60);
+      row.Cells["Field"].Style.Font      = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+      if (required && string.IsNullOrWhiteSpace(val))
+      {
+        row.Cells["Field"].Style.BackColor = Color.FromArgb(255, 200, 200);
+        row.Cells["Field"].Style.ForeColor = Color.Firebrick;
+        row.Cells["Value"].Style.ForeColor = Color.Silver;
+      }
+      else if (string.IsNullOrWhiteSpace(val))
+      {
+        row.Cells["Value"].Style.ForeColor = Color.Silver;
+      }
+    }
+
+    var hint = new Label
+    {
+      Text      = "Double-click any value to copy it. To edit and resend, use \"Reprocess\".",
+      Dock      = DockStyle.Top,
+      Height    = 22,
+      Padding   = new Padding(8, 4, 0, 0),
+      Font      = new Font("Segoe UI", 8f, FontStyle.Italic),
+      ForeColor = Color.Gray,
+      BackColor = Color.White,
+    };
+
+    grid.CellDoubleClick += (_, ce) =>
+    {
+      if (ce.RowIndex < 0 || ce.ColumnIndex < 0) return;
+      var val = grid.Rows[ce.RowIndex].Cells[ce.ColumnIndex].Value?.ToString() ?? string.Empty;
+      if (!string.IsNullOrEmpty(val))
+        Clipboard.SetText(val);
+    };
+
+    // ── Button panel ──────────────────────────────────────────────────────────
+    var btnPanel = new Panel { Dock = DockStyle.Bottom, Height = 44, BackColor = Color.White };
+    btnPanel.Paint += (_, e) =>
+      e.Graphics.DrawLine(new Pen(Color.FromArgb(208, 213, 219)), 0, 0, btnPanel.Width, 0);
+
+    var closeBtn = new Button { Text = "Close", Width = 80, Height = 28, FlatStyle = FlatStyle.System };
+    closeBtn.Click += (_, _) => dlg.Close();
+
+    var canReprocess = !string.IsNullOrEmpty(entry.ProcessedFilePath) &&
+                       File.Exists(entry.ProcessedFilePath);
+    var reprocessBtn = new Button
+    {
+      Text      = canReprocess ? "Reprocess Order" : "File Not Found",
+      Width     = 130,
+      Height    = 28,
+      FlatStyle = FlatStyle.System,
+      Font      = new Font("Segoe UI", 9f, FontStyle.Bold),
+      Enabled   = canReprocess,
+    };
+    reprocessBtn.Click += (_, _) =>
+    {
+      dlg.Close();
+      ReprocessLoggedOrder(entry);
+    };
+
+    btnPanel.Controls.AddRange(new Control[] { closeBtn, reprocessBtn });
+    btnPanel.Layout += (_, _) =>
+    {
+      closeBtn.Location     = new Point(btnPanel.ClientSize.Width - closeBtn.Width - 10, 8);
+      reprocessBtn.Location = new Point(btnPanel.ClientSize.Width - closeBtn.Width - reprocessBtn.Width - 20, 8);
+    };
+
+    dlg.Controls.Add(grid);
+    dlg.Controls.Add(hint);
+    dlg.Controls.Add(infoBar);
+    dlg.Controls.Add(btnPanel);
+    dlg.ShowDialog(this);
+    dlg.Dispose();
+  }
+
+  private void ReprocessLoggedOrder(OrderLogEntry entry)
+  {
+    if (string.IsNullOrEmpty(entry.ProcessedFilePath) || !File.Exists(entry.ProcessedFilePath))
+    {
+      SetFooterStatus("Reprocess failed — processed file not found.", isError: true);
+      return;
+    }
+
+    if (!File.Exists(NodeExePath) || !File.Exists(ServiceScript))
+    {
+      SetFooterStatus("node.exe or service.js not found.", isError: true);
+      return;
+    }
+
+    var cfg = AppConfig.Load(ConfigPath);
+    var fileName   = Path.GetFileName(entry.ProcessedFilePath);
+    var destInWatch = Path.Combine(cfg.WatchFolder, fileName);
+    var suffix = 0;
+
+    // If a file with the same name already exists in the watch folder, append a counter
+    while (File.Exists(destInWatch))
+    {
+      suffix++;
+      var name = Path.GetFileNameWithoutExtension(fileName);
+      var ext  = Path.GetExtension(fileName);
+      destInWatch = Path.Combine(cfg.WatchFolder, $"{name}_r{suffix}{ext}");
+    }
+
+    try
+    {
+      Directory.CreateDirectory(cfg.WatchFolder);
+      File.Copy(entry.ProcessedFilePath, destInWatch);
+    }
+    catch (Exception ex)
+    {
+      SetFooterStatus($"Failed to copy file for reprocessing: {ex.Message}", isError: true);
+      return;
+    }
+
+    string? overridesFilePath = null;
+    if (entry.Fields is { Count: > 0 })
+    {
+      try
+      {
+        var tmp = Path.ChangeExtension(Path.GetTempFileName(), ".json");
+        File.WriteAllText(tmp, System.Text.Json.JsonSerializer.Serialize(entry.Fields));
+        overridesFilePath = tmp;
+      }
+      catch { /* proceed without overrides */ }
+    }
+
+    SetFooterStatus($"Reprocessing {Path.GetFileName(destInWatch)}…", isError: false);
+    Application.DoEvents();
+
+    try
+    {
+      var psi = new ProcessStartInfo(NodeExePath)
+      {
+        UseShellExecute        = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError  = true,
+        CreateNoWindow         = true,
+        WorkingDirectory       = Path.GetDirectoryName(ServiceScript)!,
+      };
+      psi.ArgumentList.Add(ServiceScript);
+      psi.ArgumentList.Add($"--process-file={destInWatch}");
+      if (overridesFilePath != null)
+        psi.ArgumentList.Add($"--field-overrides-file={overridesFilePath}");
+
+      using var proc = Process.Start(psi)!;
+      var stdout = proc.StandardOutput.ReadToEnd();
+      var stderr = proc.StandardError.ReadToEnd();
+      proc.WaitForExit(120_000);
+
+      if (proc.ExitCode == 0)
+        SetFooterStatus($"✓ Reprocessed {fileName} successfully.", isError: false);
+      else
+      {
+        var errText   = (stderr.Trim().Length > 0 ? stderr : stdout).Trim();
+        var firstLine = errText.Split('\n').FirstOrDefault(l => l.Trim().Length > 0) ?? "unknown error";
+        SetFooterStatus($"Reprocess failed: {firstLine}", isError: true);
+        // Clean up the copy if processing failed
+        try { File.Delete(destInWatch); } catch { /* non-fatal */ }
+      }
+    }
+    catch (Exception ex)
+    {
+      SetFooterStatus($"Error: {ex.Message}", isError: true);
+      try { File.Delete(destInWatch); } catch { /* non-fatal */ }
+    }
+    finally
+    {
+      if (overridesFilePath != null)
+        try { File.Delete(overridesFilePath); } catch { /* non-fatal */ }
+    }
+
+    ScanPendingFiles();
+    LoadLog();
+  }
+
+  private async Task ProcessSelectedFilesAsync()
   {
     if (!File.Exists(NodeExePath))
     {
@@ -1351,9 +2505,11 @@ internal sealed class MainForm : Form
         psi.ArgumentList.Add($"--process-file={filePath}");
 
         using var proc = Process.Start(psi)!;
-        var stdout = proc.StandardOutput.ReadToEnd();
-        var stderr = proc.StandardError.ReadToEnd();
-        proc.WaitForExit(120_000);
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        var stderrTask = proc.StandardError.ReadToEndAsync();
+        await proc.WaitForExitAsync();
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
 
         if (proc.ExitCode == 0)
         {
@@ -1383,7 +2539,7 @@ internal sealed class MainForm : Form
       SetFooterStatus($"Processed {ok} ok, {fail} failed — see error above.", isError: true);
   }
 
-  private void ProcessFileWithOverrides(string filePath, string overridesFilePath)
+  private async Task ProcessFileWithOverridesAsync(string filePath, string overridesFilePath)
   {
     if (!File.Exists(NodeExePath))
     {
@@ -1402,7 +2558,6 @@ internal sealed class MainForm : Form
     }
 
     SetFooterStatus($"Processing {Path.GetFileName(filePath)} with edited values…", isError: false);
-    Application.DoEvents();
 
     try
     {
@@ -1419,9 +2574,11 @@ internal sealed class MainForm : Form
       psi.ArgumentList.Add($"--field-overrides-file={overridesFilePath}");
 
       using var proc = Process.Start(psi)!;
-      var stdout = proc.StandardOutput.ReadToEnd();
-      var stderr = proc.StandardError.ReadToEnd();
-      proc.WaitForExit(120_000);
+      var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+      var stderrTask = proc.StandardError.ReadToEndAsync();
+      await proc.WaitForExitAsync();
+      var stdout = await stdoutTask;
+      var stderr = await stderrTask;
 
       if (proc.ExitCode == 0)
         SetFooterStatus($"✓ Processed {Path.GetFileName(filePath)} successfully.", isError: false);

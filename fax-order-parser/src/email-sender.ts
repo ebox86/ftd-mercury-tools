@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import * as forge from 'node-forge';
 import * as nodemailer from 'nodemailer';
 import { FaxOrderFields } from './index';
 import { EmailConfig, DEFAULT_FIELD_MAP } from './config';
@@ -29,7 +29,8 @@ const SOURCE_TO_KEY: Record<string, keyof FaxOrderFields> = {
  * If any are missing after OCR (and no manual override fills them), the file
  * is quarantined in the pending queue for human review.
  */
-export const REQUIRED_WOI_FIELDS = ['Bill Name', 'Recipient Name', 'Product Code 1'] as const;
+// Bill Name is always hardcoded to FREYVOGEL WEBSITE so it is never missing.
+export const REQUIRED_WOI_FIELDS = ['Recipient Name', 'Product Code 1', 'Delivery Date'] as const;
 
 /** Returns the names of required WOI fields that have no resolved OCR value. */
 export function getMissingRequiredFields(
@@ -203,36 +204,29 @@ function normalizePassword(password: string, length: number): Buffer {
 
 function getCipherOptions(algorithm: EmailConfig['encryptionAlgorithm'] = 'TripleDES') {
   switch (algorithm) {
-    case 'DES': return { cipherName: 'des-cbc', keyLength: 8, ivLength: 8 };
-    case 'RC2': return { cipherName: 'rc2-cbc', keyLength: 16, ivLength: 8 };
-    case 'Rijndael': return { cipherName: 'aes-256-cbc', keyLength: 32, ivLength: 16 };
-    case 'TripleDES': return { cipherName: 'des-ede3-cbc', keyLength: 24, ivLength: 8 };
-    default: return { cipherName: 'des-ede3-cbc', keyLength: 24, ivLength: 8 };
+    case 'DES':      return { forgeName: 'DES-CBC',  keyLength: 8,  ivLength: 8  };
+    case 'RC2':      return { forgeName: 'RC2-CBC',  keyLength: 16, ivLength: 8  };
+    case 'Rijndael': return { forgeName: 'AES-CBC',  keyLength: 32, ivLength: 16 };
+    case 'TripleDES':
+    default:         return { forgeName: '3DES-CBC', keyLength: 24, ivLength: 8  };
   }
 }
 
+function wrapBase64(b64: string, lineLen = 76): string {
+  return b64.match(new RegExp(`.{1,${lineLen}}`, 'g'))?.join('\r\n') ?? b64;
+}
+
 function encryptWoiBody(body: string, password: string, algorithm: EmailConfig['encryptionAlgorithm'] = 'TripleDES'): string {
-  const { cipherName, keyLength, ivLength } = getCipherOptions(algorithm);
-  const key = normalizePassword(password, keyLength);
-  const iv = normalizePassword(password, ivLength);
+  const { forgeName, keyLength, ivLength } = getCipherOptions(algorithm);
+  const keyBuf = forge.util.createBuffer(normalizePassword(password, keyLength).toString('binary'));
+  const ivBuf  = forge.util.createBuffer(normalizePassword(password, ivLength).toString('binary'));
 
-  const runCipher = (name: string, keyBuffer: Buffer, ivBuffer: Buffer) => {
-    const cipher = crypto.createCipheriv(name, keyBuffer, ivBuffer);
-    return Buffer.concat([cipher.update(Buffer.from(body, 'utf8')), cipher.final()]);
-  };
+  const cipher = forge.cipher.createCipher(forgeName as forge.cipher.Algorithm, keyBuf);
+  cipher.start({ iv: ivBuf });
+  cipher.update(forge.util.createBuffer(Buffer.from(body, 'utf8').toString('binary')));
+  cipher.finish();
 
-  try {
-    const encrypted = runCipher(cipherName, key, iv);
-    return encrypted.toString('base64');
-  } catch (err) {
-    if (algorithm === 'TripleDES') {
-      const fallbackKey = normalizePassword(password, 8);
-      const fallbackIv = normalizePassword(password, 8);
-      const encrypted = runCipher('des-cbc', fallbackKey, fallbackIv);
-      return encrypted.toString('base64');
-    }
-    throw err;
-  }
+  return wrapBase64(forge.util.encode64(cipher.output.getBytes()));
 }
 
 /**
@@ -260,7 +254,8 @@ export function formatWoiEmail(
   // Occasion code: 1 = Sympathy when "for the passing of" is present, else 0
   const occasionCode = fields.forThePassingOf ? '1' : '0';
 
-  const billName    = sanitizeWoiText(resolveField('Bill Name', fields, fieldMap), 50);
+  // Bill Name is always this shop's WOI identifier — never the fax customer name.
+  const billName    = 'FREYVOGEL WEBSITE';
   const recipName   = sanitizeWoiText(resolveField('Recipient Name', fields, fieldMap), 70);
   const cardMsg     = sanitizeWoiText(resolveField('Card Message', fields, fieldMap), 600);
   const delivInstr  = sanitizeWoiText(resolveField('Delivery Instructions', fields, fieldMap), 250);
@@ -310,15 +305,15 @@ export function formatWoiEmail(
     `Delivery (Year): ${delDate.year}`,
     `Card Message: ${cardMsg}`,
     `Occasion Code: ${occasionCode}`,
-    `Product Code1: ${prodCode}`,
-    `Product Description1: ${prodDesc}`,
-    `Product Amount1: ${fields.productPrice ?? ''}`,
-    `Product Qty1: 1`,
+    `Product Code 1: ${prodCode}`,
+    `Product Description 1: ${prodDesc}`,
+    `Product Amount 1: ${fields.productPrice ?? ''}`,
+    `Product Qty 1: 1`,
     `Delivery Charge: ${fields.deliveryCharge ?? ''}`,
     `Relay Charge: `,
     `Retrans Charge: `,
     `Service Charge: `,
-    `Tax Amount: `,
+    `Tax Amount: 0.00`,
     `Discount Amount: `,
     `Total Order Amount: ${fields.totalPayable ?? ''}`,
     `Additional Information: ${addlInfo}`,
@@ -326,7 +321,7 @@ export function formatWoiEmail(
 
   // Trim trailing whitespace from every line — prevents quoted-printable encoding
   // of trailing spaces as =20, which Mercury's WOI parser may not decode.
-  return lines.map(l => l.trimEnd()).join('\n');
+  return lines.map(l => l.trimEnd()).join('\r\n');
 }
 
 // ── Email sender ───────────────────────────────────────────────────────────────
@@ -336,22 +331,21 @@ export async function sendWoiEmail(
   fieldMap: Record<string, string> = DEFAULT_FIELD_MAP,
 ): Promise<void> {
   let body = formatWoiEmail(fields, fieldMap);
-  if (emailConfig.encryptionPassword?.trim()) {
-    body = encryptWoiBody(
-      body,
-      emailConfig.encryptionPassword,
-      emailConfig.encryptionAlgorithm ?? 'TripleDES',
-    );
+  const algo = emailConfig.encryptionAlgorithm ?? 'TripleDES';
+  if (emailConfig.encryptionPassword?.trim() && (algo as string) !== 'None') {
+    body = encryptWoiBody(body, emailConfig.encryptionPassword, algo);
   }
 
   const transport = nodemailer.createTransport({
     host: emailConfig.smtpHost,
     port: emailConfig.smtpPort,
     secure: false,
-    auth: {
-      user: emailConfig.senderAddress,
-      pass: emailConfig.senderPassword,
-    },
+    ...(emailConfig.senderPassword?.trim() ? {
+      auth: {
+        user: emailConfig.smtpUsername || emailConfig.senderAddress,
+        pass: emailConfig.senderPassword,
+      },
+    } : {}),
   });
 
   // Build a raw 7-bit email to avoid quoted-printable encoding.

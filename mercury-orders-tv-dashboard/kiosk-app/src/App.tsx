@@ -198,6 +198,8 @@ const DEFAULT_TODAY_DINGS = 1;
 const DEFAULT_DING_GAP_MS = 620;
 const DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC = 20;
 const NEW_ORDER_PULSE_WINDOW_MINUTES = 30;
+const WEATHER_FORECAST_REFRESH_MS = 10 * 60 * 1000;
+const WEATHER_FORECAST_RETRY_MS = 30 * 1000;
 const CHART_ML = 40;
 const CHART_MR = 36;
 const CHART_MT = 14;
@@ -3353,6 +3355,7 @@ export default function App() {
   const [configMessage, setConfigMessage] = useState('');
   const [weatherTickerSnapshot, setWeatherTickerSnapshot] = useState<WeatherTickerSnapshot | null>(null);
   const [weatherForecastData, setWeatherForecastData] = useState<WeatherForecastData | null>(null);
+  const [weatherForecastZip, setWeatherForecastZip] = useState('');
   const [weatherForecastLoading, setWeatherForecastLoading] = useState(false);
   const [shopAddressSuggestions, setShopAddressSuggestions] = useState<AddressSuggestion[]>([]);
   const [isShopAddressSuggesting, setIsShopAddressSuggesting] = useState(false);
@@ -5754,32 +5757,61 @@ export default function App() {
 
   useEffect(() => {
     if (currentPageId !== 'weather') {
-      setWeatherForecastData(null);
+      setWeatherForecastLoading(false);
       return;
     }
     let disposed = false;
     let activeController: AbortController | null = null;
+    let retryTimer: number | null = null;
 
-    const refresh = async () => {
+    const clearRetryTimer = (): void => {
+      if (retryTimer === null) return;
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    };
+
+    const scheduleRetry = (): void => {
+      if (disposed || retryTimer !== null) return;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        void refresh();
+      }, WEATHER_FORECAST_RETRY_MS);
+    };
+
+    const refresh = async (): Promise<void> => {
       if (disposed) return;
+      if (activeController) {
+        activeController.abort();
+      }
       const controller = new AbortController();
       activeController = controller;
       setWeatherForecastLoading(true);
       try {
         const data = await fetchWeatherForecast(config.tickerWeatherZip, controller.signal);
-        if (!disposed) setWeatherForecastData(data);
+        if (disposed || controller.signal.aborted) return;
+        if (data) {
+          clearRetryTimer();
+          setWeatherForecastData(data);
+          setWeatherForecastZip(config.tickerWeatherZip);
+        } else {
+          scheduleRetry();
+        }
       } catch {
-        // ignore fetch errors (aborts, network failures)
+        if (!controller.signal.aborted) scheduleRetry();
       } finally {
-        if (!disposed) setWeatherForecastLoading(false);
+        if (!disposed && activeController === controller) {
+          activeController = null;
+          setWeatherForecastLoading(false);
+        }
       }
     };
 
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 10 * 60 * 1000);
+    const timer = window.setInterval(() => void refresh(), WEATHER_FORECAST_REFRESH_MS);
 
     return () => {
       disposed = true;
+      clearRetryTimer();
       if (activeController) activeController.abort();
       window.clearInterval(timer);
     };
@@ -6091,9 +6123,13 @@ export default function App() {
     void fetchLastYear();
   }, [selectedDateKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const visibleWeatherForecastData = weatherForecastZip === config.tickerWeatherZip
+    ? weatherForecastData
+    : null;
+
   const weatherChartData = useMemo(() => {
-    if (!weatherForecastData || weatherForecastData.hourly.length === 0) return null;
-    const { hourly } = weatherForecastData;
+    if (!visibleWeatherForecastData || visibleWeatherForecastData.hourly.length === 0) return null;
+    const { hourly } = visibleWeatherForecastData;
     const temps = hourly.map(h => h.temp);
     const minTemp = Math.min(...temps) - 5;
     const maxTemp = Math.max(...temps) + 5;
@@ -6113,7 +6149,7 @@ export default function App() {
     ].join(' ');
     const barW = Math.max(6, (PW / Math.max(1, n)) * 0.45);
     return { W, H, ML, MR, MT, MB, PW, PH, n, xOf, yOf, points, tempPolyline, areaPolygon, barW, minTemp, maxTemp, tempRange };
-  }, [weatherForecastData]);
+  }, [visibleWeatherForecastData]);
 
   const chartLineData = useMemo(() => {
     const currentHour = new Date().getHours();
@@ -7823,17 +7859,17 @@ export default function App() {
           </div>
         ) : activePage?.id === 'weather' ? (
           <div className="weather-page">
-            {weatherForecastLoading && !weatherForecastData ? (
+            {weatherForecastLoading && !visibleWeatherForecastData ? (
               <div className="weather-page__loading">
                 <span className="board-loading-overlay__spinner" aria-hidden="true" />
                 <span>Loading weather…</span>
               </div>
-            ) : !weatherForecastData ? (
+            ) : !visibleWeatherForecastData ? (
               <div className="weather-page__error">
-                Unable to load weather data. Check the ZIP code in Settings.
+                Unable to load weather data. Retrying shortly; check the ZIP code in Settings if this keeps happening.
               </div>
             ) : (() => {
-              const { current, today, tomorrow, hourly, location } = weatherForecastData;
+              const { current, today, tomorrow, hourly, location } = visibleWeatherForecastData;
               const curDisplay = weatherCodeDisplay(current.weatherCode, current.isDay);
               const todayDisplay = weatherCodeDisplay(today.weatherCode, true);
               const tomorrowDisplay = weatherCodeDisplay(tomorrow.weatherCode, true);

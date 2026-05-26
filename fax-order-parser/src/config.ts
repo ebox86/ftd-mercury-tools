@@ -6,12 +6,26 @@ export type EmailEncryptionAlgorithm = 'DES' | 'RC2' | 'Rijndael' | 'TripleDES';
 export interface EmailConfig {
   senderAddress: string;
   senderPassword: string;
+  smtpUsername?: string;
   recipientAddress: string;
   smtpHost: string;
   smtpPort: number;
   subjectLine: string;
   encryptionPassword?: string;
   encryptionAlgorithm?: EmailEncryptionAlgorithm;
+}
+
+export interface FieldBounds {
+  x: number; // fraction of image width  (0–1)
+  y: number; // fraction of image height (0–1)
+  w: number;
+  h: number;
+}
+
+export interface LocalRelayConfig {
+  enabled: boolean;
+  smtpPort: number;
+  pop3Port: number;
 }
 
 export interface FaxParserConfig {
@@ -21,6 +35,8 @@ export interface FaxParserConfig {
   processedSubfolder: string;
   email: EmailConfig;
   fieldMap: Record<string, string>;
+  fieldBounds?: Record<string, FieldBounds>;
+  localRelay: LocalRelayConfig;
 }
 
 export const DEFAULT_FIELD_MAP: Record<string, string> = {
@@ -30,6 +46,7 @@ export const DEFAULT_FIELD_MAP: Record<string, string> = {
   'Product Code 1':        'Product Item Number',
   'Delivery Instructions': 'Delivery Time',
   'Additional Information':'For the Passing Of',
+  'Delivery Date':         'Delivery Date',
 };
 
 export function getConfigDir(): string {
@@ -59,6 +76,11 @@ export const DEFAULT_CONFIG: FaxParserConfig = {
     encryptionAlgorithm: 'TripleDES',
   },
   fieldMap: { ...DEFAULT_FIELD_MAP },
+  localRelay: {
+    enabled: false,
+    smtpPort: 2525,
+    pop3Port: 1110,
+  },
 };
 
 export function loadConfig(): FaxParserConfig {
@@ -79,6 +101,10 @@ export function loadConfig(): FaxParserConfig {
       fieldMap: {
         ...DEFAULT_FIELD_MAP,
         ...(parsed.fieldMap ?? {}),
+      },
+      localRelay: {
+        ...DEFAULT_CONFIG.localRelay,
+        ...(parsed.localRelay ?? {}),
       },
     };
   } catch {

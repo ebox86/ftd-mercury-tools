@@ -11,14 +11,34 @@ import * as fs from 'fs';
 import * as path from 'path';
 import chokidar from 'chokidar';
 import { loadConfig, DEFAULT_FIELD_MAP } from './config';
-import { appendLogEntry } from './logger';
+import { appendLogEntry, readLogEntries } from './logger';
 import { sendWoiEmail, getMissingRequiredFields } from './email-sender';
-import { runOcr, parseOrderFields, FaxOrderFields } from './index';
+import { runOcr, runOcrFull, parseOrderFields, detectFieldBboxes, FaxOrderFields } from './index';
+import { startSmtpServer, startPop3Server } from './local-relay';
 
 // ── File processor ─────────────────────────────────────────────────────────────
 
+async function renameWithRetry(src: string, dest: string, retries = 8, baseDelayMs = 500): Promise<void> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      fs.renameSync(src, dest);
+      return;
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if ((code !== 'EBUSY' && code !== 'EPERM') || i === retries - 1) throw err;
+      const delay = baseDelayMs * (i + 1);
+      console.warn(`[FaxParser] File locked (${code}), retrying in ${delay}ms… (attempt ${i + 1}/${retries})`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
 function holdSidecarPath(filePath: string): string {
   return filePath + '.hold.json';
+}
+
+function sentSidecarPath(filePath: string): string {
+  return filePath + '.sent.json';
 }
 
 async function processFile(filePath: string, fieldOverrides?: Partial<FaxOrderFields>): Promise<void> {
@@ -49,34 +69,51 @@ async function processFile(filePath: string, fieldOverrides?: Partial<FaxOrderFi
 
   console.log('[FaxParser] Parsed order #', fields.orderNumber ?? '(unknown)');
 
-  let emailSent = false;
-  let error: string | undefined;
-
-  if (!config.email.senderPassword) {
-    error = 'Email not sent: sender password not configured. Open the config app to set it.';
-    console.warn(`[FaxParser] ${error}`);
-  } else {
-    try {
-      await sendWoiEmail(fields, config.email, fieldMap);
-      emailSent = true;
-      console.log(`[FaxParser] Email sent to ${config.email.recipientAddress}`);
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-      console.error(`[FaxParser] Email send failed: ${error}`);
+  // Guard against double-send: if the log already shows this file was emailed
+  // successfully (e.g. .sent.json was lost but email went through), skip re-sending.
+  if (!fieldOverrides) {
+    const prevEntry = readLogEntries().find(e => e.fileName === fileName && e.emailSent);
+    if (prevEntry) {
+      console.warn(`[FaxParser] SKIP double-send: ${fileName} already emailed at ${prevEntry.timestamp}. Moving file only.`);
+      const processedDir = path.join(path.dirname(filePath), config.processedSubfolder);
+      if (!fs.existsSync(processedDir)) fs.mkdirSync(processedDir, { recursive: true });
+      try { await renameWithRetry(filePath, path.join(processedDir, fileName)); } catch { /* non-fatal */ }
+      return;
     }
   }
 
-  // Remove hold sidecar if present
-  try { fs.unlinkSync(holdSidecarPath(filePath)); } catch { /* not held, ignore */ }
+  let emailSent = false;
+  let error: string | undefined;
 
-  // Move processed file to the configured subfolder
-  const processedDir = path.join(path.dirname(filePath), config.processedSubfolder);
-  if (!fs.existsSync(processedDir)) {
-    fs.mkdirSync(processedDir, { recursive: true });
+  try {
+    await sendWoiEmail(fields, config.email, fieldMap);
+    emailSent = true;
+    console.log(`[FaxParser] Email sent to ${config.email.recipientAddress}`);
+    // Write .sent sidecar immediately so if the move below fails and chokidar
+    // re-detects the file, we skip re-sending and just retry the move.
+    try { fs.writeFileSync(sentSidecarPath(filePath), JSON.stringify({ timestamp: new Date().toISOString() }), 'utf-8'); } catch { /* non-fatal */ }
+  } catch (err: unknown) {
+    error = err instanceof Error ? err.message : String(err);
+    console.error(`[FaxParser] Email send failed: ${error}`);
   }
+
+  try { fs.unlinkSync(holdSidecarPath(filePath)); } catch { /* not held */ }
+
+  const processedDir = path.join(path.dirname(filePath), config.processedSubfolder);
+  if (!fs.existsSync(processedDir)) fs.mkdirSync(processedDir, { recursive: true });
   const dest = path.join(processedDir, fileName);
-  fs.renameSync(filePath, dest);
-  console.log(`[FaxParser] Moved to: ${dest}`);
+
+  let movedOk = false;
+  try {
+    await renameWithRetry(filePath, dest);
+    movedOk = true;
+    console.log(`[FaxParser] Moved to: ${dest}`);
+    try { fs.unlinkSync(sentSidecarPath(filePath)); } catch { /* non-fatal */ }
+  } catch (moveErr: unknown) {
+    const moveMsg = moveErr instanceof Error ? moveErr.message : String(moveErr);
+    console.error(`[FaxParser] Move failed — will retry on next poll: ${moveMsg}`);
+    if (!error) error = `Move failed (email ${emailSent ? 'was' : 'was not'} sent): ${moveMsg}`;
+  }
 
   appendLogEntry({
     timestamp: new Date().toISOString(),
@@ -86,6 +123,10 @@ async function processFile(filePath: string, fieldOverrides?: Partial<FaxOrderFi
     deliveryDate: fields.deliveryDate,
     emailSent,
     error,
+    fields: Object.fromEntries(
+      Object.entries(fields).filter(([, v]) => v !== undefined)
+    ) as Record<string, string>,
+    processedFilePath: movedOk ? dest : undefined,
   });
 }
 
@@ -94,13 +135,22 @@ async function processFile(filePath: string, fieldOverrides?: Partial<FaxOrderFi
 async function startWatcher(): Promise<void> {
   // Reload config on every file event so settings changes take effect without restart.
   const config = loadConfig();
+
+  // Start built-in SMTP/POP3 relay if enabled
+  const smtpServer = config.localRelay.enabled ? startSmtpServer(config.localRelay.smtpPort) : null;
+  const pop3Server = config.localRelay.enabled ? startPop3Server(config.localRelay.pop3Port)  : null;
+  if (config.localRelay.enabled)
+    console.log(`[FaxParser] Local relay enabled — SMTP :${config.localRelay.smtpPort}  POP3 :${config.localRelay.pop3Port}`);
+
   const watchFolder = config.watchFolder;
   const pollInterval = config.pollIntervalSeconds * 1000;
-  const ext = config.fileFormat === 'PDF' ? '.pdf' : '.tif';
+  const exts = config.fileFormat === 'PDF'
+    ? new Set(['.pdf'])
+    : new Set(['.tif', '.tiff', '.jpg', '.jpeg']);
   const processedSubfolder = config.processedSubfolder;
 
   console.log(`[FaxParser] Watch folder  : ${watchFolder}`);
-  console.log(`[FaxParser] File format   : ${ext}`);
+  console.log(`[FaxParser] File format   : ${[...exts].join(', ')}`);
   console.log(`[FaxParser] Poll interval : ${config.pollIntervalSeconds}s`);
 
   if (!fs.existsSync(watchFolder)) {
@@ -124,8 +174,28 @@ async function startWatcher(): Promise<void> {
 
   watcher.on('add', (filePath: string) => {
     const fileExt = path.extname(filePath).toLowerCase();
-    if (fileExt !== ext) return;
+    if (!exts.has(fileExt)) return;
     if (inFlight.has(filePath)) return;
+
+    // Email already sent but file wasn't moved (e.g., previous EBUSY). Retry
+    // the move only — do not re-OCR or re-send.
+    if (fs.existsSync(sentSidecarPath(filePath))) {
+      console.log(`[FaxParser] Completing deferred move: ${path.basename(filePath)}`);
+      inFlight.add(filePath);
+      (async () => {
+        try {
+          const cfg = loadConfig();
+          const dir = path.join(path.dirname(filePath), cfg.processedSubfolder);
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          await renameWithRetry(filePath, path.join(dir, path.basename(filePath)));
+          try { fs.unlinkSync(sentSidecarPath(filePath)); } catch { /* non-fatal */ }
+          console.log(`[FaxParser] Deferred move complete.`);
+        } catch (err: unknown) {
+          console.warn(`[FaxParser] Deferred move still pending: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      })().finally(() => inFlight.delete(filePath));
+      return;
+    }
 
     // Skip files quarantined for manual review
     if (fs.existsSync(holdSidecarPath(filePath))) {
@@ -137,6 +207,12 @@ async function startWatcher(): Promise<void> {
 
     processFile(filePath)
       .catch((err: unknown) => {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') {
+          // File disappeared between detection and processing (fax software moved it). Skip silently.
+          console.log(`[FaxParser] Skipping ${path.basename(filePath)}: file already gone.`);
+          return;
+        }
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[FaxParser] Error processing ${path.basename(filePath)}: ${msg}`);
         appendLogEntry({
@@ -160,6 +236,8 @@ async function startWatcher(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = () => {
     console.log('[FaxParser] Shutting down...');
+    smtpServer?.close();
+    pop3Server?.close();
     watcher.close().finally(() => process.exit(0));
   };
   process.on('SIGTERM', shutdown);
@@ -176,9 +254,15 @@ if (extractOnlyArg) {
   // OCR + field extraction only — no email, no file move, no log write.
   const filePath = extractOnlyArg.slice('--extract-only='.length);
   (async () => {
-    const ocrText = await runOcr(filePath);
-    const fields = parseOrderFields(ocrText);
-    process.stdout.write(JSON.stringify({ rawText: ocrText, fields }, null, 2) + '\n');
+    const { text, words } = await runOcrFull(filePath);
+    const fields = parseOrderFields(text);
+    const detectedBounds = detectFieldBboxes(fields, words);
+    process.stdout.write(JSON.stringify({
+      rawText: text,
+      fields,
+      detectedBounds,
+      filePath: path.resolve(filePath),
+    }, null, 2) + '\n');
     process.exit(0);
   })().catch((err: unknown) => {
     process.stderr.write('[FaxParser] extract-only failed: ' + (err instanceof Error ? err.message : String(err)) + '\n');

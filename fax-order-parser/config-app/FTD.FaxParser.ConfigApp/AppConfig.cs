@@ -22,6 +22,12 @@ internal sealed class AppConfig
   [JsonPropertyName("email")]
   public EmailConfig Email { get; set; } = new();
 
+  [JsonPropertyName("fieldBounds")]
+  public Dictionary<string, FieldBoundsConfig> FieldBounds { get; set; } = new();
+
+  [JsonPropertyName("localRelay")]
+  public LocalRelayConfig LocalRelay { get; set; } = new();
+
   [JsonPropertyName("fieldMap")]
   public Dictionary<string, string> FieldMap { get; set; } = new()
   {
@@ -31,6 +37,7 @@ internal sealed class AppConfig
     ["Product Code 1"]         = "Product Item Number",
     ["Delivery Instructions"]  = "Delivery Time",
     ["Additional Information"] = "For the Passing Of",
+    ["Delivery Date"]          = "Delivery Date",
   };
 
   private static readonly JsonSerializerOptions SerializerOptions = new()
@@ -61,6 +68,51 @@ internal sealed class AppConfig
   }
 }
 
+internal sealed class LocalRelayConfig
+{
+  [JsonPropertyName("enabled")]
+  public bool Enabled { get; set; } = false;
+
+  [JsonPropertyName("smtpPort")]
+  public int SmtpPort { get; set; } = 2525;
+
+  [JsonPropertyName("pop3Port")]
+  public int Pop3Port { get; set; } = 1110;
+}
+
+internal sealed class FieldBoundsConfig
+{
+  // Polygon points, each normalized to 0–1 of image width/height
+  [JsonPropertyName("points")]
+  public List<PointConfig>? Points { get; set; }
+
+  // Legacy rectangle fields kept for backward-compat deserialization
+  [JsonPropertyName("x")] public double? X { get; set; }
+  [JsonPropertyName("y")] public double? Y { get; set; }
+  [JsonPropertyName("w")] public double? W { get; set; }
+  [JsonPropertyName("h")] public double? H { get; set; }
+
+  public List<PointConfig> GetPoints()
+  {
+    if (Points is { Count: > 0 }) return Points;
+    if (X.HasValue && Y.HasValue && W.HasValue && H.HasValue)
+      return
+      [
+        new() { X = X.Value,            Y = Y.Value },
+        new() { X = X.Value + W.Value,  Y = Y.Value },
+        new() { X = X.Value + W.Value,  Y = Y.Value + H.Value },
+        new() { X = X.Value,            Y = Y.Value + H.Value },
+      ];
+    return [];
+  }
+}
+
+internal sealed class PointConfig
+{
+  [JsonPropertyName("x")] public double X { get; set; }
+  [JsonPropertyName("y")] public double Y { get; set; }
+}
+
 internal sealed class EmailConfig
 {
   [JsonPropertyName("senderAddress")]
@@ -68,6 +120,9 @@ internal sealed class EmailConfig
 
   [JsonPropertyName("senderPassword")]
   public string SenderPassword { get; set; } = string.Empty;
+
+  [JsonPropertyName("smtpUsername")]
+  public string SmtpUsername { get; set; } = string.Empty;
 
   [JsonPropertyName("recipientAddress")]
   public string RecipientAddress { get; set; } = "ftdpos71440@oliverflowers.com";
@@ -110,6 +165,12 @@ internal sealed class OrderLogEntry
 
   [JsonPropertyName("error")]
   public string? Error { get; set; }
+
+  [JsonPropertyName("fields")]
+  public Dictionary<string, string>? Fields { get; set; }
+
+  [JsonPropertyName("processedFilePath")]
+  public string? ProcessedFilePath { get; set; }
 
   private static readonly JsonSerializerOptions SerializerOptions = new()
   {
