@@ -34,20 +34,23 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 async function loadConfig() {
   const cfg = await window.faxParserApi.loadConfig();
   const email = cfg.email ?? {};
+  const processing = cfg.processing ?? {};
 
   $('watchFolder').value        = cfg.watchFolder ?? '';
   $('pollInterval').value       = cfg.pollIntervalSeconds ?? 10;
   $('fileFormat').value         = cfg.fileFormat ?? 'PDF';
   $('processedSubfolder').value = cfg.processedSubfolder ?? 'processed';
+  $('usePlacedDateFallback').checked =
+    processing.useOrderPlacedDateWhenDeliveryDateMissing !== false;
 
   $('senderAddress').value        = email.senderAddress   ?? '';
   $('senderPassword').value       = email.senderPassword  ?? '';
   $('recipientAddress').value     = email.recipientAddress ?? '';
   $('subjectLine').value          = email.subjectLine      ?? '';
   $('encryptionPassword').value   = email.encryptionPassword ?? '';
-  $('encryptionAlgorithm').value  = email.encryptionAlgorithm ?? 'TripleDES';
+  $('encryptionAlgorithm').value  = email.encryptionAlgorithm ?? 'None';
   $('smtpHost').value             = email.smtpHost         ?? '';
-  $('smtpPort').value             = email.smtpPort         ?? 587;
+  $('smtpPort').value             = email.smtpPort         ?? 2525;
 }
 
 async function saveConfig() {
@@ -64,7 +67,15 @@ async function saveConfig() {
       encryptionPassword: $('encryptionPassword').value,
       encryptionAlgorithm:$('encryptionAlgorithm').value,
       smtpHost:           $('smtpHost').value.trim(),
-      smtpPort:           parseInt($('smtpPort').value, 10) || 587,
+      smtpPort:           parseInt($('smtpPort').value, 10) || 2525,
+    },
+    localRelay: {
+      enabled: true,
+      smtpPort: parseInt($('smtpPort').value, 10) || 2525,
+      pop3Port: 1110,
+    },
+    processing: {
+      useOrderPlacedDateWhenDeliveryDateMissing: $('usePlacedDateFallback').checked,
     },
   };
 
@@ -131,6 +142,7 @@ async function loadLog() {
     const note = e.error
       ? `<span title="${escHtml(e.error)}">⚠ ${escHtml(e.error.slice(0, 50))}…</span>`
       : '';
+    const shownNote = note || (e.note ? `<span title="${escHtml(e.note)}">${escHtml(e.note.slice(0, 50))}${e.note.length > 50 ? '...' : ''}</span>` : '');
     return `<tr>
       <td>${ts}</td>
       <td>${escHtml(e.fileName)}</td>
@@ -138,7 +150,7 @@ async function loadLog() {
       <td>${escHtml(e.customerName ?? '')}</td>
       <td>${escHtml(e.deliveryDate ?? '')}</td>
       <td>${emailCell}</td>
-      <td>${note}</td>
+      <td>${shownNote}</td>
     </tr>`;
   }).join('');
 }

@@ -18,7 +18,7 @@ Assert-Admin
 
 $serviceHostExe = Join-Path $AppRoot "service-runtime\FTD.FaxParser.ServiceHost.exe"
 if (-not (Test-Path $serviceHostExe)) {
-  Write-Warning "Service host executable not found: $serviceHostExe — attempting sc.exe fallback."
+  Write-Warning "Service host executable not found: $serviceHostExe - attempting sc.exe fallback."
   & sc.exe stop   $ServiceName 2>$null | Out-Null
   & sc.exe delete $ServiceName 2>$null | Out-Null
   Write-Host "Service '$ServiceName' removed (fallback)."

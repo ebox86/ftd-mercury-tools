@@ -33,6 +33,35 @@ export interface FaxOrderFields {
   totalPayable?: string;
 }
 
+const MONTH_NAME_BY_TOKEN: Record<string, string> = {
+  jan: 'January', january: 'January',
+  feb: 'February', february: 'February',
+  mar: 'March', march: 'March',
+  apr: 'April', april: 'April',
+  may: 'May',
+  jun: 'June', june: 'June',
+  jul: 'July', july: 'July',
+  aug: 'August', august: 'August',
+  sep: 'September', sept: 'September', september: 'September',
+  oct: 'October', october: 'October',
+  nov: 'November', november: 'November',
+  dec: 'December', december: 'December',
+};
+
+export function deliveryDateFromOrderPlacedDate(orderPlacedDate: string | undefined): string | undefined {
+  if (!orderPlacedDate) return undefined;
+
+  const m = orderPlacedDate.match(
+    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2}),?\s*(\d{4})\b/i,
+  );
+  if (!m) return undefined;
+
+  const month = MONTH_NAME_BY_TOKEN[m[1].replace(/\.$/, '').toLowerCase()];
+  if (!month) return undefined;
+
+  return `${month} ${Number.parseInt(m[2], 10)}, ${m[3]}`;
+}
+
 // Regex-based parser for extracting fields from OCR text
 export function parseOrderFields(rawOcrText: string): FaxOrderFields {
   // Normalize Windows CRLF so all patterns can use \n consistently

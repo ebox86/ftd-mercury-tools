@@ -18,7 +18,7 @@ $configAppCsproj   = Join-Path $projectRoot "config-app\FTD.FaxParser.ConfigApp\
 $stageRoot     = Join-Path $projectRoot "artifacts\installer\stage"
 $distRoot      = Join-Path $projectRoot "dist"
 
-# ── Verify prerequisites ───────────────────────────────────────────────────────
+# Verify prerequisites
 
 if (-not (Test-Path $installerIss))      { throw "Installer script not found: $installerIss" }
 if (-not (Test-Path $serviceHostCsproj)) { throw "Service host project not found: $serviceHostCsproj" }
@@ -32,15 +32,19 @@ if (-not (Test-Path (Join-Path $NodeRuntimeDir "node.exe"))) {
 }
 
 # Check InnoSetup
+$isccOnPath = Get-Command ISCC.exe -ErrorAction SilentlyContinue
 $isccCandidates = @(
   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
   "C:\Program Files\Inno Setup 6\ISCC.exe",
-  (Get-Command ISCC.exe -ErrorAction SilentlyContinue)?.Source
+  (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe")
 ) | Where-Object { $_ -and (Test-Path $_) }
+if ($isccOnPath -and (Test-Path $isccOnPath.Source)) {
+  $isccCandidates += $isccOnPath.Source
+}
 if (-not $isccCandidates) { throw "Inno Setup 6 (ISCC.exe) not found. Install from https://jrsoftware.org/isdl.php" }
-$iscc = $isccCandidates[0]
+$iscc = @($isccCandidates)[0]
 
-# ── Clean / create stage ───────────────────────────────────────────────────────
+# Clean / create stage
 
 if (Test-Path $stageRoot) { Remove-Item -Recurse -Force $stageRoot }
 $stageRuntime       = Join-Path $stageRoot "runtime"
@@ -50,12 +54,12 @@ $stageConfigApp     = Join-Path $stageRoot "config-app"
 
 New-Item -ItemType Directory -Path $stageRuntime, $stageServiceDir, $stageServiceRuntime, $stageConfigApp | Out-Null
 
-# ── 1. Copy bundled Node.js runtime ───────────────────────────────────────────
+# 1. Copy bundled Node.js runtime
 
 Write-Host "Copying Node.js runtime from $NodeRuntimeDir ..."
 Copy-Item -Path (Join-Path $NodeRuntimeDir "*") -Destination $stageRuntime -Recurse
 
-# ── 2. Build Node.js service (TypeScript → dist) ──────────────────────────────
+# 2. Build Node.js service (TypeScript to dist)
 
 Write-Host "Building Node.js service (TypeScript)..."
 Push-Location $projectRoot
@@ -87,8 +91,9 @@ if (Test-Path $trainedData) {
 # Copy service management scripts
 Copy-Item (Join-Path $projectRoot "service\install-fax-parser-service.ps1")   -Destination $stageServiceDir
 Copy-Item (Join-Path $projectRoot "service\uninstall-fax-parser-service.ps1") -Destination $stageServiceDir
+Copy-Item (Join-Path $projectRoot "service\write-local-relay-config.ps1")     -Destination $stageServiceDir
 
-# ── 3. Build C# service host ───────────────────────────────────────────────────
+# 3. Build C# service host
 
 Write-Host "Publishing C# service host ($ServiceHostRuntimeIdentifier)..."
 dotnet publish $serviceHostCsproj `
@@ -100,7 +105,7 @@ dotnet publish $serviceHostCsproj `
 
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit code $LASTEXITCODE)." }
 
-# ── 4. Publish WinForms config app ───────────────────────────────────────────
+# 4. Publish WinForms config app
 
 Write-Host "Publishing WinForms config app ($ConfigAppRuntimeIdentifier)..."
 dotnet publish $configAppCsproj `
@@ -112,23 +117,23 @@ dotnet publish $configAppCsproj `
 
 if ($LASTEXITCODE -ne 0) { throw "Config app publish failed (exit code $LASTEXITCODE)." }
 
-# ── 5. Copy app icon next to config exe (loaded at runtime by MainForm) ───────
+# 5. Copy app icon next to config exe (loaded at runtime by MainForm)
 
 $iconSrc = Join-Path $projectRoot "installer\assets\fax-parser.ico"
 if (Test-Path $iconSrc) {
   Copy-Item $iconSrc -Destination (Join-Path $stageConfigApp "app-icon.ico") -Force
 }
 
-# ── 6. Copy icon to installer assets ─────────────────────────────────────────
+# 6. Copy icon to installer assets
 
 $iconSrc = Join-Path $projectRoot "installer\assets\fax-parser.ico"
 if (-not (Test-Path $iconSrc)) {
-  Write-Warning "Icon file not found: $iconSrc — using a placeholder. The installer icon will be missing."
+  Write-Warning "Icon file not found: $iconSrc - using a placeholder. The installer icon will be missing."
   # Create empty placeholder so InnoSetup doesn't fail
   [System.IO.File]::WriteAllBytes($iconSrc, [byte[]]@())
 }
 
-# ── 7. Run InnoSetup ─────────────────────────────────────────────────────────
+# 7. Run InnoSetup
 
 if (-not (Test-Path $distRoot)) { New-Item -ItemType Directory -Path $distRoot | Out-Null }
 

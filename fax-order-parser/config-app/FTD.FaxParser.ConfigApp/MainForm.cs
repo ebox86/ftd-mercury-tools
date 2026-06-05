@@ -16,9 +16,21 @@ internal sealed class MainForm : Form
   private static readonly Color  AccentColor   = Color.FromArgb(26, 58, 92);
   private static readonly Color  BgColor       = Color.FromArgb(240, 242, 245);
   private const string           ServiceName   = "FTD Fax Order Parser";
-  private static readonly string AppRoot       = @"C:\FTDTools\FaxOrderParser";
-  private static readonly string NodeExePath   = Path.Combine(@"C:\FTDTools\FaxOrderParser", "runtime", "node.exe");
-  private static readonly string ServiceScript = Path.Combine(@"C:\FTDTools\FaxOrderParser", "service", "service.js");
+  private static readonly string InstalledAppRoot = @"C:\FTDTools\FaxOrderParser";
+  private static readonly string? DevProjectRoot = FindDevProjectRoot();
+  private const string           LocalRelayHost = "127.0.0.1";
+  private const string           LocalRelaySenderAddress = "faxparser@localhost.local";
+  private const string           LocalRelayRecipientAddress = "order@localhost.local";
+
+  private static string AppRoot => Environment.GetEnvironmentVariable("FAX_PARSER_APP_ROOT")
+    ?? DevProjectRoot
+    ?? InstalledAppRoot;
+
+  private static string NodeExePath => ResolveNodeExePath();
+  private static string ServiceScript => Environment.GetEnvironmentVariable("FAX_PARSER_SERVICE_SCRIPT")
+    ?? (DevProjectRoot is not null
+      ? Path.Combine(DevProjectRoot, "dist", "service.js")
+      : Path.Combine(AppRoot, "service", "service.js"));
 
   private static string ConfigPath => Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
@@ -34,12 +46,53 @@ internal sealed class MainForm : Form
   private static string OutLogPath => Path.Combine(ServiceLogDir, "fax-parser.out.log");
   private static string ErrLogPath => Path.Combine(ServiceLogDir, "fax-parser.err.log");
 
+  private static string? FindDevProjectRoot()
+  {
+    var dir = new DirectoryInfo(AppContext.BaseDirectory);
+    while (dir is not null)
+    {
+      if (File.Exists(Path.Combine(dir.FullName, "package.json")) &&
+          File.Exists(Path.Combine(dir.FullName, "src", "service.ts")) &&
+          Directory.Exists(Path.Combine(dir.FullName, "config-app")))
+        return dir.FullName;
+
+      dir = dir.Parent;
+    }
+
+    return null;
+  }
+
+  private static string ResolveNodeExePath()
+  {
+    var configured = Environment.GetEnvironmentVariable("FAX_PARSER_NODE_EXE");
+    if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
+      return configured;
+
+    var bundled = Path.Combine(AppRoot, "runtime", "node.exe");
+    if (File.Exists(bundled)) return bundled;
+
+    var pathEnv = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+    foreach (var dir in pathEnv.Split(Path.PathSeparator))
+    {
+      if (string.IsNullOrWhiteSpace(dir)) continue;
+      try
+      {
+        var candidate = Path.Combine(dir.Trim('"'), "node.exe");
+        if (File.Exists(candidate)) return candidate;
+      }
+      catch { /* ignore malformed PATH entry */ }
+    }
+
+    return bundled;
+  }
+
   // ── Monitor tab controls ──────────────────────────────────────────────────────
 
   private TextBox        _watchFolderBox       = null!;
   private NumericUpDown  _pollIntervalSpinner  = null!;
   private ComboBox       _fileFormatCombo      = null!;
   private TextBox        _processedSubfolderBox = null!;
+  private CheckBox       _usePlacedDateFallbackCheck = null!;
 
   // ── Local relay controls ──────────────────────────────────────────────────────
 
@@ -106,6 +159,7 @@ internal sealed class MainForm : Form
   private Label          _serviceBadge         = null!;
   private Label          _footerStatusLabel    = null!;
   private System.Windows.Forms.Timer? _statusClearTimer;
+  private bool           _loadingConfig;
 
   // ── Constructor ───────────────────────────────────────────────────────────────
 
@@ -364,6 +418,17 @@ internal sealed class MainForm : Form
     panel.Controls.Add(_processedSubfolderBox);
     panel.Controls.Add(HintLabel("Processed files are moved here (relative to the watch folder)."));
 
+    _usePlacedDateFallbackCheck = new CheckBox
+    {
+      Text     = "Use order placed date when delivery date is missing",
+      AutoSize = true,
+      Checked  = true,
+      Margin   = new Padding(0, 10, 0, 0),
+      Font     = new Font("Segoe UI", 9f, FontStyle.Bold),
+    };
+    panel.Controls.Add(_usePlacedDateFallbackCheck);
+    panel.Controls.Add(HintLabel("If a CFS fax has no delivery date line, the parser uses the Placed date instead of holding the order."));
+
     // Local relay group
     var relayGroup = new GroupBox
     {
@@ -420,6 +485,12 @@ internal sealed class MainForm : Form
       var on = _relayEnabledCheck.Checked;
       _relaySmtpPortSpinner.Enabled = on;
       _relayPop3PortSpinner.Enabled = on;
+      if (on && !_loadingConfig) ApplyLocalRelayEmailDefaults();
+    };
+    _relaySmtpPortSpinner.ValueChanged += (_, _) =>
+    {
+      if (_relayEnabledCheck.Checked && !_loadingConfig)
+        _smtpPortSpinner.Value = _relaySmtpPortSpinner.Value;
     };
 
     panel.Controls.Add(relayGroup);
@@ -516,7 +587,7 @@ internal sealed class MainForm : Form
     _smtpHostBox = new TextBox { Width = 280, Location = new Point(130, 24) };
     _smtpPortSpinner = new NumericUpDown
     {
-      Minimum  = 1, Maximum = 65535, Value = 587,
+      Minimum  = 1, Maximum = 65535, Value = 2525,
       Width    = 90, Location = new Point(130, 60),
     };
     smtpGroup.Controls.AddRange(new Control[]
@@ -808,32 +879,59 @@ internal sealed class MainForm : Form
   {
     var cfg = AppConfig.Load(ConfigPath);
 
-    _watchFolderBox.Text        = cfg.WatchFolder;
-    _pollIntervalSpinner.Value  = Math.Clamp(cfg.PollIntervalSeconds, 1, 3600);
-    _fileFormatCombo.SelectedIndex = cfg.FileFormat == "TIF" ? 1 : 0;
-    _processedSubfolderBox.Text = cfg.ProcessedSubfolder;
+    _loadingConfig = true;
+    try
+    {
+      _watchFolderBox.Text        = cfg.WatchFolder;
+      _pollIntervalSpinner.Value  = Math.Clamp(cfg.PollIntervalSeconds, 1, 3600);
+      _fileFormatCombo.SelectedIndex = cfg.FileFormat == "TIF" ? 1 : 0;
+      _processedSubfolderBox.Text = cfg.ProcessedSubfolder;
+      _usePlacedDateFallbackCheck.Checked = cfg.Processing.UseOrderPlacedDateWhenDeliveryDateMissing;
 
-    _senderAddressBox.Text    = cfg.Email.SenderAddress;
-    _senderPasswordBox.Text   = cfg.Email.SenderPassword;
-    _smtpUsernameBox.Text     = cfg.Email.SmtpUsername;
-    _recipientAddressBox.Text = cfg.Email.RecipientAddress;
-    _subjectLineBox.Text      = cfg.Email.SubjectLine;
-    _smtpHostBox.Text         = cfg.Email.SmtpHost;
-    _smtpPortSpinner.Value    = Math.Clamp(cfg.Email.SmtpPort, 1, 65535);
+      _senderAddressBox.Text    = cfg.Email.SenderAddress;
+      _senderPasswordBox.Text   = cfg.Email.SenderPassword;
+      _smtpUsernameBox.Text     = cfg.Email.SmtpUsername;
+      _recipientAddressBox.Text = cfg.Email.RecipientAddress;
+      _subjectLineBox.Text      = cfg.Email.SubjectLine;
+      _smtpHostBox.Text         = cfg.Email.SmtpHost;
+      _smtpPortSpinner.Value    = Math.Clamp(cfg.Email.SmtpPort, 1, 65535);
 
-    _encryptionPasswordBox.Text = cfg.Email.EncryptionPassword;
-    var algoIndex = _encryptionAlgorithmCombo.Items.IndexOf(cfg.Email.EncryptionAlgorithm);
-    _encryptionAlgorithmCombo.SelectedIndex = algoIndex >= 0 ? algoIndex : 0;
+      _encryptionPasswordBox.Text = cfg.Email.EncryptionPassword;
+      var algoIndex = _encryptionAlgorithmCombo.Items.IndexOf(cfg.Email.EncryptionAlgorithm);
+      _encryptionAlgorithmCombo.SelectedIndex = algoIndex >= 0 ? algoIndex : 0;
 
-    _relayEnabledCheck.Checked    = cfg.LocalRelay.Enabled;
-    _relaySmtpPortSpinner.Value   = Math.Clamp(cfg.LocalRelay.SmtpPort, 1, 65535);
-    _relayPop3PortSpinner.Value   = Math.Clamp(cfg.LocalRelay.Pop3Port,  1, 65535);
-    _relaySmtpPortSpinner.Enabled = cfg.LocalRelay.Enabled;
-    _relayPop3PortSpinner.Enabled = cfg.LocalRelay.Enabled;
+      _relaySmtpPortSpinner.Value   = Math.Clamp(cfg.LocalRelay.SmtpPort, 1, 65535);
+      _relayPop3PortSpinner.Value   = Math.Clamp(cfg.LocalRelay.Pop3Port,  1, 65535);
+      _relayEnabledCheck.Checked    = cfg.LocalRelay.Enabled;
+      _relaySmtpPortSpinner.Enabled = cfg.LocalRelay.Enabled;
+      _relayPop3PortSpinner.Enabled = cfg.LocalRelay.Enabled;
+    }
+    finally
+    {
+      _loadingConfig = false;
+    }
+
+    if (_relayEnabledCheck.Checked) ApplyLocalRelayEmailDefaults();
+  }
+
+  private void ApplyLocalRelayEmailDefaults()
+  {
+    _senderAddressBox.Text = LocalRelaySenderAddress;
+    _senderPasswordBox.Clear();
+    _smtpUsernameBox.Clear();
+    _recipientAddressBox.Text = LocalRelayRecipientAddress;
+    _smtpHostBox.Text = LocalRelayHost;
+    _smtpPortSpinner.Value = _relaySmtpPortSpinner.Value;
+    _encryptionPasswordBox.Clear();
+
+    var noneIndex = _encryptionAlgorithmCombo.Items.IndexOf("None");
+    if (noneIndex >= 0) _encryptionAlgorithmCombo.SelectedIndex = noneIndex;
   }
 
   private void SaveConfig()
   {
+    if (_relayEnabledCheck.Checked) ApplyLocalRelayEmailDefaults();
+
     var cfg = new AppConfig
     {
       WatchFolder         = _watchFolderBox.Text.Trim(),
@@ -850,13 +948,17 @@ internal sealed class MainForm : Form
         SmtpHost         = _smtpHostBox.Text.Trim(),
         SmtpPort         = (int)_smtpPortSpinner.Value,
         EncryptionPassword  = _encryptionPasswordBox.Text,
-        EncryptionAlgorithm = _encryptionAlgorithmCombo.SelectedItem?.ToString() ?? "TripleDES",
+        EncryptionAlgorithm = _encryptionAlgorithmCombo.SelectedItem?.ToString() ?? "None",
       },
       LocalRelay = new LocalRelayConfig
       {
         Enabled  = _relayEnabledCheck.Checked,
         SmtpPort = (int)_relaySmtpPortSpinner.Value,
         Pop3Port = (int)_relayPop3PortSpinner.Value,
+      },
+      Processing = new ProcessingConfig
+      {
+        UseOrderPlacedDateWhenDeliveryDateMissing = _usePlacedDateFallbackCheck.Checked,
       },
     };
 
@@ -890,6 +992,9 @@ internal sealed class MainForm : Form
         ? dto.LocalDateTime.ToString("g")
         : e.Timestamp;
       var note = e.Error is { Length: > 60 } err ? err[..60] + "…" : e.Error ?? string.Empty;
+
+      if (string.IsNullOrEmpty(note) && !string.IsNullOrEmpty(e.Note))
+        note = e.Note.Length > 60 ? e.Note[..60] + "..." : e.Note;
 
       var rowIndex = _logGrid.Rows.Add(
         ts, e.FileName, e.OrderNumber ?? string.Empty,
@@ -2238,6 +2343,9 @@ internal sealed class MainForm : Form
     if (!string.IsNullOrWhiteSpace(entry.Error))
       statusText += $"  —  {entry.Error}";
 
+    if (string.IsNullOrWhiteSpace(entry.Error) && !string.IsNullOrWhiteSpace(entry.Note))
+      statusText += $"  -  {entry.Note}";
+
     var infoBar = new Label
     {
       Text      = $"{ts}   ·   {entry.FileName}   ·   {statusText}",
@@ -2422,6 +2530,7 @@ internal sealed class MainForm : Form
       };
       psi.ArgumentList.Add(ServiceScript);
       psi.ArgumentList.Add($"--process-file={destInWatch}");
+      psi.ArgumentList.Add("--force-send");
       if (overridesFilePath != null)
         psi.ArgumentList.Add($"--field-overrides-file={overridesFilePath}");
 
@@ -2503,6 +2612,7 @@ internal sealed class MainForm : Form
         };
         psi.ArgumentList.Add(ServiceScript);
         psi.ArgumentList.Add($"--process-file={filePath}");
+        psi.ArgumentList.Add("--force-send");
 
         using var proc = Process.Start(psi)!;
         var stdoutTask = proc.StandardOutput.ReadToEndAsync();
@@ -2571,6 +2681,7 @@ internal sealed class MainForm : Form
       };
       psi.ArgumentList.Add(ServiceScript);
       psi.ArgumentList.Add($"--process-file={filePath}");
+      psi.ArgumentList.Add("--force-send");
       psi.ArgumentList.Add($"--field-overrides-file={overridesFilePath}");
 
       using var proc = Process.Start(psi)!;

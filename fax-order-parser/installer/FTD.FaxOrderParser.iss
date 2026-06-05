@@ -70,6 +70,7 @@ Source: "{#StageDir}\config-app\*"; DestDir: "{app}\config-app"; Flags: recurses
 ; PowerShell helper scripts
 Source: "{#StageDir}\service\install-fax-parser-service.ps1";   DestDir: "{app}\service"; Flags: ignoreversion
 Source: "{#StageDir}\service\uninstall-fax-parser-service.ps1"; DestDir: "{app}\service"; Flags: ignoreversion
+Source: "{#StageDir}\service\write-local-relay-config.ps1";     DestDir: "{app}\service"; Flags: ignoreversion
 
 [Dirs]
 ; Ensure the ProgramData config directory exists
@@ -85,6 +86,12 @@ Name: "{group}\Uninstall {#MyAppName}";    Filename: "{uninstallexe}"
 Name: "{userdesktop}\{#MyAppName} Configuration"; Filename: "{app}\config-app\FaxParserConfig.exe"; IconFilename: "{app}\app-icon.ico"
 
 [Run]
+; Create or migrate config.json to the bundled localhost SMTP/POP3 relay before the service starts
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\service\write-local-relay-config.ps1"" -ConfigDir ""{commonappdata}\FTD\FaxOrderParser"" -WatchFolder ""C:\received_faxes"""; \
+  StatusMsg: "Configuring built-in local mail relay..."; \
+  Flags: runhidden waituntilterminated
+
 ; Install and start the Windows service after all files are placed
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\service\install-fax-parser-service.ps1"" -AppRoot ""{app}"""; \

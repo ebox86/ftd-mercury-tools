@@ -10,10 +10,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import chokidar from 'chokidar';
-import { loadConfig, DEFAULT_FIELD_MAP } from './config';
+import { FaxParserConfig, loadConfig } from './config';
 import { appendLogEntry, readLogEntries } from './logger';
 import { sendWoiEmail, getMissingRequiredFields } from './email-sender';
-import { runOcr, runOcrFull, parseOrderFields, detectFieldBboxes, FaxOrderFields } from './index';
+import { runOcr, runOcrFull, parseOrderFields, detectFieldBboxes, deliveryDateFromOrderPlacedDate, FaxOrderFields } from './index';
 import { startSmtpServer, startPop3Server } from './local-relay';
 
 // ── File processor ─────────────────────────────────────────────────────────────
@@ -41,7 +41,18 @@ function sentSidecarPath(filePath: string): string {
   return filePath + '.sent.json';
 }
 
-async function processFile(filePath: string, fieldOverrides?: Partial<FaxOrderFields>): Promise<void> {
+function applyDeliveryDateFallback(fields: FaxOrderFields, config: FaxParserConfig): string | undefined {
+  if (fields.deliveryDate?.trim()) return undefined;
+  if (!config.processing.useOrderPlacedDateWhenDeliveryDateMissing) return undefined;
+
+  const fallbackDate = deliveryDateFromOrderPlacedDate(fields.orderPlacedDate);
+  if (!fallbackDate) return undefined;
+
+  fields.deliveryDate = fallbackDate;
+  return `Delivery Date missing; used order placed date fallback: ${fallbackDate}`;
+}
+
+async function processFile(filePath: string, fieldOverrides?: Partial<FaxOrderFields>, forceSend = false): Promise<void> {
   const config = loadConfig();
   const fileName = path.basename(filePath);
 
@@ -53,6 +64,11 @@ async function processFile(filePath: string, fieldOverrides?: Partial<FaxOrderFi
   if (fieldOverrides && Object.keys(fieldOverrides).length > 0) {
     Object.assign(fields, fieldOverrides);
     console.log('[FaxParser] Applied manual field overrides from config app.');
+  }
+
+  const deliveryDateFallbackNote = applyDeliveryDateFallback(fields, config);
+  if (deliveryDateFallbackNote) {
+    console.warn(`[FaxParser] ${deliveryDateFallbackNote}`);
   }
 
   // Quarantine the file if required WOI fields are missing after OCR
@@ -71,13 +87,29 @@ async function processFile(filePath: string, fieldOverrides?: Partial<FaxOrderFi
 
   // Guard against double-send: if the log already shows this file was emailed
   // successfully (e.g. .sent.json was lost but email went through), skip re-sending.
-  if (!fieldOverrides) {
+  if (!fieldOverrides && !forceSend) {
     const prevEntry = readLogEntries().find(e => e.fileName === fileName && e.emailSent);
     if (prevEntry) {
       console.warn(`[FaxParser] SKIP double-send: ${fileName} already emailed at ${prevEntry.timestamp}. Moving file only.`);
       const processedDir = path.join(path.dirname(filePath), config.processedSubfolder);
       if (!fs.existsSync(processedDir)) fs.mkdirSync(processedDir, { recursive: true });
-      try { await renameWithRetry(filePath, path.join(processedDir, fileName)); } catch { /* non-fatal */ }
+      const dest = path.join(processedDir, fileName);
+      let movedOk = false;
+      try {
+        await renameWithRetry(filePath, dest);
+        movedOk = true;
+      } catch { /* non-fatal */ }
+      appendLogEntry({
+        timestamp: new Date().toISOString(),
+        fileName,
+        orderNumber: fields.orderNumber,
+        customerName: fields.customerName,
+        deliveryDate: fields.deliveryDate,
+        emailSent: false,
+        note: deliveryDateFallbackNote,
+        error: `SKIP duplicate-send: already emailed at ${prevEntry.timestamp}`,
+        processedFilePath: movedOk ? dest : undefined,
+      });
       return;
     }
   }
@@ -95,6 +127,30 @@ async function processFile(filePath: string, fieldOverrides?: Partial<FaxOrderFi
   } catch (err: unknown) {
     error = err instanceof Error ? err.message : String(err);
     console.error(`[FaxParser] Email send failed: ${error}`);
+  }
+
+  if (!emailSent) {
+    try {
+      fs.writeFileSync(holdSidecarPath(filePath), JSON.stringify({
+        error: `Email send failed: ${error ?? 'unknown error'}`,
+        timestamp: new Date().toISOString(),
+      }, null, 2), 'utf-8');
+    } catch { /* non-fatal */ }
+
+    appendLogEntry({
+      timestamp: new Date().toISOString(),
+      fileName,
+      orderNumber: fields.orderNumber,
+      customerName: fields.customerName,
+      deliveryDate: fields.deliveryDate,
+      emailSent: false,
+      error,
+      note: deliveryDateFallbackNote,
+      fields: Object.fromEntries(
+        Object.entries(fields).filter(([, v]) => v !== undefined)
+      ) as Record<string, string>,
+    });
+    return;
   }
 
   try { fs.unlinkSync(holdSidecarPath(filePath)); } catch { /* not held */ }
@@ -123,6 +179,7 @@ async function processFile(filePath: string, fieldOverrides?: Partial<FaxOrderFi
     deliveryDate: fields.deliveryDate,
     emailSent,
     error,
+    note: deliveryDateFallbackNote,
     fields: Object.fromEntries(
       Object.entries(fields).filter(([, v]) => v !== undefined)
     ) as Record<string, string>,
@@ -137,8 +194,8 @@ async function startWatcher(): Promise<void> {
   const config = loadConfig();
 
   // Start built-in SMTP/POP3 relay if enabled
-  const smtpServer = config.localRelay.enabled ? startSmtpServer(config.localRelay.smtpPort) : null;
-  const pop3Server = config.localRelay.enabled ? startPop3Server(config.localRelay.pop3Port)  : null;
+  const smtpServer = config.localRelay.enabled ? await startSmtpServer(config.localRelay.smtpPort) : null;
+  const pop3Server = config.localRelay.enabled ? await startPop3Server(config.localRelay.pop3Port)  : null;
   if (config.localRelay.enabled)
     console.log(`[FaxParser] Local relay enabled — SMTP :${config.localRelay.smtpPort}  POP3 :${config.localRelay.pop3Port}`);
 
@@ -249,18 +306,22 @@ async function startWatcher(): Promise<void> {
 
 const extractOnlyArg = process.argv.slice(2).find((a: string) => a.startsWith('--extract-only='));
 const processFileArg = process.argv.slice(2).find((a: string) => a.startsWith('--process-file='));
+const forceSendArg = process.argv.slice(2).some((a: string) => a === '--force-send');
 
 if (extractOnlyArg) {
   // OCR + field extraction only — no email, no file move, no log write.
   const filePath = extractOnlyArg.slice('--extract-only='.length);
   (async () => {
+    const config = loadConfig();
     const { text, words } = await runOcrFull(filePath);
     const fields = parseOrderFields(text);
+    const deliveryDateFallbackNote = applyDeliveryDateFallback(fields, config);
     const detectedBounds = detectFieldBboxes(fields, words);
     process.stdout.write(JSON.stringify({
       rawText: text,
       fields,
       detectedBounds,
+      deliveryDateFallbackNote,
       filePath: path.resolve(filePath),
     }, null, 2) + '\n');
     process.exit(0);
@@ -287,7 +348,7 @@ if (extractOnlyArg) {
     }
   }
 
-  processFile(filePath, fieldOverrides)
+  processFile(filePath, fieldOverrides, forceSendArg)
     .then(() => { console.log('[FaxParser] Done.'); process.exit(0); })
     .catch((err: unknown) => {
       console.error('[FaxParser] Failed:', err instanceof Error ? err.message : String(err));

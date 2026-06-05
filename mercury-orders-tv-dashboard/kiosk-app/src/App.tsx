@@ -13,8 +13,10 @@ import {
   faInbox,
   faMagnifyingGlass,
   faPlay,
+  faPlus,
   faScroll,
   faTriangleExclamation,
+  faTrash,
   faTruck,
   faUpRightAndDownLeftFromCenter,
   faVolumeHigh,
@@ -67,6 +69,24 @@ import appPackage from '../package.json';
 type GroupedCards = Record<StatusStage, BoardCard[]>;
 type IntakeKind = 'uncreated' | 'ask' | 'cancel' | 'message';
 type IntakeMessageTypeKey = 'ask' | 'ans' | 'con' | 'cancel' | 'other' | 'unknown';
+type ZipGateMode = 'watchlist' | 'allowlist';
+type SenderGateMatchMode = 'contains' | 'exact';
+type OrderGateSeverity = 'review' | 'reject';
+
+interface SenderGateRule {
+  id: string;
+  pattern: string;
+  matchMode: SenderGateMatchMode;
+  label: string;
+  enabled: boolean;
+}
+
+interface IntakeGateResult {
+  key: string;
+  label: string;
+  detail: string;
+  severity: OrderGateSeverity;
+}
 
 interface IntakeTicketCard {
   id: string;
@@ -84,6 +104,8 @@ interface IntakeTicketCard {
   messageDate: string;
   notes: string;
   wireService: string;
+  senderName: string;
+  senderGateText: string;
   msgType: string;
   messageTypeKey: IntakeMessageTypeKey;
   messageTypeLabel: string;
@@ -98,6 +120,7 @@ interface IntakeTicketCard {
   askDebugSummary: string;
   askDebugDetails: string[];
   askMessageKeys: string[];
+  gateResults: IntakeGateResult[];
 }
 
 interface OrderReferenceEntry {
@@ -160,6 +183,10 @@ interface DashboardUserConfig {
   pageAutoRotateEnabled: boolean;
   pageAutoRotateIntervalSec: number;
   minOrderThreshold: number;
+  minOrderPadding: number;
+  zipGateMode: ZipGateMode;
+  gateZipCodes: string[];
+  blockedSenderRules: SenderGateRule[];
   currencySymbol: string;
   storeHours: StoreHoursConfig;
   shopName: string;
@@ -240,6 +267,10 @@ const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
   pageAutoRotateEnabled: false,
   pageAutoRotateIntervalSec: DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC,
   minOrderThreshold: 55,
+  minOrderPadding: 2,
+  zipGateMode: 'watchlist',
+  gateZipCodes: [],
+  blockedSenderRules: [],
   currencySymbol: '$',
   storeHours: DEFAULT_STORE_HOURS_CONFIG,
   shopName: '',
@@ -1018,6 +1049,13 @@ function clampInteger(value: unknown, minimum: number, maximum: number, fallback
   return rounded;
 }
 
+function clampCurrencyAmount(value: unknown, minimum: number, maximum: number, fallback: number): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  const clamped = Math.max(minimum, Math.min(maximum, numeric));
+  return Math.round(clamped * 100) / 100;
+}
+
 function normalizeSoundPreset(value: unknown): AlertSoundPreset {
   const raw = String(value || '').trim().toLowerCase();
   if (raw === 'classic_ding') return 'classic_ding';
@@ -1044,6 +1082,58 @@ function normalizeToggle(value: unknown, fallback: boolean): boolean {
 
 function normalizeConfigText(value: unknown, maxLength: number): string {
   return String(value || '').slice(0, maxLength);
+}
+
+function normalizeZipGateMode(value: unknown): ZipGateMode {
+  return value === 'allowlist' ? 'allowlist' : 'watchlist';
+}
+
+function normalizeSenderGateMatchMode(value: unknown): SenderGateMatchMode {
+  return value === 'exact' ? 'exact' : 'contains';
+}
+
+function normalizeGateZipCodes(raw: unknown): string[] {
+  const parts = Array.isArray(raw)
+    ? raw
+    : String(raw || '').split(/[\s,;]+/);
+  const next: string[] = [];
+  for (const part of parts) {
+    const zip = extractUsZip5(String(part || ''));
+    if (!zip || next.includes(zip)) continue;
+    next.push(zip);
+    if (next.length >= 100) break;
+  }
+  return next;
+}
+
+function createSenderGateRuleId(): string {
+  return `sender-rule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function normalizeSenderGateRules(raw: unknown): SenderGateRule[] {
+  const input = Array.isArray(raw) ? raw : [];
+  const rules: SenderGateRule[] = [];
+  for (let index = 0; index < input.length; index += 1) {
+    const item = input[index] as string | Partial<SenderGateRule> | null | undefined;
+    const patternRaw = typeof item === 'string'
+      ? item
+      : firstNonEmptyText(item?.pattern, (item as { value?: string } | null | undefined)?.value);
+    const pattern = normalizeConfigText(patternRaw, 120).trim();
+    const id = normalizeConfigText(typeof item === 'string' ? '' : item?.id, 80).trim();
+    if (!pattern && !id) continue;
+    const label = typeof item === 'string'
+      ? ''
+      : normalizeConfigText(item?.label, 60).trim();
+    rules.push({
+      id: id || `sender-rule-${index + 1}`,
+      pattern,
+      matchMode: normalizeSenderGateMatchMode(typeof item === 'string' ? 'contains' : item?.matchMode),
+      label,
+      enabled: typeof item === 'string' ? true : normalizeToggle(item?.enabled, true),
+    });
+    if (rules.length >= 50) break;
+  }
+  return rules;
 }
 
 function normalizeOptionalCoordinate(value: unknown): number | null {
@@ -1302,6 +1392,10 @@ function pickServerConfigFields(raw: Partial<DashboardUserConfig> | null | undef
     pageAutoRotateEnabled: raw?.pageAutoRotateEnabled,
     pageAutoRotateIntervalSec: raw?.pageAutoRotateIntervalSec,
     minOrderThreshold: raw?.minOrderThreshold,
+    minOrderPadding: raw?.minOrderPadding,
+    zipGateMode: raw?.zipGateMode,
+    gateZipCodes: raw?.gateZipCodes,
+    blockedSenderRules: raw?.blockedSenderRules,
     currencySymbol: raw?.currencySymbol,
     storeHours: raw?.storeHours,
     shopName: raw?.shopName,
@@ -1360,6 +1454,10 @@ function sanitizeDashboardConfig(raw: Partial<DashboardUserConfig> | null | unde
       DEFAULT_DASHBOARD_CONFIG.pageAutoRotateIntervalSec,
     ),
     minOrderThreshold: clampInteger(raw?.minOrderThreshold, 0, 9999, DEFAULT_DASHBOARD_CONFIG.minOrderThreshold),
+    minOrderPadding: clampCurrencyAmount(raw?.minOrderPadding, 0, 25, DEFAULT_DASHBOARD_CONFIG.minOrderPadding),
+    zipGateMode: normalizeZipGateMode(raw?.zipGateMode),
+    gateZipCodes: normalizeGateZipCodes(raw?.gateZipCodes),
+    blockedSenderRules: normalizeSenderGateRules(raw?.blockedSenderRules),
     currencySymbol: String(raw?.currencySymbol ?? DEFAULT_DASHBOARD_CONFIG.currencySymbol).trim().slice(0, 3) || '$',
     storeHours: normalizeStoreHoursConfig(raw?.storeHours),
     shopName: normalizeConfigText(raw?.shopName, 80),
@@ -1406,6 +1504,10 @@ function isDashboardConfigEqual(leftRaw: DashboardUserConfig, rightRaw: Dashboar
     && left.pageAutoRotateEnabled === right.pageAutoRotateEnabled
     && left.pageAutoRotateIntervalSec === right.pageAutoRotateIntervalSec
     && left.minOrderThreshold === right.minOrderThreshold
+    && left.minOrderPadding === right.minOrderPadding
+    && left.zipGateMode === right.zipGateMode
+    && left.gateZipCodes.join('|') === right.gateZipCodes.join('|')
+    && JSON.stringify(left.blockedSenderRules) === JSON.stringify(right.blockedSenderRules)
     && left.currencySymbol === right.currencySymbol
     && JSON.stringify(left.storeHours) === JSON.stringify(right.storeHours)
     && left.shopName === right.shopName
@@ -1677,6 +1779,155 @@ function sourcePillLabel(wireServiceRaw: string): string {
   }
 
   return value.toUpperCase();
+}
+
+function senderGateFieldsForMessage(message: MessageItem): string[] {
+  const wireService = String(message.WIRE_SERVICE || '').trim();
+  return [
+    String(message.FIRM_NAME || '').trim(),
+    String(message.SHOP_NAME || '').trim(),
+    String(message.SHOP_CODE || '').trim(),
+    String(message.MEMBER_CODE || '').trim(),
+    String(message.MERCURY_NUM || '').trim(),
+    wireService,
+    wireService ? sourcePillLabel(wireService) : '',
+  ].filter(Boolean);
+}
+
+function senderDisplayNameForMessage(message: MessageItem): string {
+  const fields = senderGateFieldsForMessage(message);
+  return firstNonEmptyText(
+    message.FIRM_NAME,
+    message.SHOP_NAME,
+    message.SHOP_CODE,
+    fields[0],
+  );
+}
+
+function senderGateTextForMessage(message: MessageItem): string {
+  return Array.from(new Set(senderGateFieldsForMessage(message))).join(' | ');
+}
+
+function normalizeGateMatchText(raw: string): { loose: string; compact: string } {
+  const loose = String(raw || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return {
+    loose,
+    compact: loose.replace(/[^a-z0-9]/g, ''),
+  };
+}
+
+function senderGateRuleMatches(rule: SenderGateRule, senderGateText: string): boolean {
+  const pattern = normalizeGateMatchText(rule.pattern);
+  if (!pattern.loose && !pattern.compact) return false;
+  const fields = senderGateText
+    .split('|')
+    .map(part => part.trim())
+    .filter(Boolean);
+  if (!fields.length) return false;
+
+  if (rule.matchMode === 'exact') {
+    return fields.some(field => {
+      const fieldText = normalizeGateMatchText(field);
+      return Boolean(pattern.loose && fieldText.loose === pattern.loose)
+        || Boolean(pattern.compact && fieldText.compact === pattern.compact);
+    });
+  }
+
+  const haystack = normalizeGateMatchText(fields.join(' '));
+  return Boolean(pattern.loose && haystack.loose.includes(pattern.loose))
+    || Boolean(pattern.compact && haystack.compact.includes(pattern.compact));
+}
+
+function formatGateCurrencyAmount(value: number, currencySymbol: string): string {
+  const symbol = String(currencySymbol || '$').trim() || '$';
+  const amount = Number.isFinite(value) ? value : 0;
+  const amountText = Number.isInteger(amount) ? amount.toFixed(0) : amount.toFixed(2);
+  return `${symbol}${amountText}`;
+}
+
+function formatGateCurrencyCents(cents: number, currencySymbol: string): string {
+  return formatGateCurrencyAmount(cents / 100, currencySymbol);
+}
+
+function evaluateIntakeGateResults(ticket: IntakeTicketCard, config: DashboardUserConfig): IntakeGateResult[] {
+  const results: IntakeGateResult[] = [];
+  const isIncomingOrder = ticket.kind === 'uncreated';
+  const currencySymbol = config.currencySymbol || '$';
+
+  if (isIncomingOrder && config.minOrderThreshold > 0) {
+    const totalCents = amountToCents(ticket.orderAmount);
+    const minimumCents = Math.round(config.minOrderThreshold * 100);
+    const paddingCents = Math.round(config.minOrderPadding * 100);
+    const effectiveMinimumCents = Math.max(0, minimumCents - paddingCents);
+    const minimumLabel = formatGateCurrencyAmount(config.minOrderThreshold, currencySymbol);
+    const paddingLabel = formatGateCurrencyAmount(config.minOrderPadding, currencySymbol);
+
+    if (totalCents === null) {
+      results.push({
+        key: 'price-missing',
+        label: 'Total Missing',
+        detail: `No order total is available for minimum ${minimumLabel}.`,
+        severity: 'review',
+      });
+    } else if (totalCents < effectiveMinimumCents) {
+      results.push({
+        key: 'price-low',
+        label: 'Low Total',
+        detail: `Total ${formatGateCurrencyCents(totalCents, currencySymbol)} is below ${minimumLabel}${paddingCents > 0 ? ` after ${paddingLabel} padding` : ''}.`,
+        severity: 'reject',
+      });
+    } else if (paddingCents > 0 && totalCents < minimumCents) {
+      results.push({
+        key: 'price-padding',
+        label: 'Price Buffer',
+        detail: `Total ${formatGateCurrencyCents(totalCents, currencySymbol)} is inside the ${paddingLabel} buffer below ${minimumLabel}.`,
+        severity: 'review',
+      });
+    }
+  }
+
+  if (isIncomingOrder && config.gateZipCodes.length) {
+    const zip = extractUsZip5(firstNonEmptyText(ticket.destinationZip, ticket.destinationLabel));
+    const gateZipSet = new Set(config.gateZipCodes);
+    if (config.zipGateMode === 'allowlist') {
+      if (!zip) {
+        results.push({
+          key: 'zip-missing',
+          label: 'ZIP Missing',
+          detail: 'No destination ZIP is available for the incoming order allowlist.',
+          severity: 'review',
+        });
+      } else if (!gateZipSet.has(zip)) {
+        results.push({
+          key: 'zip-outside',
+          label: 'Outside ZIPs',
+          detail: `Destination ZIP ${zip} is not in the configured allowlist.`,
+          severity: 'reject',
+        });
+      }
+    } else if (zip && gateZipSet.has(zip)) {
+      results.push({
+        key: 'zip-watch',
+        label: 'ZIP Gate',
+        detail: `Destination ZIP ${zip} is on the configured watchlist.`,
+        severity: 'review',
+      });
+    }
+  }
+
+  for (const rule of config.blockedSenderRules) {
+    if (!rule.enabled || !senderGateRuleMatches(rule, ticket.senderGateText)) continue;
+    const sender = ticket.senderName || ticket.senderGateText || 'Unknown sender';
+    results.push({
+      key: `sender-${rule.id}`,
+      label: rule.label || 'Sender Rule',
+      detail: `${sender} matched "${rule.pattern}" using ${rule.matchMode} matching.`,
+      severity: 'reject',
+    });
+    if (results.filter(result => result.key.startsWith('sender-')).length >= 3) break;
+  }
+
+  return results;
 }
 
 function extractNumericTokens(...parts: string[]): string[] {
@@ -2484,6 +2735,10 @@ function toMessageItem(row: MercuryMessageListRow): MessageItem {
     RECIPIENT_ZIP: String(recipientZip || ''),
     MSG_DATE: String(msgDate || ''),
     DELIVERY_DATE: String(deliveryDate || ''),
+    FIRM_NAME: String(firstNonEmptyText(extra.FIRM_NAME, extra.SENDING_FIRM_NAME, extra.SENDER_FIRM_NAME) || ''),
+    SHOP_CODE: String(firstNonEmptyText(row.SHOP_CODE, extra.SHOPCODE, extra.SENDER_SHOP_CODE, extra.SENDING_SHOP_CODE) || ''),
+    SHOP_NAME: String(firstNonEmptyText(row.SHOP_NAME, extra.SHOPNAME, extra.SENDER_SHOP_NAME, extra.SENDING_SHOP_NAME) || ''),
+    MEMBER_CODE: String(firstNonEmptyText(row.MEMBER_CODE, extra.MEMBERCODE, extra.SENDER_MEMBER_CODE) || ''),
     MERCURY_NUM: String(row.MERCURY_NUM || ''),
     CC_AMOUNT: String(messageAmount || ''),
     REQUIRES_ATTENTION: String(row.REQUIRES_ATTENTION || ''),
@@ -2581,6 +2836,7 @@ function buildPendingIntakeTickets(
     flashMs?: number;
     askStaleMs?: number;
     activeOrderLookupKeys?: Set<string>;
+    config?: DashboardUserConfig;
   },
 ): IntakeTicketCard[] {
   interface LinkedOrderInfo {
@@ -3260,7 +3516,7 @@ function buildPendingIntakeTickets(
       messageAmount,
     );
 
-    pending.push({
+    const pendingTicket: IntakeTicketCard = {
       id,
       recipientName: recipient,
       summary,
@@ -3276,6 +3532,8 @@ function buildPendingIntakeTickets(
       messageDate: msgDateRaw,
       notes,
       wireService,
+      senderName: senderDisplayNameForMessage(message),
+      senderGateText: senderGateTextForMessage(message),
       msgType,
       messageTypeKey: messageType.key,
       messageTypeLabel: messageType.label,
@@ -3290,7 +3548,13 @@ function buildPendingIntakeTickets(
       askDebugSummary,
       askDebugDetails,
       askMessageKeys,
-    });
+      gateResults: [],
+    };
+    pendingTicket.gateResults = evaluateIntakeGateResults(
+      pendingTicket,
+      options?.config || DEFAULT_DASHBOARD_CONFIG,
+    );
+    pending.push(pendingTicket);
   }
 
   for (const [id, untilEpoch] of flashUntilById.entries()) {
@@ -3364,6 +3628,7 @@ export default function App() {
   const [deliveryMapLoading, setDeliveryMapLoading] = useState(false);
   const [deliveryMapError, setDeliveryMapError] = useState('');
   const [selectedDeliveryMapPinId, setSelectedDeliveryMapPinId] = useState('');
+  const [hoveredDeliveryMapPinId, setHoveredDeliveryMapPinId] = useState('');
   const [financialsMasked, setFinancialsMasked] = useState(false);
   const [radarFrames, setRadarFrames] = useState<RadarFrame[]>([]);
   const [radarFrameIdx, setRadarFrameIdx] = useState(0);
@@ -3460,9 +3725,10 @@ export default function App() {
       cacheKey: 'delivery-map-base-v1',
     });
   }, [deliveryMapViewport]);
+  const activeDeliveryMapPinId = hoveredDeliveryMapPinId || selectedDeliveryMapPinId;
   const selectedDeliveryMapPin = useMemo(
-    () => positionedDeliveryMapPins.find(pin => pin.id === selectedDeliveryMapPinId) || null,
-    [positionedDeliveryMapPins, selectedDeliveryMapPinId],
+    () => positionedDeliveryMapPins.find(pin => pin.id === activeDeliveryMapPinId) || null,
+    [activeDeliveryMapPinId, positionedDeliveryMapPins],
   );
   const askStaleMs = useMemo(
     () => clampInteger(config.askStaleHours * 60 * 60 * 1000, 60 * 60 * 1000, 72 * 60 * 60 * 1000, DEFAULT_ASK_STALE_HOURS * 60 * 60 * 1000),
@@ -3666,6 +3932,54 @@ export default function App() {
     setConfigDraft(previous => {
       const base = sanitizeDashboardConfig(previous || config);
       return sanitizeDashboardConfig({ ...base, [key]: Number.isFinite(value) ? value : base[key] });
+    });
+  }, [config]);
+  const updateGateZipCodes = useCallback((valueRaw: string) => {
+    setConfigDraft(previous => {
+      const base = sanitizeDashboardConfig(previous || config);
+      return sanitizeDashboardConfig({
+        ...base,
+        gateZipCodes: normalizeGateZipCodes(valueRaw),
+      });
+    });
+  }, [config]);
+  const addSenderGateRule = useCallback(() => {
+    setConfigDraft(previous => {
+      const base = sanitizeDashboardConfig(previous || config);
+      return sanitizeDashboardConfig({
+        ...base,
+        blockedSenderRules: [
+          ...base.blockedSenderRules,
+          {
+            id: createSenderGateRuleId(),
+            pattern: 'New sender',
+            matchMode: 'contains',
+            label: '',
+            enabled: true,
+          },
+        ],
+      });
+    });
+  }, [config]);
+  const updateSenderGateRule = useCallback((id: string, updates: Partial<SenderGateRule>) => {
+    setConfigDraft(previous => {
+      const base = sanitizeDashboardConfig(previous || config);
+      const nextRules = base.blockedSenderRules.map(rule => (
+        rule.id === id ? { ...rule, ...updates } : rule
+      ));
+      return sanitizeDashboardConfig({
+        ...base,
+        blockedSenderRules: nextRules,
+      });
+    });
+  }, [config]);
+  const removeSenderGateRule = useCallback((id: string) => {
+    setConfigDraft(previous => {
+      const base = sanitizeDashboardConfig(previous || config);
+      return sanitizeDashboardConfig({
+        ...base,
+        blockedSenderRules: base.blockedSenderRules.filter(rule => rule.id !== id),
+      });
     });
   }, [config]);
   const updateStoreHours = useCallback((updates: Partial<StoreHoursConfig>) => {
@@ -5365,6 +5679,7 @@ export default function App() {
           flashMs: config.flashMs,
           askStaleMs,
           activeOrderLookupKeys,
+          config,
         },
       );
       const pendingWithStatus = pending.map(ticket => {
@@ -7006,8 +7321,97 @@ export default function App() {
                     onChange={(event) => updateConfigNumber('minOrderThreshold', event.target.value)}
                   />
                 </label>
+                <label className="app__config-row">
+                  <span>Threshold padding ({editingConfig.currencySymbol})</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={25}
+                    step={0.25}
+                    value={editingConfig.minOrderPadding}
+                    onChange={(event) => updateConfigNumber('minOrderPadding', event.target.value)}
+                  />
+                </label>
                 <div className="app__config-row app__config-row--full">
-                  <div className="app__config-help">Incoming orders below this amount will be flagged for review. Set to 0 to disable.</div>
+                  <div className="app__config-help">Incoming orders below the minimum after padding are marked as reject candidates; orders inside the padding buffer are marked for review. Set the minimum to 0 to disable price gating.</div>
+                </div>
+                <label className="app__config-row">
+                  <span>ZIP gate mode</span>
+                  <select
+                    value={editingConfig.zipGateMode}
+                    onChange={(event) => {
+                      setConfigDraft(previous => sanitizeDashboardConfig({
+                        ...(previous || config),
+                        zipGateMode: normalizeZipGateMode(event.target.value),
+                      }));
+                    }}
+                  >
+                    <option value="watchlist">Flag listed ZIPs</option>
+                    <option value="allowlist">Require listed ZIPs</option>
+                  </select>
+                </label>
+                <label className="app__config-row app__config-row--full">
+                  <span>ZIP gate list</span>
+                  <textarea
+                    rows={3}
+                    value={editingConfig.gateZipCodes.join('\n')}
+                    placeholder="15212&#10;15237"
+                    onChange={(event) => updateGateZipCodes(event.target.value)}
+                  />
+                </label>
+                <div className="app__config-row app__config-row--full">
+                  <span>Sender reject/watch list</span>
+                  <div className="app__config-rule-list">
+                    {editingConfig.blockedSenderRules.length ? (
+                      editingConfig.blockedSenderRules.map(rule => (
+                        <div className="app__config-rule-row" key={rule.id}>
+                          <label className="app__config-rule-enabled" title="Enable sender rule">
+                            <input
+                              type="checkbox"
+                              checked={rule.enabled}
+                              onChange={(event) => updateSenderGateRule(rule.id, { enabled: event.target.checked })}
+                            />
+                          </label>
+                          <input
+                            type="text"
+                            value={rule.pattern}
+                            placeholder="Sender name or service"
+                            onChange={(event) => updateSenderGateRule(rule.id, { pattern: event.target.value })}
+                          />
+                          <select
+                            value={rule.matchMode}
+                            onChange={(event) => updateSenderGateRule(rule.id, { matchMode: normalizeSenderGateMatchMode(event.target.value) })}
+                          >
+                            <option value="contains">Contains</option>
+                            <option value="exact">Exact</option>
+                          </select>
+                          <input
+                            type="text"
+                            value={rule.label}
+                            placeholder="Badge label"
+                            onChange={(event) => updateSenderGateRule(rule.id, { label: event.target.value })}
+                          />
+                          <button
+                            type="button"
+                            className="app__config-icon-btn"
+                            onClick={() => removeSenderGateRule(rule.id)}
+                            title="Remove sender rule"
+                            aria-label="Remove sender rule"
+                          >
+                            <FontAwesomeIcon icon={faTrash} />
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="app__config-help">No sender rules configured.</div>
+                    )}
+                  </div>
+                  <div className="app__config-inline-actions">
+                    <button type="button" className="app__control-btn" onClick={addSenderGateRule}>
+                      <FontAwesomeIcon icon={faPlus} /> Add sender rule
+                    </button>
+                  </div>
+                  <div className="app__config-help">Sender rules inspect sending florist name, shop code, member code, Mercury number, and wire service. Matches are visual reject candidates only.</div>
                 </div>
               </div>
             </section>
@@ -7255,10 +7659,15 @@ export default function App() {
                     const displayRecipientName = formatDisplayRecipientName(
                       ticket.recipientName || ticket.summary || 'Incoming Ticket',
                     );
+                    const gateResults = ticket.gateResults || [];
+                    const hasRejectGate = gateResults.some(result => result.severity === 'reject');
+                    const hasReviewGate = gateResults.length > 0 && !hasRejectGate;
+                    const gateTitle = gateResults.map(result => `${result.label}: ${result.detail}`).join('\n');
                     return (
                       <article
                         key={ticket.id}
-                        className={`ticket-card${ticket.kind === 'uncreated' && ticket.messageTypeKey === 'unknown' ? ' ticket-card--uncreated' : ''}${ticket.isFlashing ? ' ticket-card--flash' : ''}${ticket.isMarketplace ? ' ticket-card--marketplace' : ''}${ticket.isStaleAsk ? ' ticket-card--ask-stale' : ''}`}
+                        className={`ticket-card${ticket.kind === 'uncreated' && ticket.messageTypeKey === 'unknown' ? ' ticket-card--uncreated' : ''}${ticket.isFlashing ? ' ticket-card--flash' : ''}${ticket.isMarketplace ? ' ticket-card--marketplace' : ''}${ticket.isStaleAsk ? ' ticket-card--ask-stale' : ''}${hasRejectGate ? ' ticket-card--gate-reject' : ''}${hasReviewGate ? ' ticket-card--gate-review' : ''}`}
+                        title={gateTitle || undefined}
                       >
                         <header className="ticket-card__header">
                           <div className="ticket-card__kind-pills">
@@ -7271,13 +7680,19 @@ export default function App() {
                             {showNewOrderTotalPill ? (
                               <span className="badge badge--total">{ticket.orderAmount || '--'}</span>
                             ) : null}
-                            {showNewOrderTotalPill && config.minOrderThreshold > 0 && (() => {
-                              const cents = amountToCents(ticket.orderAmount);
-                              return cents !== null && cents < config.minOrderThreshold * 100;
-                            })() ? (
-                              <span className="badge badge--below-threshold" title={`Below minimum order threshold (${config.currencySymbol}${config.minOrderThreshold})`}>
+                            {gateResults.slice(0, 3).map(result => (
+                              <span
+                                key={result.key}
+                                className={`badge ${result.severity === 'reject' ? 'badge--gate-reject' : 'badge--gate-review'}`}
+                                title={result.detail}
+                              >
                                 <FontAwesomeIcon icon={faTriangleExclamation} className="badge__icon" />
-                                Review
+                                {result.label}
+                              </span>
+                            ))}
+                            {gateResults.length > 3 ? (
+                              <span className="badge badge--gate-review" title={gateTitle}>
+                                +{gateResults.length - 3}
                               </span>
                             ) : null}
                             {ticket.distanceMilesLabel ? (
@@ -7795,59 +8210,102 @@ export default function App() {
                 <span>{selectedDayCountLabel}: {positionedDeliveryMapPins.length}/{selectedDayDeliveryMapOrders.length} mapped</span>
               </div>
               {deliveryMapUrl && positionedDeliveryMapPins.length ? (
-                <div className="delivery-map-page__map" onClick={() => setSelectedDeliveryMapPinId('')}>
-                  <img src={deliveryMapUrl} alt={`Delivery map for ${selectedDayCountLabel}`} />
-                  {positionedDeliveryMapPins.map((pin, index) => (
-                    <button
-                      key={`${pin.id}-${index}`}
-                      type="button"
-                      className={`delivery-map-page__pin${selectedDeliveryMapPinId === pin.id ? ' delivery-map-page__pin--active' : ''}`}
-                      style={{ left: `${pin.xPercent}%`, top: `${pin.yPercent}%` }}
-                      title={`${pin.label}\n${pin.address}`}
-                      aria-label={`${pin.label}, ${pin.address}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setSelectedDeliveryMapPinId(previous => previous === pin.id ? '' : pin.id);
-                      }}
-                    >
-                      <span>{index + 1}</span>
-                    </button>
-                  ))}
-                  {selectedDeliveryMapPin ? (
-                    <div
-                      className="delivery-map-page__popup"
-                      style={{
-                        left: `${Math.max(18, Math.min(82, selectedDeliveryMapPin.xPercent))}%`,
-                        top: `${Math.max(18, Math.min(76, selectedDeliveryMapPin.yPercent))}%`,
-                      }}
-                      onClick={(event) => event.stopPropagation()}
-                    >
+                <div className="delivery-map-page__body">
+                  <div
+                    className="delivery-map-page__map"
+                    onClick={() => {
+                      setSelectedDeliveryMapPinId('');
+                      setHoveredDeliveryMapPinId('');
+                    }}
+                  >
+                    <img src={deliveryMapUrl} alt={`Delivery map for ${selectedDayCountLabel}`} />
+                    {positionedDeliveryMapPins.map((pin, index) => (
                       <button
+                        key={`${pin.id}-${index}`}
                         type="button"
-                        className="delivery-map-page__popup-close"
-                        aria-label="Close delivery details"
-                        onClick={() => setSelectedDeliveryMapPinId('')}
+                        className={`delivery-map-page__pin${activeDeliveryMapPinId === pin.id ? ' delivery-map-page__pin--active' : ''}`}
+                        style={{ left: `${pin.xPercent}%`, top: `${pin.yPercent}%` }}
+                        title={`${pin.label}\n${pin.address}`}
+                        aria-label={`${pin.label}, ${pin.address}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setHoveredDeliveryMapPinId('');
+                          setSelectedDeliveryMapPinId(previous => previous === pin.id ? '' : pin.id);
+                        }}
                       >
-                        <FontAwesomeIcon icon={faXmark} />
+                        <span>{index + 1}</span>
                       </button>
-                      <div className="delivery-map-page__popup-title">{selectedDeliveryMapPin.label}</div>
-                      {selectedDeliveryMapPin.orderRef ? (
+                    ))}
+                    {selectedDeliveryMapPin ? (
+                      <div
+                        className="delivery-map-page__popup"
+                        style={{
+                          left: `${Math.max(18, Math.min(82, selectedDeliveryMapPin.xPercent))}%`,
+                          top: `${Math.max(18, Math.min(76, selectedDeliveryMapPin.yPercent))}%`,
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          className="delivery-map-page__popup-close"
+                          aria-label="Close delivery details"
+                          onClick={() => {
+                            setSelectedDeliveryMapPinId('');
+                            setHoveredDeliveryMapPinId('');
+                          }}
+                        >
+                          <FontAwesomeIcon icon={faXmark} />
+                        </button>
+                        <div className="delivery-map-page__popup-title">{selectedDeliveryMapPin.label}</div>
+                        {selectedDeliveryMapPin.orderRef ? (
+                          <div className="delivery-map-page__popup-row">
+                            <strong>Order</strong>
+                            <span>{selectedDeliveryMapPin.orderRef}</span>
+                          </div>
+                        ) : null}
                         <div className="delivery-map-page__popup-row">
-                          <strong>Order</strong>
-                          <span>{selectedDeliveryMapPin.orderRef}</span>
+                          <strong>Status</strong>
+                          <span>{selectedDeliveryMapPin.statusLabel}</span>
                         </div>
-                      ) : null}
-                      <div className="delivery-map-page__popup-row">
-                        <strong>Status</strong>
-                        <span>{selectedDeliveryMapPin.statusLabel}</span>
+                        <div className="delivery-map-page__popup-row">
+                          <strong>Date</strong>
+                          <span>{selectedDeliveryMapPin.deliveryDate}</span>
+                        </div>
+                        <div className="delivery-map-page__popup-address">{selectedDeliveryMapPin.address}</div>
                       </div>
-                      <div className="delivery-map-page__popup-row">
-                        <strong>Date</strong>
-                        <span>{selectedDeliveryMapPin.deliveryDate}</span>
-                      </div>
-                      <div className="delivery-map-page__popup-address">{selectedDeliveryMapPin.address}</div>
+                    ) : null}
+                  </div>
+                  <aside className="delivery-map-page__legend" aria-label="Delivery map key">
+                    <div className="delivery-map-page__legend-header">
+                      <span>Map Key</span>
+                      <span>{positionedDeliveryMapPins.length}</span>
                     </div>
-                  ) : null}
+                    <div className="delivery-map-page__legend-list">
+                      {positionedDeliveryMapPins.map((pin, index) => (
+                        <button
+                          key={`legend-${pin.id}-${index}`}
+                          type="button"
+                          className={`delivery-map-page__legend-row${activeDeliveryMapPinId === pin.id ? ' delivery-map-page__legend-row--active' : ''}`}
+                          onMouseEnter={() => setHoveredDeliveryMapPinId(pin.id)}
+                          onMouseLeave={() => setHoveredDeliveryMapPinId('')}
+                          onFocus={() => setHoveredDeliveryMapPinId(pin.id)}
+                          onBlur={() => setHoveredDeliveryMapPinId('')}
+                          onClick={() => {
+                            setHoveredDeliveryMapPinId('');
+                            setSelectedDeliveryMapPinId(previous => previous === pin.id ? '' : pin.id);
+                          }}
+                          title={`${pin.label}\n${pin.address}`}
+                          aria-label={`Map item ${index + 1}, order ${pin.orderRef || pin.id}`}
+                        >
+                          <span className="delivery-map-page__legend-number">{index + 1}</span>
+                          <span className="delivery-map-page__legend-copy">
+                            <strong>{pin.orderRef || pin.id}</strong>
+                            <span>{pin.label}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </aside>
                 </div>
               ) : (
                 <div className="delivery-map-page__empty">

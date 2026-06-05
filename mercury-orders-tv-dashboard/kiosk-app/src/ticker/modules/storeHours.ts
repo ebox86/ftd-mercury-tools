@@ -79,6 +79,6 @@ export function buildStoreHoursTickerItem(config = DEFAULT_STORE_HOURS_CONFIG, n
   const isOpen = isStoreOpenEastern(now, config);
   return {
     id: 'store_hours',
-    text: isOpen ? 'Store Open' : 'Store Closed',
+    text: isOpen ? '🟢 Store Open' : '🔴 Store Closed',
   };
 }

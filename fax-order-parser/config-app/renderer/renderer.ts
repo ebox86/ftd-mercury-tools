@@ -19,6 +19,7 @@ interface OrderLogEntry {
   deliveryDate?: string;
   emailSent: boolean;
   error?: string;
+  note?: string;
 }
 
 declare const window: Window & { faxParserApi: FaxParserApi };
@@ -58,20 +59,23 @@ document.querySelectorAll<HTMLButtonElement>('.tab-btn').forEach(btn => {
 async function loadConfig(): Promise<void> {
   const cfg = await window.faxParserApi.loadConfig();
   const email = (cfg['email'] as Record<string, unknown>) ?? {};
+  const processing = (cfg['processing'] as Record<string, unknown>) ?? {};
 
   ($<HTMLInputElement>('watchFolder')).value        = String(cfg['watchFolder'] ?? '');
   ($<HTMLInputElement>('pollInterval')).value       = String(cfg['pollIntervalSeconds'] ?? 10);
   ($<HTMLSelectElement>('fileFormat')).value        = String(cfg['fileFormat'] ?? 'PDF');
   ($<HTMLInputElement>('processedSubfolder')).value = String(cfg['processedSubfolder'] ?? 'processed');
+  ($<HTMLInputElement>('usePlacedDateFallback')).checked =
+    processing['useOrderPlacedDateWhenDeliveryDateMissing'] !== false;
 
   ($<HTMLInputElement>('senderAddress')).value      = String(email['senderAddress'] ?? '');
   ($<HTMLInputElement>('senderPassword')).value     = String(email['senderPassword'] ?? '');
   ($<HTMLInputElement>('recipientAddress')).value   = String(email['recipientAddress'] ?? '');
   ($<HTMLInputElement>('subjectLine')).value        = String(email['subjectLine'] ?? '');
   ($<HTMLInputElement>('encryptionPassword')).value = String(email['encryptionPassword'] ?? '');
-  ($<HTMLSelectElement>('encryptionAlgorithm')).value = String(email['encryptionAlgorithm'] ?? 'TripleDES');
+  ($<HTMLSelectElement>('encryptionAlgorithm')).value = String(email['encryptionAlgorithm'] ?? 'None');
   ($<HTMLInputElement>('smtpHost')).value           = String(email['smtpHost'] ?? '');
-  ($<HTMLInputElement>('smtpPort')).value           = String(email['smtpPort'] ?? 587);
+  ($<HTMLInputElement>('smtpPort')).value           = String(email['smtpPort'] ?? 2525);
 }
 
 async function saveConfig(): Promise<void> {
@@ -88,7 +92,16 @@ async function saveConfig(): Promise<void> {
       encryptionPassword: $<HTMLInputElement>('encryptionPassword').value,
       encryptionAlgorithm:$<HTMLSelectElement>('encryptionAlgorithm').value as any,
       smtpHost:           $<HTMLInputElement>('smtpHost').value.trim(),
-      smtpPort:           parseInt($<HTMLInputElement>('smtpPort').value, 10) || 587,
+      smtpPort:           parseInt($<HTMLInputElement>('smtpPort').value, 10) || 2525,
+    },
+    localRelay: {
+      enabled: true,
+      smtpPort: parseInt($<HTMLInputElement>('smtpPort').value, 10) || 2525,
+      pop3Port: 1110,
+    },
+    processing: {
+      useOrderPlacedDateWhenDeliveryDateMissing:
+        $<HTMLInputElement>('usePlacedDateFallback').checked,
     },
   };
 
@@ -160,6 +173,7 @@ async function loadLog(): Promise<void> {
       ? '<span class="email-ok">✓ Sent</span>'
       : `<span class="email-err">✗ Failed</span>`;
     const note = e.error ? `<span title="${escHtml(e.error)}">⚠ ${escHtml(e.error.slice(0, 40))}…</span>` : '';
+    const shownNote = note || (e.note ? `<span title="${escHtml(e.note)}">${escHtml(e.note.slice(0, 40))}${e.note.length > 40 ? '...' : ''}</span>` : '');
     return `<tr>
       <td>${ts}</td>
       <td>${escHtml(e.fileName)}</td>
@@ -167,7 +181,7 @@ async function loadLog(): Promise<void> {
       <td>${escHtml(e.customerName ?? '')}</td>
       <td>${escHtml(e.deliveryDate ?? '')}</td>
       <td>${emailCell}</td>
-      <td>${note}</td>
+      <td>${shownNote}</td>
     </tr>`;
   }).join('');
 }

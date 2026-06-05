@@ -49,6 +49,7 @@ export interface MessageItem {
   MSG_DATE?: string;
   DELIVERY_DATE?: string;
   SHOP_CODE?: string;
+  MEMBER_CODE?: string;
   SHOP_NAME?: string;
   SHOP_PHONE?: string;
   MSG_NOTES?: string;
@@ -206,6 +207,10 @@ export interface MercuryMessageListRow {
   DELIVERY_DATE?: string;
   MEMBER_CODE?: string;
   MERCURY_NUM?: string;
+  FIRM_NAME?: string;
+  SHOP_CODE?: string;
+  SHOP_NAME?: string;
+  SHOP_PHONE?: string;
   TICKET_NUM?: string;
   TICKET_ID?: string;
   ORDER_ID?: string;

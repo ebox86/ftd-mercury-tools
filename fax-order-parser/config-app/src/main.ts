@@ -26,16 +26,44 @@ const DEFAULT_CONFIG = {
   fileFormat: 'PDF',
   processedSubfolder: 'processed',
   email: {
-    senderAddress: 'oliverflowershop71440@gmail.com',
+    senderAddress: 'faxparser@localhost.local',
     senderPassword: '',
-    recipientAddress: 'ftdpos71440@oliverflowers.com',
-    smtpHost: 'smtp.gmail.com',
-    smtpPort: 587,
+    smtpUsername: '',
+    recipientAddress: 'order@localhost.local',
+    smtpHost: '127.0.0.1',
+    smtpPort: 2525,
     subjectLine: 'Online Order',
     encryptionPassword: '',
-    encryptionAlgorithm: 'TripleDES',
+    encryptionAlgorithm: 'None',
+  },
+  localRelay: {
+    enabled: true,
+    smtpPort: 2525,
+    pop3Port: 1110,
+  },
+  processing: {
+    useOrderPlacedDateWhenDeliveryDateMissing: true,
   },
 };
+
+function normalizeLocalRelayConfig(config: typeof DEFAULT_CONFIG): typeof DEFAULT_CONFIG {
+  if (!config.localRelay.enabled) return config;
+
+  return {
+    ...config,
+    email: {
+      ...config.email,
+      senderAddress: DEFAULT_CONFIG.email.senderAddress,
+      senderPassword: '',
+      smtpUsername: '',
+      recipientAddress: DEFAULT_CONFIG.email.recipientAddress,
+      smtpHost: DEFAULT_CONFIG.email.smtpHost,
+      smtpPort: config.localRelay.smtpPort,
+      encryptionPassword: '',
+      encryptionAlgorithm: 'None',
+    },
+  };
+}
 
 // ── IPC handlers ──────────────────────────────────────────────────────────────
 
@@ -44,7 +72,13 @@ ipcMain.handle('config:load', () => {
   try {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
     const parsed = JSON.parse(raw);
-    return { ...DEFAULT_CONFIG, ...parsed, email: { ...DEFAULT_CONFIG.email, ...(parsed.email ?? {}) } };
+    return normalizeLocalRelayConfig({
+      ...DEFAULT_CONFIG,
+      ...parsed,
+      email: { ...DEFAULT_CONFIG.email, ...(parsed.email ?? {}) },
+      localRelay: { ...DEFAULT_CONFIG.localRelay, ...(parsed.localRelay ?? {}) },
+      processing: { ...DEFAULT_CONFIG.processing, ...(parsed.processing ?? {}) },
+    });
   } catch {
     return DEFAULT_CONFIG;
   }

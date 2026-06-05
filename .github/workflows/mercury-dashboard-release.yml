@@ -161,12 +161,12 @@ jobs:
 
       - name: Build Mercury dashboard installer
         env:
-          MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
+          MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN || vars.MAPBOX_TOKEN || secrets.MAPBOX_ACCESS_TOKEN || vars.MAPBOX_ACCESS_TOKEN }}
         run: |
           $publisherUrl = "https://github.com/${{ github.repository }}"
           $mapboxToken = "$env:MAPBOX_TOKEN"
           if ([string]::IsNullOrWhiteSpace($mapboxToken)) {
-            throw "MAPBOX_TOKEN secret is empty; production installers require an embedded Mapbox token for address lookup."
+            throw "MAPBOX_TOKEN is empty; set repository/environment secret or variable MAPBOX_TOKEN for production installer address lookup."
           }
 
           if ($mapboxToken -match '(?i)^(MAPBOX_TOKEN|MAPBOX_ACCESS_TOKEN)\s*=\s*(.*)$') {

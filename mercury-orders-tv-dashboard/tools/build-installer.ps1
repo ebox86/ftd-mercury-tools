@@ -122,7 +122,40 @@ function Normalize-MapboxToken {
   return $token
 }
 
+function Read-MapboxTokenFromEnvFile {
+  param([string]$EnvPath)
+
+  if (-not (Test-Path $EnvPath)) {
+    return ""
+  }
+
+  $lines = Get-Content -Path $EnvPath -ErrorAction SilentlyContinue
+  foreach ($line in $lines) {
+    $text = ([string]$line).Trim()
+    if (-not $text -or $text.StartsWith("#")) {
+      continue
+    }
+    if ($text -match '^(?i)\s*(MAPBOX_TOKEN|MAPBOX_ACCESS_TOKEN)\s*=\s*(.*)$') {
+      return Normalize-MapboxToken $Matches[2]
+    }
+  }
+
+  return ""
+}
+
 $MapboxToken = Normalize-MapboxToken $MapboxToken
+if (-not $MapboxToken) {
+  $MapboxToken = Normalize-MapboxToken ([string]$env:MAPBOX_TOKEN)
+}
+if (-not $MapboxToken) {
+  $MapboxToken = Normalize-MapboxToken ([string]$env:MAPBOX_ACCESS_TOKEN)
+}
+if (-not $MapboxToken) {
+  $MapboxToken = Read-MapboxTokenFromEnvFile (Join-Path $projectRoot ".env")
+}
+if (-not $MapboxToken) {
+  $MapboxToken = Read-MapboxTokenFromEnvFile (Join-Path $projectRoot "workflow-bridge\.env")
+}
 
 $compileArgs = @(
   $defineVersion,
