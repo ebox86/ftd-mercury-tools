@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-export type EmailEncryptionAlgorithm = 'DES' | 'RC2' | 'Rijndael' | 'TripleDES';
+export type EmailEncryptionAlgorithm = 'None' | 'DES' | 'RC2' | 'Rijndael' | 'TripleDES';
 
 export interface EmailConfig {
   senderAddress: string;
@@ -28,6 +28,10 @@ export interface LocalRelayConfig {
   pop3Port: number;
 }
 
+export interface ProcessingConfig {
+  useOrderPlacedDateWhenDeliveryDateMissing: boolean;
+}
+
 export interface FaxParserConfig {
   watchFolder: string;
   pollIntervalSeconds: number;
@@ -37,6 +41,7 @@ export interface FaxParserConfig {
   fieldMap: Record<string, string>;
   fieldBounds?: Record<string, FieldBounds>;
   localRelay: LocalRelayConfig;
+  processing: ProcessingConfig;
 }
 
 export const DEFAULT_FIELD_MAP: Record<string, string> = {
@@ -66,32 +71,65 @@ export const DEFAULT_CONFIG: FaxParserConfig = {
   fileFormat: 'PDF',
   processedSubfolder: 'processed',
   email: {
-    senderAddress: 'oliverflowershop71440@gmail.com',
+    senderAddress: 'faxparser@localhost.local',
     senderPassword: '',
-    recipientAddress: 'ftdpos71440@oliverflowers.com',
-    smtpHost: 'smtp.gmail.com',
-    smtpPort: 587,
+    smtpUsername: '',
+    recipientAddress: 'order@localhost.local',
+    smtpHost: '127.0.0.1',
+    smtpPort: 2525,
     subjectLine: 'Online Order',
     encryptionPassword: '',
-    encryptionAlgorithm: 'TripleDES',
+    encryptionAlgorithm: 'None',
   },
   fieldMap: { ...DEFAULT_FIELD_MAP },
   localRelay: {
-    enabled: false,
+    enabled: true,
     smtpPort: 2525,
     pop3Port: 1110,
   },
+  processing: {
+    useOrderPlacedDateWhenDeliveryDateMissing: true,
+  },
 };
+
+function cloneDefaultConfig(): FaxParserConfig {
+  return {
+    ...DEFAULT_CONFIG,
+    email: { ...DEFAULT_CONFIG.email },
+    fieldMap: { ...DEFAULT_FIELD_MAP },
+    localRelay: { ...DEFAULT_CONFIG.localRelay },
+    processing: { ...DEFAULT_CONFIG.processing },
+  };
+}
+
+function normalizeLocalRelayConfig(config: FaxParserConfig): FaxParserConfig {
+  if (!config.localRelay.enabled) return config;
+
+  return {
+    ...config,
+    email: {
+      ...config.email,
+      senderAddress: DEFAULT_CONFIG.email.senderAddress,
+      senderPassword: '',
+      smtpUsername: '',
+      recipientAddress: DEFAULT_CONFIG.email.recipientAddress,
+      smtpHost: DEFAULT_CONFIG.email.smtpHost,
+      smtpPort: config.localRelay.smtpPort,
+      encryptionPassword: '',
+      encryptionAlgorithm: 'None',
+    },
+  };
+}
 
 export function loadConfig(): FaxParserConfig {
   const configPath = getConfigPath();
   if (!fs.existsSync(configPath)) {
-    return { ...DEFAULT_CONFIG, email: { ...DEFAULT_CONFIG.email } };
+    return normalizeLocalRelayConfig(cloneDefaultConfig());
   }
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
     const parsed = JSON.parse(raw) as Partial<FaxParserConfig>;
-    return {
+    return normalizeLocalRelayConfig({
       ...DEFAULT_CONFIG,
       ...parsed,
       email: {
@@ -106,9 +144,13 @@ export function loadConfig(): FaxParserConfig {
         ...DEFAULT_CONFIG.localRelay,
         ...(parsed.localRelay ?? {}),
       },
-    };
+      processing: {
+        ...DEFAULT_CONFIG.processing,
+        ...(parsed.processing ?? {}),
+      },
+    });
   } catch {
-    return { ...DEFAULT_CONFIG, email: { ...DEFAULT_CONFIG.email } };
+    return normalizeLocalRelayConfig(cloneDefaultConfig());
   }
 }
 

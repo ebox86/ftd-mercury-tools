@@ -18,7 +18,7 @@ function ensureQueueDir(): string {
 // Accepts the WOI email from nodemailer and writes it as an .eml file to the
 // queue directory for Mercury to collect via POP3.
 
-export function startSmtpServer(port: number): SMTPServer {
+export async function startSmtpServer(port: number): Promise<SMTPServer> {
   const queueDir = ensureQueueDir();
 
   const server = new SMTPServer({
@@ -33,21 +33,32 @@ export function startSmtpServer(port: number): SMTPServer {
         try {
           fs.writeFileSync(path.join(queueDir, filename), Buffer.concat(chunks));
           console.log(`[Relay/SMTP] Queued: ${filename}`);
+          callback();
         } catch (err: unknown) {
-          console.error(`[Relay/SMTP] Store failed: ${err instanceof Error ? err.message : String(err)}`);
+          const error = err instanceof Error ? err : new Error(String(err));
+          console.error(`[Relay/SMTP] Store failed: ${error.message}`);
+          callback(error);
         }
-        callback();
       });
       stream.on('error', (err: Error) => callback(err));
     },
   });
 
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: Error) => {
+      server.off('error', onError);
+      reject(err);
+    };
+    server.once('error', onError);
+    server.listen(port, '127.0.0.1', () => {
+      server.off('error', onError);
+      console.log(`[Relay/SMTP] Listening on 127.0.0.1:${port}`);
+      resolve();
+    });
+  });
+
   server.on('error', (err: Error) =>
     console.error(`[Relay/SMTP] ${err.message}`)
-  );
-
-  server.listen(port, '127.0.0.1', () =>
-    console.log(`[Relay/SMTP] Listening on 127.0.0.1:${port}`)
   );
 
   return server;
@@ -57,7 +68,7 @@ export function startSmtpServer(port: number): SMTPServer {
 // Serves queued .eml files to Mercury using the POP3 protocol (RFC 1939).
 // Only the commands Mercury actually issues are implemented.
 
-export function startPop3Server(port: number): net.Server {
+export async function startPop3Server(port: number): Promise<net.Server> {
   ensureQueueDir();
 
   const server = net.createServer((socket) => {
@@ -112,14 +123,16 @@ export function startPop3Server(port: number): net.Server {
 
           case 'LIST': {
             if (!authenticated) { send('-ERR not authenticated'); break; }
-            const avail = visible(messages, toDelete);
             if (arg) {
               const i = parseInt(arg, 10) - 1;
-              if (i < 0 || i >= avail.length) { send('-ERR no such message'); break; }
-              send(`+OK ${i + 1} ${fileSize(queueDir, avail[i])}`);
+              const message = getMessage(messages, toDelete, i);
+              if (!message) { send('-ERR no such message'); break; }
+              send(`+OK ${i + 1} ${fileSize(queueDir, message)}`);
             } else {
               send('+OK');
-              avail.forEach((m, i) => socket.write(`${i + 1} ${fileSize(queueDir, m)}\r\n`));
+              messages.forEach((m, i) => {
+                if (!toDelete.has(m)) socket.write(`${i + 1} ${fileSize(queueDir, m)}\r\n`);
+              });
               socket.write('.\r\n');
             }
             break;
@@ -127,14 +140,16 @@ export function startPop3Server(port: number): net.Server {
 
           case 'UIDL': {
             if (!authenticated) { send('-ERR not authenticated'); break; }
-            const avail = visible(messages, toDelete);
             if (arg) {
               const i = parseInt(arg, 10) - 1;
-              if (i < 0 || i >= avail.length) { send('-ERR no such message'); break; }
-              send(`+OK ${i + 1} ${avail[i]}`);
+              const message = getMessage(messages, toDelete, i);
+              if (!message) { send('-ERR no such message'); break; }
+              send(`+OK ${i + 1} ${message}`);
             } else {
               send('+OK');
-              avail.forEach((m, i) => socket.write(`${i + 1} ${m}\r\n`));
+              messages.forEach((m, i) => {
+                if (!toDelete.has(m)) socket.write(`${i + 1} ${m}\r\n`);
+              });
               socket.write('.\r\n');
             }
             break;
@@ -142,11 +157,11 @@ export function startPop3Server(port: number): net.Server {
 
           case 'RETR': {
             if (!authenticated) { send('-ERR not authenticated'); break; }
-            const avail = visible(messages, toDelete);
             const i = parseInt(arg, 10) - 1;
-            if (i < 0 || i >= avail.length) { send('-ERR no such message'); break; }
+            const message = getMessage(messages, toDelete, i);
+            if (!message) { send('-ERR no such message'); break; }
             try {
-              const raw = fs.readFileSync(path.join(queueDir, avail[i]));
+              const raw = fs.readFileSync(path.join(queueDir, message));
               send(`+OK ${raw.length} octets`);
               // Normalise line endings then byte-stuff lines beginning with '.'
               const emlLines = raw.toString('binary')
@@ -163,10 +178,10 @@ export function startPop3Server(port: number): net.Server {
 
           case 'DELE': {
             if (!authenticated) { send('-ERR not authenticated'); break; }
-            const avail = visible(messages, toDelete);
             const i = parseInt(arg, 10) - 1;
-            if (i < 0 || i >= avail.length) { send('-ERR no such message'); break; }
-            toDelete.add(avail[i]);
+            const message = getMessage(messages, toDelete, i);
+            if (!message) { send('-ERR no such message'); break; }
+            toDelete.add(message);
             send('+OK');
             break;
           }
@@ -198,9 +213,18 @@ export function startPop3Server(port: number): net.Server {
     socket.on('error', () => { /* client disconnected unexpectedly */ });
   });
 
-  server.listen(port, '127.0.0.1', () =>
-    console.log(`[Relay/POP3] Listening on 127.0.0.1:${port}`)
-  );
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: Error) => {
+      server.off('error', onError);
+      reject(err);
+    };
+    server.once('error', onError);
+    server.listen(port, '127.0.0.1', () => {
+      server.off('error', onError);
+      console.log(`[Relay/POP3] Listening on 127.0.0.1:${port}`);
+      resolve();
+    });
+  });
 
   server.on('error', (err: Error) =>
     console.error(`[Relay/POP3] ${err.message}`)
@@ -221,6 +245,12 @@ function listQueue(dir: string): string[] {
 
 function visible(messages: string[], toDelete: Set<string>): string[] {
   return messages.filter(m => !toDelete.has(m));
+}
+
+function getMessage(messages: string[], toDelete: Set<string>, index: number): string | undefined {
+  if (index < 0 || index >= messages.length) return undefined;
+  const message = messages[index];
+  return toDelete.has(message) ? undefined : message;
 }
 
 function fileSize(dir: string, filename: string): number {

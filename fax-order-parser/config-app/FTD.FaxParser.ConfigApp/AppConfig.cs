@@ -28,6 +28,9 @@ internal sealed class AppConfig
   [JsonPropertyName("localRelay")]
   public LocalRelayConfig LocalRelay { get; set; } = new();
 
+  [JsonPropertyName("processing")]
+  public ProcessingConfig Processing { get; set; } = new();
+
   [JsonPropertyName("fieldMap")]
   public Dictionary<string, string> FieldMap { get; set; } = new()
   {
@@ -71,13 +74,19 @@ internal sealed class AppConfig
 internal sealed class LocalRelayConfig
 {
   [JsonPropertyName("enabled")]
-  public bool Enabled { get; set; } = false;
+  public bool Enabled { get; set; } = true;
 
   [JsonPropertyName("smtpPort")]
   public int SmtpPort { get; set; } = 2525;
 
   [JsonPropertyName("pop3Port")]
   public int Pop3Port { get; set; } = 1110;
+}
+
+internal sealed class ProcessingConfig
+{
+  [JsonPropertyName("useOrderPlacedDateWhenDeliveryDateMissing")]
+  public bool UseOrderPlacedDateWhenDeliveryDateMissing { get; set; } = true;
 }
 
 internal sealed class FieldBoundsConfig
@@ -116,7 +125,7 @@ internal sealed class PointConfig
 internal sealed class EmailConfig
 {
   [JsonPropertyName("senderAddress")]
-  public string SenderAddress { get; set; } = "oliverflowershop71440@gmail.com";
+  public string SenderAddress { get; set; } = "faxparser@localhost.local";
 
   [JsonPropertyName("senderPassword")]
   public string SenderPassword { get; set; } = string.Empty;
@@ -125,22 +134,22 @@ internal sealed class EmailConfig
   public string SmtpUsername { get; set; } = string.Empty;
 
   [JsonPropertyName("recipientAddress")]
-  public string RecipientAddress { get; set; } = "ftdpos71440@oliverflowers.com";
+  public string RecipientAddress { get; set; } = "order@localhost.local";
 
   [JsonPropertyName("subjectLine")]
   public string SubjectLine { get; set; } = "Online Order";
 
   [JsonPropertyName("smtpHost")]
-  public string SmtpHost { get; set; } = "smtp.gmail.com";
+  public string SmtpHost { get; set; } = "127.0.0.1";
 
   [JsonPropertyName("smtpPort")]
-  public int SmtpPort { get; set; } = 587;
+  public int SmtpPort { get; set; } = 2525;
 
   [JsonPropertyName("encryptionPassword")]
   public string EncryptionPassword { get; set; } = string.Empty;
 
   [JsonPropertyName("encryptionAlgorithm")]
-  public string EncryptionAlgorithm { get; set; } = "TripleDES";
+  public string EncryptionAlgorithm { get; set; } = "None";
 }
 
 internal sealed class OrderLogEntry
@@ -165,6 +174,9 @@ internal sealed class OrderLogEntry
 
   [JsonPropertyName("error")]
   public string? Error { get; set; }
+
+  [JsonPropertyName("note")]
+  public string? Note { get; set; }
 
   [JsonPropertyName("fields")]
   public Dictionary<string, string>? Fields { get; set; }

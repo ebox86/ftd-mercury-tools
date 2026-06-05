@@ -10,6 +10,7 @@ export interface OrderLogEntry {
   deliveryDate?: string;
   emailSent: boolean;
   error?: string;
+  note?: string;
   fields?: Record<string, string | undefined>;
   processedFilePath?: string;
 }
