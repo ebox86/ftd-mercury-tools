@@ -54,8 +54,28 @@ function normalizeBaseUrl(raw: string): string {
 const ENV_BASE_URL = normalizeBaseUrl(RAW_ENV_BASE_URL);
 let runtimeBaseUrlOverride = '';
 
+function isLoopbackHost(rawHost: string): boolean {
+  const host = String(rawHost || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return host === 'localhost'
+    || host === '::1'
+    || host === '0:0:0:0:0:0:0:1'
+    || host.startsWith('127.');
+}
+
 function effectiveBaseUrl(): string {
-  return runtimeBaseUrlOverride || ENV_BASE_URL;
+  const override = runtimeBaseUrlOverride || '';
+  if (override && typeof window !== 'undefined') {
+    try {
+      const overrideUrl = new URL(override, window.location.href);
+      const pageHost = window.location.hostname;
+      if (!isLoopbackHost(pageHost) && isLoopbackHost(overrideUrl.hostname)) {
+        return ENV_BASE_URL;
+      }
+    } catch {
+      // Keep existing behavior for relative or malformed override values.
+    }
+  }
+  return override || ENV_BASE_URL;
 }
 
 export function setWorkflowBaseUrlOverride(raw: string): void {
