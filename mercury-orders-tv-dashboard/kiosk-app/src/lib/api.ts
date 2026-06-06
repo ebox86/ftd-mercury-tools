@@ -123,7 +123,22 @@ async function getJson<T>(path: string): Promise<T> {
       headers: { Accept: 'application/json' },
     });
     if (!response.ok) {
-      throw new Error(`Request failed: ${requestUrl} (${response.status})`);
+      let detail = '';
+      try {
+        const bodyText = await response.text();
+        if (bodyText) {
+          try {
+            const body = JSON.parse(bodyText) as { error?: unknown; detail?: unknown; endpoint?: unknown };
+            detail = String(body.error || body.detail || '').trim();
+            if (body.endpoint && detail) detail = `${body.endpoint}: ${detail}`;
+          } catch {
+            detail = bodyText.slice(0, 240);
+          }
+        }
+      } catch {
+        detail = '';
+      }
+      throw new Error(`Request failed: ${requestUrl} (${response.status})${detail ? `. ${detail}` : ''}`);
     }
     return response.json() as Promise<T>;
   } catch (error) {

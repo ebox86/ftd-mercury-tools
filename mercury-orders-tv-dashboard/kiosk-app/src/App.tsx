@@ -6228,6 +6228,8 @@ export default function App() {
       setDeliveryMapLoading(true);
       setDeliveryMapError('');
       const pins: Array<Omit<DeliveryMapPin, 'xPercent' | 'yPercent'>> = [];
+      const geocodeFailures: string[] = [];
+      const noMatchQueries: string[] = [];
 
       for (const card of selectedDayDeliveryMapOrders) {
         if (disposed) return;
@@ -6240,10 +6242,12 @@ export default function App() {
         }
 
         try {
-          const suggestions = await fetchAddressSuggestions(deliveryMapAddressQuery(card));
+          const addressQuery = deliveryMapAddressQuery(card);
+          const suggestions = await fetchAddressSuggestions(addressQuery);
           const match = suggestions[0] || null;
           if (!match) {
             deliveryMapGeocodeCacheRef.current.set(lookupKey, null);
+            noMatchQueries.push(addressQuery);
             continue;
           }
           const pin = {
@@ -6258,7 +6262,9 @@ export default function App() {
           };
           deliveryMapGeocodeCacheRef.current.set(lookupKey, pin);
           pins.push(pin);
-        } catch {
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          geocodeFailures.push(reason);
           deliveryMapGeocodeCacheRef.current.set(lookupKey, null);
         }
       }
@@ -6266,7 +6272,15 @@ export default function App() {
       if (disposed) return;
       setDeliveryMapPins(pins);
       setSelectedDeliveryMapPinId('');
-      setDeliveryMapError(pins.length ? '' : 'Unable to geocode delivery addresses for this date.');
+      if (pins.length) {
+        setDeliveryMapError('');
+      } else if (geocodeFailures.length) {
+        setDeliveryMapError(`Unable to geocode delivery addresses. ${geocodeFailures[0]}`);
+      } else if (noMatchQueries.length) {
+        setDeliveryMapError(`Mapbox returned no matches for ${noMatchQueries.length} delivery address${noMatchQueries.length === 1 ? '' : 'es'}. First query: ${noMatchQueries[0]}`);
+      } else {
+        setDeliveryMapError('Unable to geocode delivery addresses for this date.');
+      }
       setDeliveryMapLoading(false);
     };
 

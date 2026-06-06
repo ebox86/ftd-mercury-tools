@@ -1985,6 +1985,68 @@ async function getMapboxStaticMapImage(params = {}) {
   };
 }
 
+async function getMapboxDiagnostics() {
+  const diagnostics = {
+    enabled: Boolean(mapboxToken),
+    apiBaseUrl: mapboxApiBaseUrl,
+    geocoding: {
+      ok: false,
+      matchCount: 0,
+      firstMatch: '',
+      error: '',
+    },
+    staticMap: {
+      ok: false,
+      contentType: '',
+      bytes: 0,
+      error: '',
+    },
+  };
+
+  if (!mapboxToken) {
+    diagnostics.geocoding.error = 'MAPBOX_TOKEN is missing.';
+    diagnostics.staticMap.error = 'MAPBOX_TOKEN is missing.';
+    return diagnostics;
+  }
+
+  try {
+    const geocode = await getMapboxAddressSuggestions('608 Foreland Street Pittsburgh PA 15212', {
+      country: 'US',
+      limit: 1,
+    });
+    const suggestions = Array.isArray(geocode?.suggestions) ? geocode.suggestions : [];
+    diagnostics.geocoding.ok = suggestions.length > 0;
+    diagnostics.geocoding.matchCount = suggestions.length;
+    diagnostics.geocoding.firstMatch = String(suggestions[0]?.address || suggestions[0]?.label || '');
+    if (!suggestions.length) {
+      diagnostics.geocoding.error = 'Mapbox returned no geocoding matches for the diagnostic address.';
+    }
+  } catch (error) {
+    diagnostics.geocoding.error = String(error?.message || error);
+  }
+
+  try {
+    const image = await getMapboxStaticMapImage({
+      latitude: 40.454896,
+      longitude: -79.999037,
+      width: 320,
+      height: 180,
+      zoom: 13,
+      marker: false,
+    });
+    diagnostics.staticMap.ok = Buffer.isBuffer(image.body) && image.body.length > 0;
+    diagnostics.staticMap.contentType = String(image.contentType || '');
+    diagnostics.staticMap.bytes = Buffer.isBuffer(image.body) ? image.body.length : 0;
+    if (!diagnostics.staticMap.ok) {
+      diagnostics.staticMap.error = 'Mapbox returned an empty static map image.';
+    }
+  } catch (error) {
+    diagnostics.staticMap.error = String(error?.message || error);
+  }
+
+  return diagnostics;
+}
+
 function normalizeWeatherZipValue(raw = '') {
   const match = String(raw || '').match(/\b(\d{5})(?:-\d{4})?\b/);
   return match?.[1] || '15212';
@@ -3247,6 +3309,12 @@ async function routeJson(req, res, url, pathname) {
       endpoint: 'distance-estimate',
       ttlMs: mapboxRouteCacheTtlMs,
       loader: () => getLiveDistanceEstimate(params),
+    });
+  }
+
+  if (pathname === '/api/workflow/mapbox/diagnostics') {
+    return sendJson(res, 200, await getMapboxDiagnostics(), {
+      'Cache-Control': 'no-store',
     });
   }
 
