@@ -74,4 +74,8 @@ Optional installer switches:
 `/MAPBOXTOKEN` is optional and only used by the workflow-bridge service.  
 During service installation, the token is protected and persisted as encrypted service configuration (not plain text).
 
+Release builds read Mapbox from `MAPBOX_TOKEN` first, then `MAPBOX_ACCESS_TOKEN`, using either GitHub secrets or repository/environment variables. The release workflow and local `tools/build-installer.ps1` validate that the token can use Mapbox v6 forward geocoding and Static Images before compiling the setup exe.
+
+When the generated installer installs the web service on `0.0.0.0`, it creates a Windows Firewall inbound TCP rule for the web port. Other machines should open `http://<server-name-or-ip>:5173`; the web service proxies `/api/*` to the local workflow bridge on the server. To verify Mapbox after install, open `http://<server-name-or-ip>:5173/api/workflow/mapbox/diagnostics` and confirm `geocoding.ok` and `staticMap.ok` are both `true`.
+
 Optional PowerShell wrappers are still available under `service/` for manual admin tooling, but they now call the same compiled service host executable.

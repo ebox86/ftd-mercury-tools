@@ -1182,9 +1182,27 @@ function deliveryMapLookupKey(card: BoardCard): string {
   ].filter(Boolean).join('|');
 }
 
+function deliveryMapAddressLineForQuery(addressLineRaw: string): string {
+  const lines = String(addressLineRaw || '')
+    .split(/\r?\n+/)
+    .map(line => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  if (lines.length <= 1) return lines[0] || '';
+
+  const streetLineIndex = lines.findIndex(line => (
+    /^\d+\s+\S+/.test(line)
+    || /\b(ave|avenue|blvd|boulevard|cir|circle|ct|court|dr|drive|hwy|highway|ln|lane|pkwy|parkway|pl|place|rd|road|st|street|ter|terrace|trl|trail|way)\b/i.test(line)
+  ));
+  if (streetLineIndex >= 0) {
+    return lines.slice(streetLineIndex).join(' ');
+  }
+
+  return lines[lines.length - 1] || '';
+}
+
 function deliveryMapAddressQuery(card: BoardCard): string {
   return [
-    card.addressLine,
+    deliveryMapAddressLineForQuery(card.addressLine),
     card.cityStateZip,
     deriveCardFooterZip(card),
   ].map(value => String(value || '').trim()).filter(Boolean).join(', ');

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Principal;
 using System.Text;
+using System.Text.Json;
 
 namespace FTD.Mercury.Dashboard.ServiceHost;
 
@@ -34,7 +35,7 @@ internal static class ServiceCommandHandler
           await InstallOrUpdateAsync(options, cancellationToken);
           return 0;
         case ServiceCommand.Uninstall:
-          await UninstallAsync(options.ServiceName, cancellationToken);
+          await UninstallAsync(options, cancellationToken);
           return 0;
         case ServiceCommand.Start:
           await StartAsync(options.ServiceName, cancellationToken);
@@ -88,21 +89,26 @@ internal static class ServiceCommandHandler
       await RunScCheckedAsync(config, cancellationToken);
     }
 
+    await ConfigureFirewallAsync(options, cancellationToken);
     await ConfigureRecoveryAsync(options.ServiceName, cancellationToken);
     await StartAsync(options.ServiceName, cancellationToken);
     await VerifyHealthAsync(options, cancellationToken);
+    await VerifyMapboxAsync(options, cancellationToken);
   }
 
-  private static async Task UninstallAsync(string serviceName, CancellationToken cancellationToken)
+  private static async Task UninstallAsync(HostOptions options, CancellationToken cancellationToken)
   {
+    var serviceName = options.ServiceName;
     if (!await ServiceExistsAsync(serviceName, cancellationToken))
     {
       Console.WriteLine($"Service '{serviceName}' not found.");
+      await RemoveFirewallRuleAsync(options, cancellationToken);
       return;
     }
 
     await StopAsync(serviceName, cancellationToken);
     await RunScAsync($"delete {EscapeArg(serviceName)}", cancellationToken);
+    await RemoveFirewallRuleAsync(options, cancellationToken);
     Console.WriteLine($"Service '{serviceName}' deleted.");
   }
 
@@ -194,6 +200,129 @@ internal static class ServiceCommandHandler
     throw new InvalidOperationException($"Service started but health endpoint did not become ready: {options.HealthUrl}");
   }
 
+  private static async Task VerifyMapboxAsync(HostOptions options, CancellationToken cancellationToken)
+  {
+    if (options.Role != ServiceRole.Bridge)
+    {
+      return;
+    }
+
+    if (string.IsNullOrWhiteSpace(options.MapboxToken) && string.IsNullOrWhiteSpace(options.MapboxTokenProtected))
+    {
+      Console.WriteLine("Mapbox token was not configured; delivery-map geocoding and static maps will be disabled.");
+      return;
+    }
+
+    var diagnosticsUrl = $"http://127.0.0.1:{options.BridgePort}/api/workflow/mapbox/diagnostics";
+    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+    var deadline = DateTimeOffset.UtcNow.AddSeconds(60);
+    var lastError = "diagnostics endpoint did not respond";
+
+    while (DateTimeOffset.UtcNow < deadline)
+    {
+      cancellationToken.ThrowIfCancellationRequested();
+
+      try
+      {
+        var body = await http.GetStringAsync(diagnosticsUrl, cancellationToken);
+        var error = GetMapboxDiagnosticsError(body);
+        if (string.IsNullOrWhiteSpace(error))
+        {
+          Console.WriteLine($"Mapbox diagnostics passed ({diagnosticsUrl}).");
+          return;
+        }
+
+        lastError = error;
+      }
+      catch (Exception ex)
+      {
+        if (cancellationToken.IsCancellationRequested)
+        {
+          throw;
+        }
+
+        lastError = ex.Message;
+      }
+
+      await Task.Delay(1000, cancellationToken);
+    }
+
+    throw new InvalidOperationException($"Mapbox token is configured, but diagnostics did not pass at {diagnosticsUrl}: {lastError}");
+  }
+
+  private static string GetMapboxDiagnosticsError(string body)
+  {
+    try
+    {
+      using var doc = JsonDocument.Parse(body);
+      var root = doc.RootElement;
+      if (root.ValueKind != JsonValueKind.Object)
+      {
+        return "diagnostics response was not a JSON object";
+      }
+
+      var enabled = root.TryGetProperty("enabled", out var enabledElement) && enabledElement.ValueKind == JsonValueKind.True;
+      var geocodingOk = TryReadNestedBoolean(root, "geocoding", "ok");
+      var staticMapOk = TryReadNestedBoolean(root, "staticMap", "ok");
+
+      if (enabled && geocodingOk && staticMapOk)
+      {
+        return string.Empty;
+      }
+
+      var errors = new List<string>();
+      if (!enabled)
+      {
+        errors.Add("Mapbox is not enabled in the bridge");
+      }
+      if (!geocodingOk)
+      {
+        errors.Add($"geocoding failed: {TryReadNestedString(root, "geocoding", "error", "unknown error")}");
+      }
+      if (!staticMapOk)
+      {
+        errors.Add($"static map failed: {TryReadNestedString(root, "staticMap", "error", "unknown error")}");
+      }
+
+      return string.Join("; ", errors);
+    }
+    catch (JsonException ex)
+    {
+      return $"diagnostics response was invalid JSON: {ex.Message}";
+    }
+  }
+
+  private static bool TryReadNestedBoolean(JsonElement root, string objectName, string propertyName)
+  {
+    if (!root.TryGetProperty(objectName, out var section) || section.ValueKind != JsonValueKind.Object)
+    {
+      return false;
+    }
+
+    if (!section.TryGetProperty(propertyName, out var value))
+    {
+      return false;
+    }
+
+    return value.ValueKind == JsonValueKind.True;
+  }
+
+  private static string TryReadNestedString(JsonElement root, string objectName, string propertyName, string fallback)
+  {
+    if (!root.TryGetProperty(objectName, out var section) || section.ValueKind != JsonValueKind.Object)
+    {
+      return fallback;
+    }
+
+    if (!section.TryGetProperty(propertyName, out var value) || value.ValueKind != JsonValueKind.String)
+    {
+      return fallback;
+    }
+
+    var text = value.GetString();
+    return string.IsNullOrWhiteSpace(text) ? fallback : text;
+  }
+
   private static async Task<bool> ServiceExistsAsync(string serviceName, CancellationToken cancellationToken)
   {
     var result = await RunScAsync($"query {EscapeArg(serviceName)}", cancellationToken);
@@ -235,6 +364,46 @@ internal static class ServiceCommandHandler
     await RunScCheckedAsync($"failureflag {EscapeArg(serviceName)} 1", cancellationToken);
   }
 
+  private static async Task ConfigureFirewallAsync(HostOptions options, CancellationToken cancellationToken)
+  {
+    if (options.Role != ServiceRole.Web)
+    {
+      return;
+    }
+
+    await RemoveFirewallRuleAsync(options, cancellationToken);
+
+    if (IsLoopbackHost(options.WebHost))
+    {
+      Console.WriteLine($"Skipping firewall rule for loopback-only web host '{options.WebHost}'.");
+      return;
+    }
+
+    var ruleName = BuildFirewallRuleName(options);
+    var result = await RunNetshAsync(
+      $"advfirewall firewall add rule name={EscapeArg(ruleName)} dir=in action=allow protocol=TCP localport={options.WebPort}",
+      cancellationToken);
+    if (result.ExitCode != 0)
+    {
+      throw new InvalidOperationException($"Could not create firewall rule '{ruleName}': {result.Message}");
+    }
+
+    Console.WriteLine($"Firewall rule '{ruleName}' allows inbound TCP {options.WebPort}.");
+  }
+
+  private static async Task RemoveFirewallRuleAsync(HostOptions options, CancellationToken cancellationToken)
+  {
+    if (options.Role != ServiceRole.Web)
+    {
+      return;
+    }
+
+    var ruleName = BuildFirewallRuleName(options);
+    await RunNetshAsync($"advfirewall firewall delete rule name={EscapeArg(ruleName)} protocol=TCP", cancellationToken);
+  }
+
+  private static string BuildFirewallRuleName(HostOptions options) => options.ServiceName;
+
   private static async Task<ScResult> RunScCheckedAsync(string arguments, CancellationToken cancellationToken)
   {
     var result = await RunScAsync(arguments, cancellationToken);
@@ -249,6 +418,29 @@ internal static class ServiceCommandHandler
   private static async Task<ScResult> RunScAsync(string arguments, CancellationToken cancellationToken)
   {
     var psi = new ProcessStartInfo("sc.exe", arguments)
+    {
+      CreateNoWindow = true,
+      UseShellExecute = false,
+      RedirectStandardOutput = true,
+      RedirectStandardError = true,
+    };
+
+    using var process = new Process { StartInfo = psi };
+    process.Start();
+
+    var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+    var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+    await process.WaitForExitAsync(cancellationToken);
+
+    var stdout = await stdoutTask;
+    var stderr = await stderrTask;
+    var message = BuildMessage(stdout, stderr);
+    return new ScResult(process.ExitCode, message);
+  }
+
+  private static async Task<ScResult> RunNetshAsync(string arguments, CancellationToken cancellationToken)
+  {
+    var psi = new ProcessStartInfo("netsh.exe", arguments)
     {
       CreateNoWindow = true,
       UseShellExecute = false,
@@ -376,6 +568,15 @@ internal static class ServiceCommandHandler
     using var identity = WindowsIdentity.GetCurrent();
     var principal = new WindowsPrincipal(identity);
     return principal.IsInRole(WindowsBuiltInRole.Administrator);
+  }
+
+  private static bool IsLoopbackHost(string host)
+  {
+    var normalized = (host ?? string.Empty).Trim().Trim('[', ']').ToLowerInvariant();
+    return normalized == "localhost"
+      || normalized == "::1"
+      || normalized == "0:0:0:0:0:0:0:1"
+      || normalized.StartsWith("127.", StringComparison.Ordinal);
   }
 
   private sealed record ScResult(int ExitCode, string Message);

@@ -1886,17 +1886,44 @@ async function getMapboxGeocodeCoords(address = {}) {
 }
 
 function normalizeMapboxFeature(feature) {
-  const center = Array.isArray(feature?.center) ? feature.center : null;
-  const longitude = Number(center?.[0]);
-  const latitude = Number(center?.[1]);
+  const coordinates = Array.isArray(feature?.geometry?.coordinates)
+    ? feature.geometry.coordinates
+    : (Array.isArray(feature?.center) ? feature.center : null);
+  const longitude = Number(coordinates?.[0]);
+  const latitude = Number(coordinates?.[1]);
   if (!hasUsableCoords(latitude, longitude)) return null;
+  const properties = feature?.properties || {};
+  const label = normalizeSpace(
+    properties.full_address
+    || properties.place_formatted
+    || feature?.place_name
+    || properties.name
+    || feature?.text
+    || '',
+  );
   return {
-    id: String(feature?.id || feature?.mapbox_id || feature?.place_name || ''),
-    label: String(feature?.place_name || feature?.text || '').trim(),
-    address: String(feature?.place_name || '').trim(),
+    id: String(feature?.id || feature?.mapbox_id || properties.mapbox_id || label || ''),
+    label,
+    address: label,
     latitude,
     longitude,
   };
+}
+
+function mapboxRequestContextFromReq(req) {
+  return {
+    referer: firstHeaderValue(req.headers.referer),
+    origin: firstHeaderValue(req.headers.origin),
+  };
+}
+
+function mapboxRequestHeaders(accept, options = {}) {
+  const headers = { Accept: accept };
+  const referer = normalizeSpace(options.referer || options.referrer || '');
+  const origin = normalizeSpace(options.origin || '');
+  if (referer) headers.Referer = referer;
+  if (origin) headers.Origin = origin;
+  return headers;
 }
 
 async function getMapboxAddressSuggestions(query, options = {}) {
@@ -1914,22 +1941,63 @@ async function getMapboxAddressSuggestions(query, options = {}) {
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), Math.max(1000, mapboxTimeoutMs));
     try {
-      const endpoint = `${mapboxApiBaseUrl}/geocoding/v5/mapbox.places/${encodeURIComponent(normalizedQuery)}.json`;
-      const params = new URLSearchParams({
+      const headers = mapboxRequestHeaders('application/json', options);
+      let v6Error = '';
+      let v6NoMatches = false;
+
+      const v6Endpoint = `${mapboxApiBaseUrl}/search/geocode/v6/forward`;
+      const v6Params = new URLSearchParams({
+        access_token: mapboxToken,
+        q: normalizedQuery,
+        limit: String(limit),
+        autocomplete: 'true',
+        types: 'address,street,place,postcode',
+      });
+      if (country) v6Params.set('country', country);
+      const v6Response = await fetch(`${v6Endpoint}?${v6Params.toString()}`, {
+        method: 'GET',
+        headers,
+        signal: controller.signal,
+      });
+      const v6BodyText = await v6Response.text();
+      if (v6Response.ok) {
+        let body = null;
+        try {
+          body = JSON.parse(v6BodyText);
+        } catch {
+          throw new Error('Mapbox Geocoding v6 returned invalid JSON.');
+        }
+        const suggestions = (Array.isArray(body?.features) ? body.features : [])
+          .map(normalizeMapboxFeature)
+          .filter(Boolean);
+        if (suggestions.length) {
+          return {
+            suggestions,
+            mapboxEnabled: true,
+            provider: 'mapbox_geocoding_v6',
+          };
+        }
+        v6NoMatches = true;
+      } else {
+        v6Error = `v6 (${v6Response.status}): ${v6BodyText.slice(0, 240)}`;
+      }
+
+      const v5Endpoint = `${mapboxApiBaseUrl}/geocoding/v5/mapbox.places/${encodeURIComponent(normalizedQuery)}.json`;
+      const v5Params = new URLSearchParams({
         access_token: mapboxToken,
         limit: String(limit),
         autocomplete: 'true',
-        types: 'address,poi',
+        types: 'address,poi,place',
       });
-      if (country) params.set('country', country);
-      const response = await fetch(`${endpoint}?${params.toString()}`, {
+      if (country) v5Params.set('country', country);
+      const response = await fetch(`${v5Endpoint}?${v5Params.toString()}`, {
         method: 'GET',
-        headers: { Accept: 'application/json' },
+        headers,
         signal: controller.signal,
       });
       const bodyText = await response.text();
       if (!response.ok) {
-        throw new Error(`Mapbox Geocoding failed (${response.status}): ${bodyText.slice(0, 240)}`);
+        throw new Error(`Mapbox Geocoding failed. ${v6Error || (v6NoMatches ? 'v6 returned no matches.' : 'v6 was not attempted.')}; v5 (${response.status}): ${bodyText.slice(0, 240)}`);
       }
       let body = null;
       try {
@@ -1943,6 +2011,7 @@ async function getMapboxAddressSuggestions(query, options = {}) {
       return {
         suggestions,
         mapboxEnabled: true,
+        provider: suggestions.length ? 'mapbox_geocoding_v5' : (v6NoMatches ? 'mapbox_geocoding_v6_v5_no_matches' : 'mapbox_geocoding_v5'),
       };
     } finally {
       clearTimeout(timeoutHandle);
@@ -1973,7 +2042,7 @@ async function getMapboxStaticMapImage(params = {}) {
   }).toString()}`;
   const response = await fetch(url, {
     method: 'GET',
-    headers: { Accept: 'image/png,image/*' },
+    headers: mapboxRequestHeaders('image/png,image/*', params),
   });
   const body = Buffer.from(await response.arrayBuffer());
   if (!response.ok) {
@@ -1985,10 +2054,11 @@ async function getMapboxStaticMapImage(params = {}) {
   };
 }
 
-async function getMapboxDiagnostics() {
+async function getMapboxDiagnostics(options = {}) {
   const diagnostics = {
     enabled: Boolean(mapboxToken),
     apiBaseUrl: mapboxApiBaseUrl,
+    forwardedReferer: Boolean(options.referer || options.origin),
     geocoding: {
       ok: false,
       matchCount: 0,
@@ -2013,6 +2083,8 @@ async function getMapboxDiagnostics() {
     const geocode = await getMapboxAddressSuggestions('608 Foreland Street Pittsburgh PA 15212', {
       country: 'US',
       limit: 1,
+      referer: options.referer,
+      origin: options.origin,
     });
     const suggestions = Array.isArray(geocode?.suggestions) ? geocode.suggestions : [];
     diagnostics.geocoding.ok = suggestions.length > 0;
@@ -2033,6 +2105,8 @@ async function getMapboxDiagnostics() {
       height: 180,
       zoom: 13,
       marker: false,
+      referer: options.referer,
+      origin: options.origin,
     });
     diagnostics.staticMap.ok = Buffer.isBuffer(image.body) && image.body.length > 0;
     diagnostics.staticMap.contentType = String(image.contentType || '');
@@ -3313,7 +3387,7 @@ async function routeJson(req, res, url, pathname) {
   }
 
   if (pathname === '/api/workflow/mapbox/diagnostics') {
-    return sendJson(res, 200, await getMapboxDiagnostics(), {
+    return sendJson(res, 200, await getMapboxDiagnostics(mapboxRequestContextFromReq(req)), {
       'Cache-Control': 'no-store',
     });
   }
@@ -3322,17 +3396,19 @@ async function routeJson(req, res, url, pathname) {
     const query = resolveParam(url, '', ['q', 'query', 'address'], '');
     const country = resolveParam(url, '', ['country'], 'US');
     const limit = resolveParam(url, '', ['limit'], '5');
+    const mapboxRequestContext = mapboxRequestContextFromReq(req);
     return sendLiveCachedJson(res, url, {
       scope: 'mapbox-address-suggest',
       params: { query, country, limit },
       endpoint: 'mapbox-address-suggest',
       ttlMs: mapboxAddressCacheTtlMs,
-      loader: () => getMapboxAddressSuggestions(query, { country, limit }),
+      loader: () => getMapboxAddressSuggestions(query, { country, limit, ...mapboxRequestContext }),
     });
   }
 
   if (pathname === '/api/workflow/mapbox/static-map') {
     try {
+      const mapboxRequestContext = mapboxRequestContextFromReq(req);
       const image = await getMapboxStaticMapImage({
         latitude: resolveParam(url, '', ['latitude', 'lat'], ''),
         longitude: resolveParam(url, '', ['longitude', 'lon', 'lng'], ''),
@@ -3340,6 +3416,7 @@ async function routeJson(req, res, url, pathname) {
         height: resolveParam(url, '', ['height', 'h'], '260'),
         zoom: resolveParam(url, '', ['zoom', 'z'], '14'),
         marker: resolveParam(url, '', ['marker'], 'false'),
+        ...mapboxRequestContext,
       });
       return sendBinary(res, 200, image.body, image.contentType, {
         'Cache-Control': 'public, max-age=3600',
@@ -3354,6 +3431,7 @@ async function routeJson(req, res, url, pathname) {
 
   if (pathname === '/api/workflow/mapbox/static-map-base') {
     try {
+      const mapboxRequestContext = mapboxRequestContextFromReq(req);
       const image = await getMapboxStaticMapImage({
         latitude: resolveParam(url, '', ['latitude', 'lat'], ''),
         longitude: resolveParam(url, '', ['longitude', 'lon', 'lng'], ''),
@@ -3361,6 +3439,7 @@ async function routeJson(req, res, url, pathname) {
         height: resolveParam(url, '', ['height', 'h'], '260'),
         zoom: resolveParam(url, '', ['zoom', 'z'], '14'),
         marker: 'false',
+        ...mapboxRequestContext,
       });
       return sendBinary(res, 200, image.body, image.contentType, {
         'Cache-Control': 'no-store',

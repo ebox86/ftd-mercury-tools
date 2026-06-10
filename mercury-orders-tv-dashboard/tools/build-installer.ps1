@@ -98,11 +98,6 @@ if (-not (Test-Path $distRoot)) {
   New-Item -ItemType Directory -Path $distRoot | Out-Null
 }
 
-$iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
-if (-not $iscc) {
-  throw "iscc.exe (Inno Setup compiler) was not found on PATH."
-}
-
 $defineVersion = "/DMyAppVersion=$Version"
 $definePublisher = '/DMyAppPublisher="' + $Publisher + '"'
 $defineUrl = '/DMyAppURL="' + $PublisherUrl + '"'
@@ -143,6 +138,93 @@ function Read-MapboxTokenFromEnvFile {
   return ""
 }
 
+function Read-WebResponseBody {
+  param($Response)
+
+  if ($null -eq $Response) {
+    return ""
+  }
+
+  try {
+    if ($Response.PSObject.Properties.Name -contains "Content") {
+      $content = $Response.Content
+      if ($null -ne $content) {
+        if ($content -is [byte[]]) {
+          return [System.Text.Encoding]::UTF8.GetString($content)
+        }
+        if ($content.PSObject.Methods.Name -contains "ReadAsStringAsync") {
+          return $content.ReadAsStringAsync().GetAwaiter().GetResult()
+        }
+        return [string]$content
+      }
+    }
+
+    if ($Response.PSObject.Methods.Name -notcontains "GetResponseStream") {
+      return ""
+    }
+
+    $stream = $Response.GetResponseStream()
+    if ($null -eq $stream) {
+      return ""
+    }
+
+    $reader = [System.IO.StreamReader]::new($stream)
+    return $reader.ReadToEnd()
+  } catch {
+    return ""
+  }
+}
+
+function Invoke-MapboxValidationRequest {
+  param(
+    [Parameter(Mandatory = $true)] [string]$Name,
+    [Parameter(Mandatory = $true)] [string]$Uri
+  )
+
+  try {
+    return Invoke-WebRequest -Uri $Uri -Method Get -TimeoutSec 20 -UseBasicParsing
+  } catch {
+    $status = ""
+    $body = ""
+    $errorResponse = $null
+    if ($_.Exception.PSObject.Properties.Name -contains "Response") {
+      $errorResponse = $_.Exception.Response
+    }
+    if ($null -ne $errorResponse) {
+      try { $status = " HTTP $([int]$errorResponse.StatusCode)" } catch { $status = "" }
+      $body = (Read-WebResponseBody $errorResponse).Trim()
+    }
+
+    if ($body.Length -gt 240) {
+      $body = $body.Substring(0, 240)
+    }
+
+    $bodySuffix = ""
+    if ($body) {
+      $bodySuffix = " Body: $body"
+    }
+
+    throw "MAPBOX_TOKEN validation failed for ${Name}.${status} $($_.Exception.Message)$bodySuffix"
+  }
+}
+
+function Test-MapboxTokenForInstaller {
+  param([Parameter(Mandatory = $true)] [string]$Token)
+
+  $encodedMapboxToken = [System.Uri]::EscapeDataString($Token)
+  $testQuery = [System.Uri]::EscapeDataString("608 Foreland Street Pittsburgh PA 15212")
+  $geocodeUri = "https://api.mapbox.com/search/geocode/v6/forward?q=$testQuery&country=US&limit=1&autocomplete=true&types=address,street,place,postcode&access_token=$encodedMapboxToken"
+  $geocodeResponse = Invoke-MapboxValidationRequest -Name "Mapbox v6 forward geocoding" -Uri $geocodeUri
+  $geocodeJson = (Read-WebResponseBody $geocodeResponse) | ConvertFrom-Json
+  if (-not $geocodeJson.features -or $geocodeJson.features.Count -lt 1) {
+    throw "MAPBOX_TOKEN validation returned no v6 geocoding results."
+  }
+
+  $staticMapUri = "https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/pin-s+176b87(-79.999037,40.454896)/-79.999037,40.454896,13,0/320x180@2x?access_token=$encodedMapboxToken&attribution=false&logo=false"
+  [void](Invoke-MapboxValidationRequest -Name "Mapbox Static Images" -Uri $staticMapUri)
+  Write-Host "MAPBOX_TOKEN validated for installer geocoding and static maps."
+}
+
 $MapboxToken = Normalize-MapboxToken $MapboxToken
 if (-not $MapboxToken) {
   $MapboxToken = Normalize-MapboxToken ([string]$env:MAPBOX_TOKEN)
@@ -155,6 +237,12 @@ if (-not $MapboxToken) {
 }
 if (-not $MapboxToken) {
   $MapboxToken = Read-MapboxTokenFromEnvFile (Join-Path $projectRoot "workflow-bridge\.env")
+}
+
+if ($MapboxToken) {
+  Test-MapboxTokenForInstaller -Token $MapboxToken
+} else {
+  Write-Warning "No MAPBOX_TOKEN was provided. The generated installer will install successfully, but delivery-map geocoding/static maps will be disabled."
 }
 
 $compileArgs = @(
@@ -173,6 +261,11 @@ if ($MapboxToken) {
     '/DEmbeddedMapboxToken="' + $escapedMapboxToken + '"',
     $installerProjectPath
   )
+}
+
+$iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
+if (-not $iscc) {
+  throw "iscc.exe (Inno Setup compiler) was not found on PATH."
 }
 
 Write-Host "Compiling Mercury dashboard installer with Inno Setup..."

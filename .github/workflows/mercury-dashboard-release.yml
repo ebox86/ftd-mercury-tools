@@ -176,17 +176,82 @@ jobs:
             $mapboxToken = $mapboxToken.Substring(1, $mapboxToken.Length - 2).Trim()
           }
 
-          $testQuery = [System.Uri]::EscapeDataString("1600 Pennsylvania Ave NW Washington DC")
-          $testUri = "https://api.mapbox.com/geocoding/v5/mapbox.places/$testQuery.json?country=US&limit=1&access_token=$mapboxToken"
-          try {
-            $mapboxTest = Invoke-RestMethod -Uri $testUri -Method Get -TimeoutSec 15
-          } catch {
-            throw "MAPBOX_TOKEN secret was provided, but Mapbox rejected the release-workflow validation request: $($_.Exception.Message)"
+          function Read-ErrorBody {
+            param($Response)
+
+            if ($null -eq $Response) {
+              return ""
+            }
+
+            try {
+              if ($Response.Content) {
+                if ($Response.Content -is [byte[]]) {
+                  return [System.Text.Encoding]::UTF8.GetString($Response.Content)
+                }
+                return $Response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+              }
+
+              if ($Response.PSObject.Methods.Name -notcontains "GetResponseStream") {
+                return ""
+              }
+
+              $stream = $Response.GetResponseStream()
+              if ($null -eq $stream) {
+                return ""
+              }
+
+              $reader = [System.IO.StreamReader]::new($stream)
+              return $reader.ReadToEnd()
+            } catch {
+              return ""
+            }
           }
-          if (-not $mapboxTest.features -or $mapboxTest.features.Count -lt 1) {
-            throw "MAPBOX_TOKEN secret validation returned no geocoding results."
+
+          function Invoke-MapboxValidationRequest {
+            param(
+              [Parameter(Mandatory = $true)] [string]$Name,
+              [Parameter(Mandatory = $true)] [string]$Uri
+            )
+
+            try {
+              return Invoke-WebRequest -Uri $Uri -Method Get -TimeoutSec 20
+            } catch {
+              $status = ""
+              $body = ""
+              $errorResponse = $null
+              if ($_.Exception.PSObject.Properties.Name -contains "Response") {
+                $errorResponse = $_.Exception.Response
+              }
+              if ($null -ne $errorResponse) {
+                try { $status = " HTTP $([int]$errorResponse.StatusCode)" } catch { $status = "" }
+                $body = (Read-ErrorBody $errorResponse).Trim()
+              }
+
+              if ($body.Length -gt 240) {
+                $body = $body.Substring(0, 240)
+              }
+
+              $bodySuffix = ""
+              if ($body) {
+                $bodySuffix = " Body: $body"
+              }
+
+              throw "MAPBOX_TOKEN validation failed for ${Name}.${status} $($_.Exception.Message)$bodySuffix"
+            }
           }
-          Write-Host "MAPBOX_TOKEN secret validated for release build."
+
+          $encodedMapboxToken = [System.Uri]::EscapeDataString($mapboxToken)
+          $testQuery = [System.Uri]::EscapeDataString("608 Foreland Street Pittsburgh PA 15212")
+          $geocodeUri = "https://api.mapbox.com/search/geocode/v6/forward?q=$testQuery&country=US&limit=1&autocomplete=true&types=address,street,place,postcode&access_token=$encodedMapboxToken"
+          $geocodeResponse = Invoke-MapboxValidationRequest -Name "Mapbox v6 forward geocoding" -Uri $geocodeUri
+          $geocodeJson = $geocodeResponse.Content | ConvertFrom-Json
+          if (-not $geocodeJson.features -or $geocodeJson.features.Count -lt 1) {
+            throw "MAPBOX_TOKEN validation returned no v6 geocoding results."
+          }
+
+          $staticMapUri = "https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/pin-s+176b87(-79.999037,40.454896)/-79.999037,40.454896,13,0/320x180@2x?access_token=$encodedMapboxToken&attribution=false&logo=false"
+          [void](Invoke-MapboxValidationRequest -Name "Mapbox Static Images" -Uri $staticMapUri)
+          Write-Host "MAPBOX_TOKEN secret validated for release build geocoding and static maps."
 
           .\mercury-orders-tv-dashboard\tools\build-installer.ps1 `
             -Version "${{ steps.meta.outputs.version }}" `
