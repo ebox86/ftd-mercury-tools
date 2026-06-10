@@ -208,17 +208,61 @@ function Invoke-MapboxValidationRequest {
   }
 }
 
+function Get-JsonPropertyValue {
+  param(
+    [Parameter(Mandatory = $true)] $Object,
+    [Parameter(Mandatory = $true)] [string]$Name
+  )
+
+  if ($null -eq $Object) {
+    return $null
+  }
+
+  $property = $Object.PSObject.Properties[$Name]
+  if ($null -eq $property) {
+    return $null
+  }
+
+  return $property.Value
+}
+
+function Test-MapboxGeocoding {
+  param([Parameter(Mandatory = $true)] [string]$Token)
+
+  $queries = @(
+    "1600 Pennsylvania Ave NW Washington DC 20500",
+    "608 Foreland Street Pittsburgh PA 15212",
+    "1222 E Carson St Pittsburgh PA 15203"
+  )
+
+  foreach ($query in $queries) {
+    $encodedQuery = [System.Uri]::EscapeDataString($query)
+    $encodedToken = [System.Uri]::EscapeDataString($Token)
+    $uri = "https://api.mapbox.com/search/geocode/v6/forward?q=$encodedQuery&country=US&limit=1&autocomplete=false&types=address,street,place,postcode&access_token=$encodedToken"
+    $response = Invoke-MapboxValidationRequest -Name "Mapbox v6 forward geocoding" -Uri $uri
+    $json = (Read-WebResponseBody $response) | ConvertFrom-Json
+    $features = Get-JsonPropertyValue -Object $json -Name "features"
+    $featureCount = 0
+    if ($null -ne $features) {
+      $featureCount = @($features).Count
+    }
+
+    if ($featureCount -gt 0) {
+      Write-Host "MAPBOX_TOKEN v6 geocoding validated with $featureCount match(es)."
+      return
+    }
+
+    Write-Host "Mapbox v6 validation query returned no matches: $query"
+  }
+
+  throw "MAPBOX_TOKEN validation returned no v6 geocoding results for validation queries."
+}
+
 function Test-MapboxTokenForInstaller {
   param([Parameter(Mandatory = $true)] [string]$Token)
 
   $encodedMapboxToken = [System.Uri]::EscapeDataString($Token)
-  $testQuery = [System.Uri]::EscapeDataString("608 Foreland Street Pittsburgh PA 15212")
-  $geocodeUri = "https://api.mapbox.com/search/geocode/v6/forward?q=$testQuery&country=US&limit=1&autocomplete=true&types=address,street,place,postcode&access_token=$encodedMapboxToken"
-  $geocodeResponse = Invoke-MapboxValidationRequest -Name "Mapbox v6 forward geocoding" -Uri $geocodeUri
-  $geocodeJson = (Read-WebResponseBody $geocodeResponse) | ConvertFrom-Json
-  if (-not $geocodeJson.features -or $geocodeJson.features.Count -lt 1) {
-    throw "MAPBOX_TOKEN validation returned no v6 geocoding results."
-  }
+  Test-MapboxGeocoding -Token $Token
 
   $staticMapUri = "https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/pin-s+176b87(-79.999037,40.454896)/-79.999037,40.454896,13,0/320x180@2x?access_token=$encodedMapboxToken&attribution=false&logo=false"
   [void](Invoke-MapboxValidationRequest -Name "Mapbox Static Images" -Uri $staticMapUri)
