@@ -9,7 +9,7 @@ internal static class SecretProtection
 
   public static string ProtectForLocalMachine(string value)
   {
-    var input = (value ?? string.Empty).Trim();
+    var input = MapboxTokenNormalizer.Normalize(value);
     if (input.Length == 0)
     {
       return string.Empty;
@@ -42,11 +42,12 @@ internal static class SecretProtection
     {
       var protectedBytes = Convert.FromBase64String(input);
       var plainBytes = ProtectedData.Unprotect(protectedBytes, AdditionalEntropy, DataProtectionScope.LocalMachine);
-      return Encoding.UTF8.GetString(plainBytes);
+      return MapboxTokenNormalizer.Normalize(Encoding.UTF8.GetString(plainBytes));
     }
     catch (Exception ex)
     {
       throw new InvalidOperationException("Failed to decrypt protected Mapbox token.", ex);
     }
   }
+
 }

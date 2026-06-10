@@ -81,6 +81,10 @@ function normalizeAccessToken(rawToken = '') {
   if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
     token = token.slice(1, -1).trim();
   }
+  const embeddedToken = token.match(/\b(?:pk|sk)\.[A-Za-z0-9._-]+/);
+  if (embeddedToken) {
+    token = embeddedToken[0].trim();
+  }
   return token;
 }
 

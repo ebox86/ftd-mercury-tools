@@ -175,6 +175,9 @@ jobs:
           if (($mapboxToken.StartsWith('"') -and $mapboxToken.EndsWith('"')) -or ($mapboxToken.StartsWith("'") -and $mapboxToken.EndsWith("'"))) {
             $mapboxToken = $mapboxToken.Substring(1, $mapboxToken.Length - 2).Trim()
           }
+          if ($mapboxToken -match '\b(pk|sk)\.[A-Za-z0-9._-]+') {
+            $mapboxToken = $Matches[0].Trim()
+          }
 
           function Read-WebResponseBody {
             param($Response)

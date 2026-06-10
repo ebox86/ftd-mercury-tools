@@ -157,7 +157,7 @@ internal sealed class HostOptions
   {
     if (!string.IsNullOrWhiteSpace(MapboxToken))
     {
-      return MapboxToken;
+      return MapboxTokenNormalizer.Normalize(MapboxToken);
     }
 
     if (string.IsNullOrWhiteSpace(MapboxTokenProtected))
@@ -165,7 +165,7 @@ internal sealed class HostOptions
       return string.Empty;
     }
 
-    return SecretProtection.UnprotectForLocalMachine(MapboxTokenProtected);
+    return MapboxTokenNormalizer.Normalize(SecretProtection.UnprotectForLocalMachine(MapboxTokenProtected));
   }
 
   private static ServiceCommand ResolveCommand(ArgumentParser parser)

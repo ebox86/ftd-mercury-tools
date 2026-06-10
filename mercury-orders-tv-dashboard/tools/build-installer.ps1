@@ -114,6 +114,9 @@ function Normalize-MapboxToken {
   if (($token.StartsWith('"') -and $token.EndsWith('"')) -or ($token.StartsWith("'") -and $token.EndsWith("'"))) {
     $token = $token.Substring(1, $token.Length - 2).Trim()
   }
+  if ($token -match '\b(pk|sk)\.[A-Za-z0-9._-]+') {
+    $token = $Matches[0].Trim()
+  }
   return $token
 }
 
