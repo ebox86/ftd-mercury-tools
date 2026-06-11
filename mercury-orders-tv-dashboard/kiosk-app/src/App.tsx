@@ -12,6 +12,8 @@ import {
   faGear,
   faInbox,
   faMagnifyingGlass,
+  faMinus,
+  faDownLeftAndUpRightToCenter,
   faPlay,
   faPlus,
   faScroll,
@@ -182,6 +184,11 @@ interface DashboardUserConfig {
   enabledPageIds: DashboardPageId[];
   pageAutoRotateEnabled: boolean;
   pageAutoRotateIntervalSec: number;
+  deliveryMapInitialZoom: number;
+  deliveryMapMinZoom: number;
+  deliveryMapMaxZoom: number;
+  deliveryMapZoomAdjustment: number;
+  deliveryMapPadding: number;
   minOrderThreshold: number;
   minOrderPadding: number;
   zipGateMode: ZipGateMode;
@@ -214,6 +221,14 @@ interface DeliveryMapViewport {
   zoom: number;
 }
 
+interface DeliveryMapViewportConfig {
+  initialZoom: number;
+  minZoom: number;
+  maxZoom: number;
+  zoomAdjustment: number;
+  padding: number;
+}
+
 const DEFAULT_POLL_MS = 15000;
 const DEFAULT_FLASH_MS = 120000;
 const DEFAULT_ASK_STALE_HOURS = 12;
@@ -224,6 +239,15 @@ const DEFAULT_MARKETPLACE_DINGS = 3;
 const DEFAULT_TODAY_DINGS = 1;
 const DEFAULT_DING_GAP_MS = 620;
 const DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC = 20;
+const DELIVERY_MAP_IMAGE_WIDTH = 900;
+const DELIVERY_MAP_IMAGE_HEIGHT = 520;
+const DEFAULT_DELIVERY_MAP_INITIAL_ZOOM = 12;
+const DEFAULT_DELIVERY_MAP_MIN_ZOOM = 9;
+const DEFAULT_DELIVERY_MAP_MAX_ZOOM = 12;
+const DEFAULT_DELIVERY_MAP_ZOOM_ADJUSTMENT = 0;
+const DEFAULT_DELIVERY_MAP_PADDING = 140;
+const DELIVERY_MAP_GEOCODE_MAX_DISTANCE_FROM_SHOP_MILES = 120;
+const DELIVERY_MAP_OUTLIER_MAX_CLUSTER_DISTANCE_MILES = 100;
 const NEW_ORDER_PULSE_WINDOW_MINUTES = 30;
 const WEATHER_FORECAST_REFRESH_MS = 10 * 60 * 1000;
 const WEATHER_FORECAST_RETRY_MS = 30 * 1000;
@@ -266,6 +290,11 @@ const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
   enabledPageIds: ['alerts_active'],
   pageAutoRotateEnabled: false,
   pageAutoRotateIntervalSec: DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC,
+  deliveryMapInitialZoom: DEFAULT_DELIVERY_MAP_INITIAL_ZOOM,
+  deliveryMapMinZoom: DEFAULT_DELIVERY_MAP_MIN_ZOOM,
+  deliveryMapMaxZoom: DEFAULT_DELIVERY_MAP_MAX_ZOOM,
+  deliveryMapZoomAdjustment: DEFAULT_DELIVERY_MAP_ZOOM_ADJUSTMENT,
+  deliveryMapPadding: DEFAULT_DELIVERY_MAP_PADDING,
   minOrderThreshold: 55,
   minOrderPadding: 2,
   zipGateMode: 'watchlist',
@@ -899,15 +928,35 @@ function hasMarketplaceKeyword(...parts: string[]): boolean {
 }
 
 function hasPickupKeyword(...parts: string[]): boolean {
-  return /\bpick[\s-]*up\b/i.test(parts.join(' '));
+  const text = parts.join(' ');
+  const compact = text.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return (
+    compact.includes('pickup')
+    || /\bpick[\s-]*up\b/i.test(text)
+    || /\bp\.?\s*\/?\s*u\.?\b/i.test(text)
+  );
+}
+
+function isPickupOrderType(orderTypeRaw: string): boolean {
+  const orderType = String(orderTypeRaw || '');
+  const compact = orderType.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return (
+    hasPickupKeyword(orderType)
+    || compact.includes('willcall')
+    || compact.includes('carryout')
+  );
 }
 
 function isPickupOrCodOrderType(orderTypeRaw: string): boolean {
   const orderType = String(orderTypeRaw || '');
   return (
-    hasPickupKeyword(orderType)
+    isPickupOrderType(orderType)
     || orderType.toLowerCase().includes('cod')
   );
+}
+
+function isPickupDeliveryMapCard(card: Pick<BoardCard, 'orderType' | 'addressLine' | 'recipientName'>): boolean {
+  return isPickupOrderType(card.orderType) || hasPickupKeyword(card.addressLine, card.recipientName);
 }
 
 
@@ -1174,6 +1223,105 @@ function mercatorWorldPoint(latitude: number, longitude: number, zoom: number): 
   };
 }
 
+function degreesToRadians(value: number): number {
+  return (value * Math.PI) / 180;
+}
+
+function deliveryMapDistanceMiles(
+  left: { latitude: number; longitude: number },
+  right: { latitude: number; longitude: number },
+): number {
+  const earthRadiusMiles = 3958.8;
+  const lat1 = degreesToRadians(left.latitude);
+  const lat2 = degreesToRadians(right.latitude);
+  const deltaLat = degreesToRadians(right.latitude - left.latitude);
+  const deltaLon = degreesToRadians(right.longitude - left.longitude);
+  const a = Math.sin(deltaLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * (Math.sin(deltaLon / 2) ** 2);
+  return earthRadiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function medianNumber(values: number[]): number {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2) return sorted[middle];
+  return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function deliveryMapShopPoint(config: DashboardUserConfig): { latitude: number; longitude: number } | null {
+  if (config.shopAddressLatitude === null || config.shopAddressLongitude === null) return null;
+  return {
+    latitude: config.shopAddressLatitude,
+    longitude: config.shopAddressLongitude,
+  };
+}
+
+function pickDeliveryMapAddressSuggestion(
+  suggestions: AddressSuggestion[],
+  origin: { latitude: number; longitude: number } | null,
+): AddressSuggestion | null {
+  if (!suggestions.length) return null;
+  if (!origin) return suggestions[0] || null;
+
+  const ranked = suggestions
+    .map(suggestion => ({
+      suggestion,
+      distanceMiles: deliveryMapDistanceMiles(origin, suggestion),
+    }))
+    .filter(item => Number.isFinite(item.distanceMiles))
+    .sort((a, b) => a.distanceMiles - b.distanceMiles);
+
+  if (!ranked.length) return suggestions[0] || null;
+  const nearest = ranked[0];
+  if (nearest.distanceMiles > DELIVERY_MAP_GEOCODE_MAX_DISTANCE_FROM_SHOP_MILES) {
+    return null;
+  }
+  return nearest.suggestion;
+}
+
+function pickDeliveryMapViewportPoints<TPoint extends { latitude: number; longitude: number }>(
+  points: TPoint[],
+  origin: { latitude: number; longitude: number } | null,
+): TPoint[] {
+  if (points.length < 4) return points;
+
+  if (origin) {
+    const nearShop = points.filter(point => (
+      deliveryMapDistanceMiles(origin, point) <= DELIVERY_MAP_GEOCODE_MAX_DISTANCE_FROM_SHOP_MILES
+    ));
+    if (nearShop.length >= Math.max(3, Math.ceil(points.length * 0.6))) {
+      return nearShop;
+    }
+  }
+
+  const medianPoint = {
+    latitude: medianNumber(points.map(point => point.latitude)),
+    longitude: medianNumber(points.map(point => point.longitude)),
+  };
+  const distances = points.map(point => deliveryMapDistanceMiles(medianPoint, point));
+  const medianDistance = medianNumber(distances);
+  const threshold = Math.min(
+    DELIVERY_MAP_OUTLIER_MAX_CLUSTER_DISTANCE_MILES,
+    Math.max(20, medianDistance * 3),
+  );
+  const clustered = points.filter((_, index) => distances[index] <= threshold);
+  if (clustered.length >= Math.max(3, Math.ceil(points.length * 0.6))) {
+    return clustered;
+  }
+
+  return points;
+}
+
+function buildDeliveryMapViewportFitPoints<TPoint extends { latitude: number; longitude: number }>(
+  points: TPoint[],
+  origin: { latitude: number; longitude: number } | null,
+): Array<{ latitude: number; longitude: number }> {
+  const clusteredPoints = pickDeliveryMapViewportPoints(points, origin);
+  if (!clusteredPoints.length || !origin) return clusteredPoints;
+  return [...clusteredPoints, origin];
+}
+
 function deliveryMapLookupKey(card: BoardCard): string {
   return [
     normalizeAddressKeyText(card.addressLine),
@@ -1208,26 +1356,52 @@ function deliveryMapAddressQuery(card: BoardCard): string {
   ].map(value => String(value || '').trim()).filter(Boolean).join(', ');
 }
 
-function buildDeliveryMapViewport(points: Array<{ latitude: number; longitude: number }>): DeliveryMapViewport | null {
+function normalizeDeliveryMapViewportConfig(raw: Partial<DeliveryMapViewportConfig> | null | undefined): DeliveryMapViewportConfig {
+  const rawMinZoom = clampInteger(raw?.minZoom, 8, 18, DEFAULT_DELIVERY_MAP_MIN_ZOOM);
+  const rawMaxZoom = clampInteger(raw?.maxZoom, 8, 18, DEFAULT_DELIVERY_MAP_MAX_ZOOM);
+  const minZoom = Math.min(rawMinZoom, rawMaxZoom);
+  const maxZoom = Math.max(rawMinZoom, rawMaxZoom);
+  const initialZoom = Math.max(
+    minZoom,
+    Math.min(maxZoom, clampInteger(raw?.initialZoom, 8, 18, DEFAULT_DELIVERY_MAP_INITIAL_ZOOM)),
+  );
+  return {
+    initialZoom,
+    minZoom,
+    maxZoom,
+    zoomAdjustment: clampInteger(raw?.zoomAdjustment, -4, 4, DEFAULT_DELIVERY_MAP_ZOOM_ADJUSTMENT),
+    padding: clampInteger(raw?.padding, 40, 260, DEFAULT_DELIVERY_MAP_PADDING),
+  };
+}
+
+function buildDeliveryMapViewport(
+  points: Array<{ latitude: number; longitude: number }>,
+  rawConfig?: Partial<DeliveryMapViewportConfig>,
+): DeliveryMapViewport | null {
   if (!points.length) return null;
+  const viewportConfig = normalizeDeliveryMapViewportConfig(rawConfig);
   const minLat = Math.min(...points.map(point => point.latitude));
   const maxLat = Math.max(...points.map(point => point.latitude));
   const minLon = Math.min(...points.map(point => point.longitude));
   const maxLon = Math.max(...points.map(point => point.longitude));
   const latitude = (minLat + maxLat) / 2;
   const longitude = (minLon + maxLon) / 2;
-  if (points.length === 1) return { latitude, longitude, zoom: 13 };
+  if (points.length === 1) {
+    const zoom = Math.max(
+      viewportConfig.minZoom,
+      Math.min(viewportConfig.maxZoom, viewportConfig.initialZoom + viewportConfig.zoomAdjustment),
+    );
+    return { latitude, longitude, zoom };
+  }
 
-  const mapWidth = 1000;
-  const mapHeight = 560;
-  const padding = 120;
   const sw = mercatorWorldPoint(minLat, minLon, 0);
   const ne = mercatorWorldPoint(maxLat, maxLon, 0);
   const spanX = Math.max(0.00001, Math.abs(ne.x - sw.x));
   const spanY = Math.max(0.00001, Math.abs(sw.y - ne.y));
-  const zoomX = Math.log2(Math.max(1, mapWidth - padding) / spanX);
-  const zoomY = Math.log2(Math.max(1, mapHeight - padding) / spanY);
-  const zoom = Math.max(8, Math.min(14, Math.floor(Math.min(zoomX, zoomY))));
+  const zoomX = Math.log2(Math.max(1, DELIVERY_MAP_IMAGE_WIDTH - viewportConfig.padding) / spanX);
+  const zoomY = Math.log2(Math.max(1, DELIVERY_MAP_IMAGE_HEIGHT - viewportConfig.padding) / spanY);
+  const fitZoom = Math.floor(Math.min(zoomX, zoomY));
+  const zoom = Math.max(viewportConfig.minZoom, Math.min(viewportConfig.maxZoom, fitZoom + viewportConfig.zoomAdjustment));
   return { latitude, longitude, zoom };
 }
 
@@ -1237,14 +1411,12 @@ function positionDeliveryMapPins(
 ): DeliveryMapPin[] {
   if (!viewport) return [];
   const center = mercatorWorldPoint(viewport.latitude, viewport.longitude, viewport.zoom);
-  const mapWidth = 1000;
-  const mapHeight = 560;
   const positioned = points.map(point => {
     const projected = mercatorWorldPoint(point.latitude, point.longitude, viewport.zoom);
     return {
       ...point,
-      xPercent: ((mapWidth / 2 + projected.x - center.x) / mapWidth) * 100,
-      yPercent: ((mapHeight / 2 + projected.y - center.y) / mapHeight) * 100,
+      xPercent: ((DELIVERY_MAP_IMAGE_WIDTH / 2 + projected.x - center.x) / DELIVERY_MAP_IMAGE_WIDTH) * 100,
+      yPercent: ((DELIVERY_MAP_IMAGE_HEIGHT / 2 + projected.y - center.y) / DELIVERY_MAP_IMAGE_HEIGHT) * 100,
     };
   });
 
@@ -1409,6 +1581,11 @@ function pickServerConfigFields(raw: Partial<DashboardUserConfig> | null | undef
     enabledPageIds: raw?.enabledPageIds,
     pageAutoRotateEnabled: raw?.pageAutoRotateEnabled,
     pageAutoRotateIntervalSec: raw?.pageAutoRotateIntervalSec,
+    deliveryMapInitialZoom: raw?.deliveryMapInitialZoom,
+    deliveryMapMinZoom: raw?.deliveryMapMinZoom,
+    deliveryMapMaxZoom: raw?.deliveryMapMaxZoom,
+    deliveryMapZoomAdjustment: raw?.deliveryMapZoomAdjustment,
+    deliveryMapPadding: raw?.deliveryMapPadding,
     minOrderThreshold: raw?.minOrderThreshold,
     minOrderPadding: raw?.minOrderPadding,
     zipGateMode: raw?.zipGateMode,
@@ -1471,6 +1648,22 @@ function sanitizeDashboardConfig(raw: Partial<DashboardUserConfig> | null | unde
       300,
       DEFAULT_DASHBOARD_CONFIG.pageAutoRotateIntervalSec,
     ),
+    ...(() => {
+      const viewportConfig = normalizeDeliveryMapViewportConfig({
+        initialZoom: raw?.deliveryMapInitialZoom,
+        minZoom: raw?.deliveryMapMinZoom,
+        maxZoom: raw?.deliveryMapMaxZoom,
+        zoomAdjustment: raw?.deliveryMapZoomAdjustment,
+        padding: raw?.deliveryMapPadding,
+      });
+      return {
+        deliveryMapInitialZoom: viewportConfig.initialZoom,
+        deliveryMapMinZoom: viewportConfig.minZoom,
+        deliveryMapMaxZoom: viewportConfig.maxZoom,
+        deliveryMapZoomAdjustment: viewportConfig.zoomAdjustment,
+        deliveryMapPadding: viewportConfig.padding,
+      };
+    })(),
     minOrderThreshold: clampInteger(raw?.minOrderThreshold, 0, 9999, DEFAULT_DASHBOARD_CONFIG.minOrderThreshold),
     minOrderPadding: clampCurrencyAmount(raw?.minOrderPadding, 0, 25, DEFAULT_DASHBOARD_CONFIG.minOrderPadding),
     zipGateMode: normalizeZipGateMode(raw?.zipGateMode),
@@ -1521,6 +1714,11 @@ function isDashboardConfigEqual(leftRaw: DashboardUserConfig, rightRaw: Dashboar
     && left.enabledPageIds.join('|') === right.enabledPageIds.join('|')
     && left.pageAutoRotateEnabled === right.pageAutoRotateEnabled
     && left.pageAutoRotateIntervalSec === right.pageAutoRotateIntervalSec
+    && left.deliveryMapInitialZoom === right.deliveryMapInitialZoom
+    && left.deliveryMapMinZoom === right.deliveryMapMinZoom
+    && left.deliveryMapMaxZoom === right.deliveryMapMaxZoom
+    && left.deliveryMapZoomAdjustment === right.deliveryMapZoomAdjustment
+    && left.deliveryMapPadding === right.deliveryMapPadding
     && left.minOrderThreshold === right.minOrderThreshold
     && left.minOrderPadding === right.minOrderPadding
     && left.zipGateMode === right.zipGateMode
@@ -3630,6 +3828,8 @@ export default function App() {
   const [isDashboardMode, setIsDashboardMode] = useState<boolean>(() => initialDashboardMode());
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [configTab, setConfigTab] = useState<'server' | 'client'>('server');
+  const [pageSettingsPageId, setPageSettingsPageId] = useState<DashboardPageId | ''>('');
+  const [tickerModuleSettingsId, setTickerModuleSettingsId] = useState<TickerModuleId | ''>('');
   const [currentPageId, setCurrentPageId] = useState<DashboardPageId>('alerts_active');
   const [config, setConfig] = useState<DashboardUserConfig>(() => initialDashboardConfig());
   const [configDraft, setConfigDraft] = useState<DashboardUserConfig | null>(null);
@@ -3647,6 +3847,7 @@ export default function App() {
   const [deliveryMapError, setDeliveryMapError] = useState('');
   const [selectedDeliveryMapPinId, setSelectedDeliveryMapPinId] = useState('');
   const [hoveredDeliveryMapPinId, setHoveredDeliveryMapPinId] = useState('');
+  const [deliveryMapClientZoomAdjustment, setDeliveryMapClientZoomAdjustment] = useState<number | null>(null);
   const [financialsMasked, setFinancialsMasked] = useState(false);
   const [radarFrames, setRadarFrames] = useState<RadarFrame[]>([]);
   const [radarFrameIdx, setRadarFrameIdx] = useState(0);
@@ -3654,6 +3855,7 @@ export default function App() {
   const flashUntilRef = useRef<Map<string, number>>(new Map());
   const pendingListRef = useRef<HTMLDivElement | null>(null);
   const activeListRef = useRef<HTMLDivElement | null>(null);
+  const deliveryMapFullscreenRef = useRef<HTMLDivElement | null>(null);
   const soundUploadRef = useRef<HTMLInputElement | null>(null);
   const marketplaceSoundUploadRef = useRef<HTMLInputElement | null>(null);
   const logoUploadRef = useRef<HTMLInputElement | null>(null);
@@ -3712,6 +3914,10 @@ export default function App() {
     const shopName = config.shopName.trim();
     return shopName ? `${shopName} TV Dashboard` : 'TV Dashboard';
   }, [config.shopName]);
+  const deliveryMapOrigin = useMemo(
+    () => deliveryMapShopPoint(config),
+    [config.shopAddressLatitude, config.shopAddressLongitude],
+  );
   const shopMapUrl = useMemo(() => {
     if (!editingConfig.shopAddress.trim()) return '';
     if (editingConfig.shopAddressLatitude === null || editingConfig.shopAddressLongitude === null) return '';
@@ -3724,9 +3930,27 @@ export default function App() {
       marker: true,
     });
   }, [editingConfig.shopAddressLatitude, editingConfig.shopAddressLongitude]);
+  const effectiveDeliveryMapZoomAdjustment = deliveryMapClientZoomAdjustment ?? config.deliveryMapZoomAdjustment;
+  const deliveryMapViewportPoints = useMemo(
+    () => buildDeliveryMapViewportFitPoints(deliveryMapPins, deliveryMapOrigin),
+    [deliveryMapOrigin, deliveryMapPins],
+  );
   const deliveryMapViewport = useMemo(
-    () => buildDeliveryMapViewport(deliveryMapPins),
-    [deliveryMapPins],
+    () => buildDeliveryMapViewport(deliveryMapViewportPoints, {
+      initialZoom: config.deliveryMapInitialZoom,
+      minZoom: config.deliveryMapMinZoom,
+      maxZoom: config.deliveryMapMaxZoom,
+      zoomAdjustment: effectiveDeliveryMapZoomAdjustment,
+      padding: config.deliveryMapPadding,
+    }),
+    [
+      config.deliveryMapInitialZoom,
+      config.deliveryMapMaxZoom,
+      config.deliveryMapMinZoom,
+      effectiveDeliveryMapZoomAdjustment,
+      config.deliveryMapPadding,
+      deliveryMapViewportPoints,
+    ],
   );
   const positionedDeliveryMapPins = useMemo(
     () => positionDeliveryMapPins(deliveryMapPins, deliveryMapViewport),
@@ -3737,8 +3961,8 @@ export default function App() {
     return buildStaticMapBaseUrl({
       latitude: deliveryMapViewport.latitude,
       longitude: deliveryMapViewport.longitude,
-      width: 900,
-      height: 520,
+      width: DELIVERY_MAP_IMAGE_WIDTH,
+      height: DELIVERY_MAP_IMAGE_HEIGHT,
       zoom: deliveryMapViewport.zoom,
       cacheKey: 'delivery-map-base-v1',
     });
@@ -3917,12 +4141,16 @@ export default function App() {
     setConfigDraft(sanitizeDashboardConfig(config));
     setConfigWeatherZipDraft(sanitizeDashboardConfig(config).tickerWeatherZip);
     setConfigMessage('');
+    setPageSettingsPageId('');
+    setTickerModuleSettingsId('');
     setIsConfigOpen(true);
   }, [config]);
   const cancelConfigChanges = useCallback(() => {
     setConfigDraft(null);
     setConfigWeatherZipDraft(sanitizeDashboardConfig(config).tickerWeatherZip);
     setConfigMessage('');
+    setPageSettingsPageId('');
+    setTickerModuleSettingsId('');
     setIsConfigOpen(false);
     if (soundUploadRef.current) soundUploadRef.current.value = '';
     if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
@@ -3939,7 +4167,10 @@ export default function App() {
     setConfig(nextConfig);
     setConfigDraft(null);
     setConfigWeatherZipDraft(nextConfig.tickerWeatherZip);
+    setDeliveryMapClientZoomAdjustment(null);
     setConfigMessage(serverConfigSaved ? '' : 'Saved client settings; server settings disk save is unavailable.');
+    setPageSettingsPageId('');
+    setTickerModuleSettingsId('');
     setIsConfigOpen(false);
     if (soundUploadRef.current) soundUploadRef.current.value = '';
     if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
@@ -3952,6 +4183,28 @@ export default function App() {
       return sanitizeDashboardConfig({ ...base, [key]: Number.isFinite(value) ? value : base[key] });
     });
   }, [config]);
+  const updateDeliveryMapClientZoomAdjustment = useCallback((delta: number) => {
+    setDeliveryMapClientZoomAdjustment(previous => {
+      const current = previous ?? config.deliveryMapZoomAdjustment;
+      return clampInteger(current + delta, -4, 4, current);
+    });
+  }, [config.deliveryMapZoomAdjustment]);
+  const fitDeliveryMapToPins = useCallback(() => {
+    setDeliveryMapClientZoomAdjustment(0);
+  }, []);
+  const toggleDeliveryMapFullscreen = useCallback(() => {
+    const target = deliveryMapFullscreenRef.current;
+    if (!target || typeof document === 'undefined') return;
+    try {
+      if (document.fullscreenElement === target) {
+        void document.exitFullscreen();
+      } else {
+        void target.requestFullscreen();
+      }
+    } catch {
+      // Ignore unsupported fullscreen failures.
+    }
+  }, []);
   const updateGateZipCodes = useCallback((valueRaw: string) => {
     setConfigDraft(previous => {
       const base = sanitizeDashboardConfig(previous || config);
@@ -4037,6 +4290,8 @@ export default function App() {
   const resetConfigDefaults = useCallback(() => {
     setConfigDraft(DEFAULT_DASHBOARD_CONFIG);
     setConfigWeatherZipDraft(DEFAULT_DASHBOARD_CONFIG.tickerWeatherZip);
+    setPageSettingsPageId('');
+    setTickerModuleSettingsId('');
     setConfigMessage('Config reset to defaults.');
     if (soundUploadRef.current) soundUploadRef.current.value = '';
     if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
@@ -4257,6 +4512,7 @@ export default function App() {
     allActiveOrders.filter(card => {
       if (toDateKey(card.deliveryDate) !== selectedDateKey) return false;
       if (isWireOutOrderType(card.orderType)) return false;
+      if (isPickupDeliveryMapCard(card)) return false;
       if (isCompletedOrder(card)) return false;
       if (!String(card.addressLine || '').trim()) return false;
       return true;
@@ -6248,13 +6504,18 @@ export default function App() {
       const pins: Array<Omit<DeliveryMapPin, 'xPercent' | 'yPercent'>> = [];
       const geocodeFailures: string[] = [];
       const noMatchQueries: string[] = [];
+      const geocodeOrigin = deliveryMapOrigin;
+      const geocodeCacheSuffix = geocodeOrigin
+        ? `|near:${geocodeOrigin.latitude.toFixed(4)},${geocodeOrigin.longitude.toFixed(4)}`
+        : '';
 
       for (const card of selectedDayDeliveryMapOrders) {
         if (disposed) return;
         const lookupKey = deliveryMapLookupKey(card);
         if (!lookupKey) continue;
-        if (deliveryMapGeocodeCacheRef.current.has(lookupKey)) {
-          const cached = deliveryMapGeocodeCacheRef.current.get(lookupKey);
+        const geocodeCacheKey = `${lookupKey}${geocodeCacheSuffix}`;
+        if (deliveryMapGeocodeCacheRef.current.has(geocodeCacheKey)) {
+          const cached = deliveryMapGeocodeCacheRef.current.get(geocodeCacheKey);
           if (cached) pins.push(cached);
           continue;
         }
@@ -6262,9 +6523,9 @@ export default function App() {
         try {
           const addressQuery = deliveryMapAddressQuery(card);
           const suggestions = await fetchAddressSuggestions(addressQuery);
-          const match = suggestions[0] || null;
+          const match = pickDeliveryMapAddressSuggestion(suggestions, geocodeOrigin);
           if (!match) {
-            deliveryMapGeocodeCacheRef.current.set(lookupKey, null);
+            deliveryMapGeocodeCacheRef.current.set(geocodeCacheKey, null);
             noMatchQueries.push(addressQuery);
             continue;
           }
@@ -6278,12 +6539,12 @@ export default function App() {
             latitude: match.latitude,
             longitude: match.longitude,
           };
-          deliveryMapGeocodeCacheRef.current.set(lookupKey, pin);
+          deliveryMapGeocodeCacheRef.current.set(geocodeCacheKey, pin);
           pins.push(pin);
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
           geocodeFailures.push(reason);
-          deliveryMapGeocodeCacheRef.current.set(lookupKey, null);
+          deliveryMapGeocodeCacheRef.current.set(geocodeCacheKey, null);
         }
       }
 
@@ -6306,7 +6567,7 @@ export default function App() {
     return () => {
       disposed = true;
     };
-  }, [currentPageId, selectedDateKey, selectedDayDeliveryMapOrders]);
+  }, [currentPageId, deliveryMapOrigin, selectedDateKey, selectedDayDeliveryMapOrders]);
 
   // Advance radar animation frame
   useEffect(() => {
@@ -6860,6 +7121,21 @@ export default function App() {
                   <span className="app__control-line">enabled</span>
                 </span>
               </button>
+              {isDashboardMode ? (
+                <button
+                  type="button"
+                  className="app__control-btn"
+                  onClick={openConfigPage}
+                  title="Open dashboard configuration"
+                >
+                  <span className="app__control-icon" aria-hidden="true">
+                    <FontAwesomeIcon icon={faGear} />
+                  </span>
+                  <span className="app__control-label">
+                    <span className="app__control-line">Config</span>
+                  </span>
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="app__control-btn app__control-btn--primary"
@@ -7022,18 +7298,32 @@ export default function App() {
                     {DASHBOARD_PAGE_DEFINITIONS.map((pageDefinition, pageIndex) => {
                       const isEnabled = editingConfig.enabledPageIds.includes(pageDefinition.id);
                       return (
-                        <label key={pageDefinition.id} className="app__config-module-card app__config-module-card--page">
-                          <input
-                            type="checkbox"
-                            checked={isEnabled}
-                            onChange={(event) => toggleEnabledPageInDraft(pageDefinition.id, event.target.checked)}
-                          />
-                          <span className="app__config-module-copy">
-                            <strong>{`Page ${pageIndex + 1}`}</strong>
-                            <span>{pageDescription(pageDefinition.id)}</span>
-                          </span>
+                        <div key={pageDefinition.id} className="app__config-module-card app__config-module-card--page">
+                          <label className="app__config-page-toggle">
+                            <input
+                              type="checkbox"
+                              checked={isEnabled}
+                              onChange={(event) => toggleEnabledPageInDraft(pageDefinition.id, event.target.checked)}
+                            />
+                            <span className="app__config-module-copy">
+                              <strong>{`Page ${pageIndex + 1}`}</strong>
+                              <span>{pageDescription(pageDefinition.id)}</span>
+                            </span>
+                          </label>
+                          <button
+                            type="button"
+                            className="app__config-page-settings-btn"
+                            onClick={() => {
+                              setTickerModuleSettingsId('');
+                              setPageSettingsPageId(pageDefinition.id);
+                            }}
+                            title={`${pageDescription(pageDefinition.id)} settings`}
+                            aria-label={`${pageDescription(pageDefinition.id)} settings`}
+                          >
+                            <FontAwesomeIcon icon={faGear} />
+                          </button>
                           <span className="app__config-page-preview" aria-hidden="true">{renderPagePreviewSvg(pageDefinition.id)}</span>
-                        </label>
+                        </div>
                       );
                     })}
                   </div>
@@ -7042,103 +7332,105 @@ export default function App() {
             </section>
 
             <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">Ticker Settings</h3>
-              <div className="app__config-grid">
-                <div className="app__config-row app__config-row--full">
-                  <span>Ticker scroll speed</span>
-                  <input
-                    type="range"
-                    min={8}
-                    max={80}
-                    step={1}
-                    value={editingConfig.tickerScrollDurationSec}
-                    onChange={(event) => updateConfigNumber('tickerScrollDurationSec', event.target.value)}
-                  />
-                  <input
-                    type="number"
-                    min={8}
-                    max={80}
-                    value={editingConfig.tickerScrollDurationSec}
-                    onChange={(event) => updateConfigNumber('tickerScrollDurationSec', event.target.value)}
-                  />
-                  <div className="app__config-help">Seconds per full loop. Lower is faster, higher is slower.</div>
+              <h3 className="app__config-section-title">Ticker</h3>
+              <div className="app__config-subsection-grid">
+                <div className="app__config-subsection app__config-subsection--full">
+                  <h4 className="app__config-subsection-title">Scroll & Clock</h4>
+                  <div className="app__config-grid">
+                    <div className="app__config-row app__config-row--full">
+                      <span>Ticker scroll speed</span>
+                      <input
+                        type="range"
+                        min={8}
+                        max={80}
+                        step={1}
+                        value={editingConfig.tickerScrollDurationSec}
+                        onChange={(event) => updateConfigNumber('tickerScrollDurationSec', event.target.value)}
+                      />
+                      <input
+                        type="number"
+                        min={8}
+                        max={80}
+                        value={editingConfig.tickerScrollDurationSec}
+                        onChange={(event) => updateConfigNumber('tickerScrollDurationSec', event.target.value)}
+                      />
+                      <div className="app__config-help">Seconds per full loop. Lower is faster, higher is slower.</div>
+                    </div>
+                    <label className="app__config-row">
+                      <span>Clock format</span>
+                      <select
+                        value={editingConfig.clockFormat}
+                        onChange={(event) => {
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            clockFormat: normalizeClockFormat(event.target.value),
+                          }));
+                        }}
+                      >
+                        <option value="12h">12-hour</option>
+                        <option value="24h">24-hour</option>
+                      </select>
+                    </label>
+                    <label className="app__config-row app__config-toggle-row">
+                      <span>Flash clock colons</span>
+                      <input
+                        type="checkbox"
+                        checked={editingConfig.clockFlashColons}
+                        onChange={(event) => {
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            clockFlashColons: event.target.checked,
+                          }));
+                        }}
+                      />
+                    </label>
+                    <label className="app__config-row app__config-toggle-row">
+                      <span>Nanosecond time display</span>
+                      <input
+                        type="checkbox"
+                        checked={editingConfig.clockShowNanoseconds}
+                        onChange={(event) => {
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            clockShowNanoseconds: event.target.checked,
+                          }));
+                        }}
+                      />
+                    </label>
+                  </div>
                 </div>
-                <label className="app__config-row">
-                  <span>Clock format</span>
-                  <select
-                    value={editingConfig.clockFormat}
-                    onChange={(event) => {
-                      setConfigDraft(previous => sanitizeDashboardConfig({
-                        ...(previous || config),
-                        clockFormat: normalizeClockFormat(event.target.value),
-                      }));
-                    }}
-                  >
-                    <option value="12h">12-hour</option>
-                    <option value="24h">24-hour</option>
-                  </select>
-                </label>
-                <label className="app__config-row app__config-toggle-row">
-                  <span>Flash clock colons</span>
-                  <input
-                    type="checkbox"
-                    checked={editingConfig.clockFlashColons}
-                    onChange={(event) => {
-                      setConfigDraft(previous => sanitizeDashboardConfig({
-                        ...(previous || config),
-                        clockFlashColons: event.target.checked,
-                      }));
-                    }}
-                  />
-                </label>
-                <label className="app__config-row app__config-toggle-row">
-                  <span>Nanosecond time display</span>
-                  <input
-                    type="checkbox"
-                    checked={editingConfig.clockShowNanoseconds}
-                    onChange={(event) => {
-                      setConfigDraft(previous => sanitizeDashboardConfig({
-                        ...(previous || config),
-                        clockShowNanoseconds: event.target.checked,
-                      }));
-                    }}
-                  />
-                </label>
-              </div>
-            </section>
 
-            <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">Ticker Modules</h3>
-              <div className="app__config-grid">
-                <label className="app__config-row">
-                  <span>Weather ZIP code</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={5}
-                    value={configWeatherZipDraft}
-                    onChange={(event) => {
-                      setConfigWeatherZipDraft(event.target.value.replace(/\D/g, '').slice(0, 5));
-                    }}
-                  />
-                </label>
-                <div className="app__config-row app__config-row--full">
-                  <span>Enabled ticker modules</span>
+                <div className="app__config-subsection app__config-subsection--full">
+                  <h4 className="app__config-subsection-title">Modules</h4>
                   <div className="app__config-module-list">
                     {TICKER_MODULE_DEFINITIONS.map(moduleDefinition => {
                       const isEnabled = editingConfig.tickerModules.includes(moduleDefinition.id);
                       return (
-                        <label key={moduleDefinition.id} className="app__config-module-card">
-                          <input
-                            type="checkbox"
-                            checked={isEnabled}
-                            onChange={(event) => toggleTickerModuleInDraft(moduleDefinition.id, event.target.checked)}
-                          />
-                          <span className="app__config-module-copy">
-                            <strong>{moduleDefinition.label}</strong>
-                            <span>{moduleDefinition.description}</span>
-                          </span>
-                        </label>
+                        <div key={moduleDefinition.id} className="app__config-module-card app__config-module-card--settings">
+                          <label className="app__config-page-toggle">
+                            <input
+                              type="checkbox"
+                              checked={isEnabled}
+                              onChange={(event) => toggleTickerModuleInDraft(moduleDefinition.id, event.target.checked)}
+                            />
+                            <span className="app__config-module-copy">
+                              <strong>{moduleDefinition.label}</strong>
+                              <span>{moduleDefinition.description}</span>
+                            </span>
+                          </label>
+                          <button
+                            type="button"
+                            className="app__config-page-settings-btn"
+                            onClick={() => {
+                              setPageSettingsPageId('');
+                              setTickerModuleSettingsId(moduleDefinition.id);
+                            }}
+                            title={`${moduleDefinition.label} settings`}
+                            aria-label={`${moduleDefinition.label} settings`}
+                          >
+                            <FontAwesomeIcon icon={faGear} />
+                          </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -7147,303 +7439,239 @@ export default function App() {
             </section>
 
             <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">Store Hours</h3>
-              <div className="app__config-grid">
-                <label className="app__config-row app__config-toggle-row">
-                  <span>Monday-Friday open</span>
-                  <input
-                    type="checkbox"
-                    checked={editingConfig.storeHours.monFriEnabled}
-                    onChange={(event) => updateStoreHours({ monFriEnabled: event.target.checked })}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Monday-Friday opens</span>
-                  <input
-                    type="time"
-                    value={editingConfig.storeHours.monFriOpen}
-                    onChange={(event) => updateStoreHours({ monFriOpen: event.target.value })}
-                    disabled={!editingConfig.storeHours.monFriEnabled}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Monday-Friday closes</span>
-                  <input
-                    type="time"
-                    value={editingConfig.storeHours.monFriClose}
-                    onChange={(event) => updateStoreHours({ monFriClose: event.target.value })}
-                    disabled={!editingConfig.storeHours.monFriEnabled}
-                  />
-                </label>
-                <label className="app__config-row app__config-toggle-row">
-                  <span>Saturday open</span>
-                  <input
-                    type="checkbox"
-                    checked={editingConfig.storeHours.saturdayEnabled}
-                    onChange={(event) => updateStoreHours({ saturdayEnabled: event.target.checked })}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Saturday opens</span>
-                  <input
-                    type="time"
-                    value={editingConfig.storeHours.saturdayOpen}
-                    onChange={(event) => updateStoreHours({ saturdayOpen: event.target.value })}
-                    disabled={!editingConfig.storeHours.saturdayEnabled}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Saturday closes</span>
-                  <input
-                    type="time"
-                    value={editingConfig.storeHours.saturdayClose}
-                    onChange={(event) => updateStoreHours({ saturdayClose: event.target.value })}
-                    disabled={!editingConfig.storeHours.saturdayEnabled}
-                  />
-                </label>
-                <label className="app__config-row app__config-toggle-row">
-                  <span>Sunday open</span>
-                  <input
-                    type="checkbox"
-                    checked={editingConfig.storeHours.sundayEnabled}
-                    onChange={(event) => updateStoreHours({ sundayEnabled: event.target.checked })}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Sunday opens</span>
-                  <input
-                    type="time"
-                    value={editingConfig.storeHours.sundayOpen}
-                    onChange={(event) => updateStoreHours({ sundayOpen: event.target.value })}
-                    disabled={!editingConfig.storeHours.sundayEnabled}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Sunday closes</span>
-                  <input
-                    type="time"
-                    value={editingConfig.storeHours.sundayClose}
-                    onChange={(event) => updateStoreHours({ sundayClose: event.target.value })}
-                    disabled={!editingConfig.storeHours.sundayEnabled}
-                  />
-                </label>
-              </div>
-            </section>
-
-            <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">Shop Information & Branding</h3>
-              <div className="app__config-grid">
-                <label className="app__config-row">
-                  <span>Store name</span>
-                  <input
-                    type="text"
-                    maxLength={80}
-                    value={editingConfig.shopName}
-                    placeholder="Store name"
-                    onChange={(event) => {
-                      setConfigDraft(previous => sanitizeDashboardConfig({
-                        ...(previous || config),
-                        shopName: event.target.value,
-                      }));
-                    }}
-                  />
-                </label>
-                <label className="app__config-row app__config-row--full">
-                  <span>Store address</span>
-                  <div className="app__config-address-field">
+              <h3 className="app__config-section-title">Shop</h3>
+              <div className="app__config-subsection-grid">
+                <div className="app__config-subsection app__config-subsection--full">
+                  <h4 className="app__config-subsection-title">Identity & Branding</h4>
+                  <label className="app__config-row">
+                    <span>Store name</span>
                     <input
                       type="text"
-                      maxLength={180}
-                      value={editingConfig.shopAddress}
-                      placeholder="Store address"
-                      autoComplete="off"
+                      maxLength={80}
+                      value={editingConfig.shopName}
+                      placeholder="Store name"
                       onChange={(event) => {
                         setConfigDraft(previous => sanitizeDashboardConfig({
                           ...(previous || config),
-                          shopAddress: event.target.value,
-                          shopAddressLatitude: null,
-                          shopAddressLongitude: null,
+                          shopName: event.target.value,
                         }));
                       }}
                     />
-                    {shopAddressSuggestions.length ? (
-                      <div className="app__config-address-suggestions">
-                        {shopAddressSuggestions.map((suggestion, index) => (
-                          <button
-                            key={`${suggestion.id || suggestion.address}-${index}`}
-                            type="button"
-                            className="app__config-address-suggestion"
-                            onClick={() => selectShopAddressSuggestion(suggestion)}
-                          >
-                            {suggestion.label}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                  {isShopAddressSuggesting ? <div className="app__config-help">Searching addresses...</div> : null}
-                  {shopAddressSuggestionError ? <div className="app__config-help">{shopAddressSuggestionError}</div> : null}
-                  {shopMapUrl ? (
-                    <div className="app__config-map-preview">
-                      <img src={shopMapUrl} alt="Validated shop address map" />
-                    </div>
-                  ) : (
-                    <div className="app__config-map-empty">
-                      <FontAwesomeIcon icon={faMagnifyingGlass} aria-hidden="true" />
-                      <span>Choose a suggested address to preview the shop map.</span>
-                    </div>
-                  )}
-                </label>
-                <div className="app__config-row app__config-row--full">
-                  <span>Shop logo image</span>
-                  <div className="app__config-inline-actions">
-                    <input
-                      ref={logoUploadRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={(event) => {
-                        void handleLogoUpload(event);
-                      }}
-                    />
-                    <button type="button" className="app__control-btn" onClick={clearCustomLogo}>
-                      Reset logo
-                    </button>
-                  </div>
-                  <div className="app__config-branding-preview">
-                    <div className="app__config-branding-preview-label">
-                      {editingConfig.customLogoDataUrl ? 'Custom logo is active' : 'Using default logo'}
-                    </div>
-                    <div className="app__config-branding-preview-frame">
-                      <img
-                        src={editingConfig.customLogoDataUrl || '/olivers.png'}
-                        alt="Configured shop logo preview"
+                  </label>
+                  <div className="app__config-row">
+                    <span>Shop logo image</span>
+                    <div className="app__config-inline-actions">
+                      <input
+                        ref={logoUploadRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={(event) => {
+                          void handleLogoUpload(event);
+                        }}
                       />
+                      <button type="button" className="app__control-btn" onClick={clearCustomLogo}>
+                        Reset logo
+                      </button>
+                    </div>
+                    <div className="app__config-branding-preview">
+                      <div className="app__config-branding-preview-label">
+                        {editingConfig.customLogoDataUrl ? 'Custom logo is active' : 'Using default logo'}
+                      </div>
+                      <div className="app__config-branding-preview-frame">
+                        <img
+                          src={editingConfig.customLogoDataUrl || '/olivers.png'}
+                          alt="Configured shop logo preview"
+                        />
+                      </div>
                     </div>
                   </div>
+                </div>
+
+                <div className="app__config-subsection">
+                  <h4 className="app__config-subsection-title">Address</h4>
+                  <label className="app__config-row">
+                    <span>Store address</span>
+                    <div className="app__config-address-field">
+                      <input
+                        type="text"
+                        maxLength={180}
+                        value={editingConfig.shopAddress}
+                        placeholder="Store address"
+                        autoComplete="off"
+                        onChange={(event) => {
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            shopAddress: event.target.value,
+                            shopAddressLatitude: null,
+                            shopAddressLongitude: null,
+                          }));
+                        }}
+                      />
+                      {shopAddressSuggestions.length ? (
+                        <div className="app__config-address-suggestions">
+                          {shopAddressSuggestions.map((suggestion, index) => (
+                            <button
+                              key={`${suggestion.id || suggestion.address}-${index}`}
+                              type="button"
+                              className="app__config-address-suggestion"
+                              onClick={() => selectShopAddressSuggestion(suggestion)}
+                            >
+                              {suggestion.label}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    {isShopAddressSuggesting ? <div className="app__config-help">Searching addresses...</div> : null}
+                    {shopAddressSuggestionError ? <div className="app__config-help">{shopAddressSuggestionError}</div> : null}
+                    {shopMapUrl ? (
+                      <div className="app__config-map-preview">
+                        <img src={shopMapUrl} alt="Validated shop address map" />
+                      </div>
+                    ) : (
+                      <div className="app__config-map-empty">
+                        <FontAwesomeIcon icon={faMagnifyingGlass} aria-hidden="true" />
+                        <span>Choose a suggested address to preview the shop map.</span>
+                      </div>
+                    )}
+                  </label>
                 </div>
               </div>
             </section>
 
             <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">Order Settings</h3>
-              <div className="app__config-grid">
-                <label className="app__config-row">
-                  <span>Currency symbol</span>
-                  <input
-                    type="text"
-                    maxLength={3}
-                    value={editingConfig.currencySymbol}
-                    placeholder="$"
-                    onChange={(event) => {
-                      const nextValue = event.target.value.slice(0, 3) || '$';
-                      setConfigDraft(previous => sanitizeDashboardConfig({
-                        ...(previous || config),
-                        currencySymbol: nextValue,
-                      }));
-                    }}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Minimum order threshold ({editingConfig.currencySymbol})</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={9999}
-                    value={editingConfig.minOrderThreshold}
-                    onChange={(event) => updateConfigNumber('minOrderThreshold', event.target.value)}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Threshold padding ({editingConfig.currencySymbol})</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={25}
-                    step={0.25}
-                    value={editingConfig.minOrderPadding}
-                    onChange={(event) => updateConfigNumber('minOrderPadding', event.target.value)}
-                  />
-                </label>
-                <div className="app__config-row app__config-row--full">
+              <h3 className="app__config-section-title">Order Gating</h3>
+              <div className="app__config-subsection-grid">
+                <div className="app__config-subsection">
+                  <h4 className="app__config-subsection-title">Price Gate</h4>
+                  <div className="app__config-grid">
+                    <label className="app__config-row">
+                      <span>Currency symbol</span>
+                      <input
+                        type="text"
+                        maxLength={3}
+                        value={editingConfig.currencySymbol}
+                        placeholder="$"
+                        onChange={(event) => {
+                          const nextValue = event.target.value.slice(0, 3) || '$';
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            currencySymbol: nextValue,
+                          }));
+                        }}
+                      />
+                    </label>
+                    <label className="app__config-row">
+                      <span>Minimum order threshold ({editingConfig.currencySymbol})</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={9999}
+                        value={editingConfig.minOrderThreshold}
+                        onChange={(event) => updateConfigNumber('minOrderThreshold', event.target.value)}
+                      />
+                    </label>
+                    <label className="app__config-row">
+                      <span>Threshold padding ({editingConfig.currencySymbol})</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={25}
+                        step={0.25}
+                        value={editingConfig.minOrderPadding}
+                        onChange={(event) => updateConfigNumber('minOrderPadding', event.target.value)}
+                      />
+                    </label>
+                  </div>
                   <div className="app__config-help">Incoming orders below the minimum after padding are marked as reject candidates; orders inside the padding buffer are marked for review. Set the minimum to 0 to disable price gating.</div>
                 </div>
-                <label className="app__config-row">
-                  <span>ZIP gate mode</span>
-                  <select
-                    value={editingConfig.zipGateMode}
-                    onChange={(event) => {
-                      setConfigDraft(previous => sanitizeDashboardConfig({
-                        ...(previous || config),
-                        zipGateMode: normalizeZipGateMode(event.target.value),
-                      }));
-                    }}
-                  >
-                    <option value="watchlist">Flag listed ZIPs</option>
-                    <option value="allowlist">Require listed ZIPs</option>
-                  </select>
-                </label>
-                <label className="app__config-row app__config-row--full">
-                  <span>ZIP gate list</span>
-                  <textarea
-                    rows={3}
-                    value={editingConfig.gateZipCodes.join('\n')}
-                    placeholder="15212&#10;15237"
-                    onChange={(event) => updateGateZipCodes(event.target.value)}
-                  />
-                </label>
-                <div className="app__config-row app__config-row--full">
-                  <span>Sender reject/watch list</span>
-                  <div className="app__config-rule-list">
-                    {editingConfig.blockedSenderRules.length ? (
-                      editingConfig.blockedSenderRules.map(rule => (
-                        <div className="app__config-rule-row" key={rule.id}>
-                          <label className="app__config-rule-enabled" title="Enable sender rule">
+
+                <div className="app__config-subsection">
+                  <h4 className="app__config-subsection-title">ZIP Gate</h4>
+                  <div className="app__config-grid">
+                    <label className="app__config-row">
+                      <span>ZIP gate mode</span>
+                      <select
+                        value={editingConfig.zipGateMode}
+                        onChange={(event) => {
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            zipGateMode: normalizeZipGateMode(event.target.value),
+                          }));
+                        }}
+                      >
+                        <option value="watchlist">Flag listed ZIPs</option>
+                        <option value="allowlist">Require listed ZIPs</option>
+                      </select>
+                    </label>
+                    <label className="app__config-row app__config-row--full">
+                      <span>ZIP gate list</span>
+                      <textarea
+                        rows={3}
+                        value={editingConfig.gateZipCodes.join('\n')}
+                        placeholder="15212&#10;15237"
+                        onChange={(event) => updateGateZipCodes(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="app__config-subsection app__config-subsection--full">
+                  <h4 className="app__config-subsection-title">Sender Gate</h4>
+                  <div className="app__config-row">
+                    <span>Sender reject/watch list</span>
+                    <div className="app__config-rule-list">
+                      {editingConfig.blockedSenderRules.length ? (
+                        editingConfig.blockedSenderRules.map(rule => (
+                          <div className="app__config-rule-row" key={rule.id}>
+                            <label className="app__config-rule-enabled" title="Enable sender rule">
+                              <input
+                                type="checkbox"
+                                checked={rule.enabled}
+                                onChange={(event) => updateSenderGateRule(rule.id, { enabled: event.target.checked })}
+                              />
+                            </label>
                             <input
-                              type="checkbox"
-                              checked={rule.enabled}
-                              onChange={(event) => updateSenderGateRule(rule.id, { enabled: event.target.checked })}
+                              type="text"
+                              value={rule.pattern}
+                              placeholder="Sender name or service"
+                              onChange={(event) => updateSenderGateRule(rule.id, { pattern: event.target.value })}
                             />
-                          </label>
-                          <input
-                            type="text"
-                            value={rule.pattern}
-                            placeholder="Sender name or service"
-                            onChange={(event) => updateSenderGateRule(rule.id, { pattern: event.target.value })}
-                          />
-                          <select
-                            value={rule.matchMode}
-                            onChange={(event) => updateSenderGateRule(rule.id, { matchMode: normalizeSenderGateMatchMode(event.target.value) })}
-                          >
-                            <option value="contains">Contains</option>
-                            <option value="exact">Exact</option>
-                          </select>
-                          <input
-                            type="text"
-                            value={rule.label}
-                            placeholder="Badge label"
-                            onChange={(event) => updateSenderGateRule(rule.id, { label: event.target.value })}
-                          />
-                          <button
-                            type="button"
-                            className="app__config-icon-btn"
-                            onClick={() => removeSenderGateRule(rule.id)}
-                            title="Remove sender rule"
-                            aria-label="Remove sender rule"
-                          >
-                            <FontAwesomeIcon icon={faTrash} />
-                          </button>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="app__config-help">No sender rules configured.</div>
-                    )}
+                            <select
+                              value={rule.matchMode}
+                              onChange={(event) => updateSenderGateRule(rule.id, { matchMode: normalizeSenderGateMatchMode(event.target.value) })}
+                            >
+                              <option value="contains">Contains</option>
+                              <option value="exact">Exact</option>
+                            </select>
+                            <input
+                              type="text"
+                              value={rule.label}
+                              placeholder="Badge label"
+                              onChange={(event) => updateSenderGateRule(rule.id, { label: event.target.value })}
+                            />
+                            <button
+                              type="button"
+                              className="app__config-icon-btn"
+                              onClick={() => removeSenderGateRule(rule.id)}
+                              title="Remove sender rule"
+                              aria-label="Remove sender rule"
+                            >
+                              <FontAwesomeIcon icon={faTrash} />
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="app__config-help">No sender rules configured.</div>
+                      )}
+                    </div>
+                    <div className="app__config-inline-actions">
+                      <button type="button" className="app__control-btn" onClick={addSenderGateRule}>
+                        <FontAwesomeIcon icon={faPlus} /> Add sender rule
+                      </button>
+                    </div>
+                    <div className="app__config-help">Sender rules inspect sending florist name, shop code, member code, Mercury number, and wire service. Matches are visual reject candidates only.</div>
                   </div>
-                  <div className="app__config-inline-actions">
-                    <button type="button" className="app__control-btn" onClick={addSenderGateRule}>
-                      <FontAwesomeIcon icon={faPlus} /> Add sender rule
-                    </button>
-                  </div>
-                  <div className="app__config-help">Sender rules inspect sending florist name, shop code, member code, Mercury number, and wire service. Matches are visual reject candidates only.</div>
                 </div>
               </div>
             </section>
@@ -7585,6 +7813,265 @@ export default function App() {
               </>
               ) : null}
             </div>
+
+            {pageSettingsPageId ? (
+              <div
+                className="app__page-settings-overlay"
+                onClick={(event) => {
+                  if (event.target === event.currentTarget) setPageSettingsPageId('');
+                }}
+              >
+                <section className="app__page-settings-dialog" aria-label={`${pageDescription(pageSettingsPageId)} settings`}>
+                  <div className="app__page-settings-header">
+                    <div className="app__page-settings-title">
+                      <FontAwesomeIcon icon={faGear} />
+                      {pageDescription(pageSettingsPageId)} Settings
+                    </div>
+                    <button
+                      type="button"
+                      className="app__config-close-btn"
+                      onClick={() => setPageSettingsPageId('')}
+                      aria-label="Close page settings"
+                    >
+                      <FontAwesomeIcon icon={faXmark} />
+                    </button>
+                  </div>
+                  <div className="app__page-settings-body">
+                    {pageSettingsPageId === 'delivery_map' ? (
+                      <section className="app__config-section">
+                        <h3 className="app__config-section-title">Map View</h3>
+                        <div className="app__config-grid">
+                          <label className="app__config-row">
+                            <span>Base zoom when one stop is mapped</span>
+                            <input
+                              type="number"
+                              min={8}
+                              max={18}
+                              value={editingConfig.deliveryMapInitialZoom}
+                              onChange={(event) => updateConfigNumber('deliveryMapInitialZoom', event.target.value)}
+                            />
+                          </label>
+                          <label className="app__config-row">
+                            <span>Minimum auto zoom</span>
+                            <input
+                              type="number"
+                              min={8}
+                              max={18}
+                              value={editingConfig.deliveryMapMinZoom}
+                              onChange={(event) => updateConfigNumber('deliveryMapMinZoom', event.target.value)}
+                            />
+                          </label>
+                          <label className="app__config-row">
+                            <span>Maximum auto zoom</span>
+                            <input
+                              type="number"
+                              min={8}
+                              max={18}
+                              value={editingConfig.deliveryMapMaxZoom}
+                              onChange={(event) => updateConfigNumber('deliveryMapMaxZoom', event.target.value)}
+                            />
+                          </label>
+                          <label className="app__config-row">
+                            <span>Auto zoom adjustment</span>
+                            <input
+                              type="number"
+                              min={-4}
+                              max={4}
+                              value={editingConfig.deliveryMapZoomAdjustment}
+                              onChange={(event) => updateConfigNumber('deliveryMapZoomAdjustment', event.target.value)}
+                            />
+                          </label>
+                          <label className="app__config-row">
+                            <span>Map edge padding (px)</span>
+                            <input
+                              type="number"
+                              min={40}
+                              max={260}
+                              value={editingConfig.deliveryMapPadding}
+                              onChange={(event) => updateConfigNumber('deliveryMapPadding', event.target.value)}
+                            />
+                          </label>
+                        </div>
+                        <div className="app__config-help">
+                          The map fits remaining delivery pins plus the configured shop address, so it can zoom in as stops are completed while still keeping the Pittsburgh shop area in view.
+                        </div>
+                      </section>
+                    ) : pageSettingsPageId === 'weather' ? (
+                      <section className="app__config-section">
+                        <h3 className="app__config-section-title">Weather Location</h3>
+                        <div className="app__config-grid">
+                          <label className="app__config-row">
+                            <span>Weather ZIP code</span>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={5}
+                              value={configWeatherZipDraft}
+                              onChange={(event) => {
+                                setConfigWeatherZipDraft(event.target.value.replace(/\D/g, '').slice(0, 5));
+                              }}
+                            />
+                          </label>
+                        </div>
+                      </section>
+                    ) : (
+                      <div className="app__page-settings-empty">
+                        No page-specific settings for this page yet.
+                      </div>
+                    )}
+                  </div>
+                  <div className="app__page-settings-actions">
+                    <button type="button" className="app__control-btn" onClick={() => setPageSettingsPageId('')}>
+                      Done
+                    </button>
+                  </div>
+                </section>
+              </div>
+            ) : null}
+
+            {tickerModuleSettingsId ? (() => {
+              const tickerModuleDefinition = TICKER_MODULE_DEFINITIONS.find(definition => definition.id === tickerModuleSettingsId);
+              const tickerModuleLabel = tickerModuleDefinition?.label || 'Ticker Module';
+              return (
+                <div
+                  className="app__page-settings-overlay"
+                  onClick={(event) => {
+                    if (event.target === event.currentTarget) setTickerModuleSettingsId('');
+                  }}
+                >
+                  <section className="app__page-settings-dialog" aria-label={`${tickerModuleLabel} ticker settings`}>
+                    <div className="app__page-settings-header">
+                      <div className="app__page-settings-title">
+                        <FontAwesomeIcon icon={faGear} />
+                        {tickerModuleLabel} Ticker Settings
+                      </div>
+                      <button
+                        type="button"
+                        className="app__config-close-btn"
+                        onClick={() => setTickerModuleSettingsId('')}
+                        aria-label="Close ticker module settings"
+                      >
+                        <FontAwesomeIcon icon={faXmark} />
+                      </button>
+                    </div>
+                    <div className="app__page-settings-body">
+                      {tickerModuleSettingsId === 'weather' ? (
+                        <section className="app__config-section">
+                          <h3 className="app__config-section-title">Weather Location</h3>
+                          <div className="app__config-grid">
+                            <label className="app__config-row">
+                              <span>Weather ZIP code</span>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                maxLength={5}
+                                value={configWeatherZipDraft}
+                                onChange={(event) => {
+                                  setConfigWeatherZipDraft(event.target.value.replace(/\D/g, '').slice(0, 5));
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </section>
+                      ) : tickerModuleSettingsId === 'store_hours' ? (
+                        <section className="app__config-section">
+                          <h3 className="app__config-section-title">Store Hours</h3>
+                          <div className="app__config-grid">
+                            <label className="app__config-row app__config-toggle-row">
+                              <span>Monday-Friday open</span>
+                              <input
+                                type="checkbox"
+                                checked={editingConfig.storeHours.monFriEnabled}
+                                onChange={(event) => updateStoreHours({ monFriEnabled: event.target.checked })}
+                              />
+                            </label>
+                            <label className="app__config-row">
+                              <span>Monday-Friday opens</span>
+                              <input
+                                type="time"
+                                value={editingConfig.storeHours.monFriOpen}
+                                onChange={(event) => updateStoreHours({ monFriOpen: event.target.value })}
+                                disabled={!editingConfig.storeHours.monFriEnabled}
+                              />
+                            </label>
+                            <label className="app__config-row">
+                              <span>Monday-Friday closes</span>
+                              <input
+                                type="time"
+                                value={editingConfig.storeHours.monFriClose}
+                                onChange={(event) => updateStoreHours({ monFriClose: event.target.value })}
+                                disabled={!editingConfig.storeHours.monFriEnabled}
+                              />
+                            </label>
+                            <label className="app__config-row app__config-toggle-row">
+                              <span>Saturday open</span>
+                              <input
+                                type="checkbox"
+                                checked={editingConfig.storeHours.saturdayEnabled}
+                                onChange={(event) => updateStoreHours({ saturdayEnabled: event.target.checked })}
+                              />
+                            </label>
+                            <label className="app__config-row">
+                              <span>Saturday opens</span>
+                              <input
+                                type="time"
+                                value={editingConfig.storeHours.saturdayOpen}
+                                onChange={(event) => updateStoreHours({ saturdayOpen: event.target.value })}
+                                disabled={!editingConfig.storeHours.saturdayEnabled}
+                              />
+                            </label>
+                            <label className="app__config-row">
+                              <span>Saturday closes</span>
+                              <input
+                                type="time"
+                                value={editingConfig.storeHours.saturdayClose}
+                                onChange={(event) => updateStoreHours({ saturdayClose: event.target.value })}
+                                disabled={!editingConfig.storeHours.saturdayEnabled}
+                              />
+                            </label>
+                            <label className="app__config-row app__config-toggle-row">
+                              <span>Sunday open</span>
+                              <input
+                                type="checkbox"
+                                checked={editingConfig.storeHours.sundayEnabled}
+                                onChange={(event) => updateStoreHours({ sundayEnabled: event.target.checked })}
+                              />
+                            </label>
+                            <label className="app__config-row">
+                              <span>Sunday opens</span>
+                              <input
+                                type="time"
+                                value={editingConfig.storeHours.sundayOpen}
+                                onChange={(event) => updateStoreHours({ sundayOpen: event.target.value })}
+                                disabled={!editingConfig.storeHours.sundayEnabled}
+                              />
+                            </label>
+                            <label className="app__config-row">
+                              <span>Sunday closes</span>
+                              <input
+                                type="time"
+                                value={editingConfig.storeHours.sundayClose}
+                                onChange={(event) => updateStoreHours({ sundayClose: event.target.value })}
+                                disabled={!editingConfig.storeHours.sundayEnabled}
+                              />
+                            </label>
+                          </div>
+                        </section>
+                      ) : (
+                        <div className="app__page-settings-empty">
+                          No module-specific settings for this ticker module yet.
+                        </div>
+                      )}
+                    </div>
+                    <div className="app__page-settings-actions">
+                      <button type="button" className="app__control-btn" onClick={() => setTickerModuleSettingsId('')}>
+                        Done
+                      </button>
+                    </div>
+                  </section>
+                </div>
+              );
+            })() : null}
 
             <div className="app__config-actions">
               <button type="button" className="app__control-btn" onClick={cancelConfigChanges}>
@@ -8239,17 +8726,62 @@ export default function App() {
             <div className="delivery-map-page__panel">
               <div className="delivery-map-page__header">
                 <span>Delivery Map</span>
-                <span>{selectedDayCountLabel}: {positionedDeliveryMapPins.length}/{selectedDayDeliveryMapOrders.length} mapped</span>
+                <span>
+                  {selectedDayCountLabel}: {positionedDeliveryMapPins.length}/{selectedDayDeliveryMapOrders.length} mapped
+                  {deliveryMapViewport ? ` - auto-centered zoom ${deliveryMapViewport.zoom}` : ''}
+                </span>
               </div>
               {deliveryMapUrl && positionedDeliveryMapPins.length ? (
                 <div className="delivery-map-page__body">
                   <div
+                    ref={deliveryMapFullscreenRef}
                     className="delivery-map-page__map"
                     onClick={() => {
                       setSelectedDeliveryMapPinId('');
                       setHoveredDeliveryMapPinId('');
                     }}
                   >
+                    <div className="delivery-map-page__map-controls" onClick={(event) => event.stopPropagation()}>
+                      <button
+                        type="button"
+                        className="delivery-map-page__map-control-btn"
+                        onClick={() => updateDeliveryMapClientZoomAdjustment(1)}
+                        disabled={effectiveDeliveryMapZoomAdjustment >= 4}
+                        title={`Increase map zoom for this screen (${effectiveDeliveryMapZoomAdjustment})`}
+                        aria-label="Increase map zoom"
+                      >
+                        <FontAwesomeIcon icon={faPlus} />
+                      </button>
+                      <button
+                        type="button"
+                        className="delivery-map-page__map-control-btn"
+                        onClick={() => updateDeliveryMapClientZoomAdjustment(-1)}
+                        disabled={effectiveDeliveryMapZoomAdjustment <= -4}
+                        title={`Decrease map zoom for this screen (${effectiveDeliveryMapZoomAdjustment})`}
+                        aria-label="Decrease map zoom"
+                      >
+                        <FontAwesomeIcon icon={faMinus} />
+                      </button>
+                      <button
+                        type="button"
+                        className="delivery-map-page__map-control-btn"
+                        onClick={fitDeliveryMapToPins}
+                        disabled={effectiveDeliveryMapZoomAdjustment === 0}
+                        title="Fit all map pins on this screen"
+                        aria-label="Fit all map pins"
+                      >
+                        <FontAwesomeIcon icon={faDownLeftAndUpRightToCenter} />
+                      </button>
+                      <button
+                        type="button"
+                        className="delivery-map-page__map-control-btn"
+                        onClick={toggleDeliveryMapFullscreen}
+                        title="Expand delivery map"
+                        aria-label="Expand delivery map"
+                      >
+                        <FontAwesomeIcon icon={faUpRightAndDownLeftFromCenter} />
+                      </button>
+                    </div>
                     <img src={deliveryMapUrl} alt={`Delivery map for ${selectedDayCountLabel}`} />
                     {positionedDeliveryMapPins.map((pin, index) => (
                       <button
