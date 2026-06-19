@@ -15,6 +15,7 @@ import {
   faMinus,
   faDownLeftAndUpRightToCenter,
   faPlay,
+  faPause,
   faPlus,
   faScroll,
   faTriangleExclamation,
@@ -6316,35 +6317,6 @@ export default function App() {
   }, [currentPageId, enabledPages]);
 
   useEffect(() => {
-    if (!config.pageAutoRotateEnabled) return;
-    if (!hasMultiplePages) return;
-    if (isConfigOpen) return;
-
-    const intervalMs = clampInteger(
-      config.pageAutoRotateIntervalSec * 1000,
-      5000,
-      300000,
-      DEFAULT_PAGE_AUTO_ROTATE_INTERVAL_SEC * 1000,
-    );
-    const timer = window.setInterval(() => {
-      setCurrentPageId(previous => {
-        const currentIndex = enabledPages.findIndex(page => page.id === previous);
-        const safeIndex = currentIndex >= 0 ? currentIndex : 0;
-        const nextIndex = (safeIndex + 1) % enabledPages.length;
-        return enabledPages[nextIndex].id;
-      });
-    }, intervalMs);
-
-    return () => window.clearInterval(timer);
-  }, [
-    config.pageAutoRotateEnabled,
-    config.pageAutoRotateIntervalSec,
-    enabledPages,
-    hasMultiplePages,
-    isConfigOpen,
-  ]);
-
-  useEffect(() => {
     if (currentPageId !== 'weather') {
       setWeatherForecastLoading(false);
       return;
@@ -6995,6 +6967,122 @@ export default function App() {
       pageAutoRotateEnabled: !previous.pageAutoRotateEnabled,
     }));
   }, []);
+
+  // Auto-rotation control with user-activity pause.
+  const activityTimeoutRef = useRef<number | null>(null);
+  const rotationIntervalRef = useRef<number | null>(null);
+  const nextRotationAtRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const userActiveRef = useRef(false);
+  const [isUserActive, setIsUserActive] = useState(false);
+  const [rotationProgress, setRotationProgress] = useState(0);
+  const INACTIVITY_DELAY_MS = 30 * 1000; // 30s after activity stops
+
+  // User activity observer: pauses rotation while user is active and resumes after inactivity delay
+  useEffect(() => {
+    function onUserActivity() {
+      // mark active and clear any pending resume
+      userActiveRef.current = true;
+      setIsUserActive(true);
+      if (rotationIntervalRef.current) {
+        window.clearInterval(rotationIntervalRef.current);
+        rotationIntervalRef.current = null;
+        nextRotationAtRef.current = null;
+      }
+      if (activityTimeoutRef.current) window.clearTimeout(activityTimeoutRef.current);
+      activityTimeoutRef.current = window.setTimeout(() => {
+        userActiveRef.current = false;
+        setIsUserActive(false);
+        activityTimeoutRef.current = null;
+        // restart rotation if enabled
+        if (config.pageAutoRotateEnabled && hasMultiplePages) {
+          if (rotationIntervalRef.current) window.clearInterval(rotationIntervalRef.current);
+          const intervalMs = config.pageAutoRotateIntervalSec * 1000;
+          rotationIntervalRef.current = window.setInterval(() => {
+            goToNextPage();
+            nextRotationAtRef.current = Date.now() + intervalMs;
+          }, intervalMs);
+          nextRotationAtRef.current = Date.now() + intervalMs;
+        }
+      }, INACTIVITY_DELAY_MS);
+    }
+
+    const opts = { passive: true } as AddEventListenerOptions;
+    window.addEventListener('mousemove', onUserActivity, opts);
+    window.addEventListener('pointerdown', onUserActivity, opts);
+    window.addEventListener('touchstart', onUserActivity, opts);
+    window.addEventListener('keydown', onUserActivity, opts);
+
+    return () => {
+      window.removeEventListener('mousemove', onUserActivity);
+      window.removeEventListener('pointerdown', onUserActivity);
+      window.removeEventListener('touchstart', onUserActivity);
+      window.removeEventListener('keydown', onUserActivity);
+      if (activityTimeoutRef.current) window.clearTimeout(activityTimeoutRef.current);
+      if (rotationIntervalRef.current) window.clearInterval(rotationIntervalRef.current);
+      activityTimeoutRef.current = null;
+      rotationIntervalRef.current = null;
+      nextRotationAtRef.current = null;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+  }, [config.pageAutoRotateEnabled, config.pageAutoRotateIntervalSec, hasMultiplePages, goToNextPage]);
+
+  // Reset next-rotation timestamp whenever the current page changes (including manual navigation)
+  useEffect(() => {
+    if (!config.pageAutoRotateEnabled || !hasMultiplePages) {
+      nextRotationAtRef.current = null;
+      return;
+    }
+    const intervalMs = config.pageAutoRotateIntervalSec * 1000;
+    // only set if not user-active (rotation is paused while active)
+    if (!userActiveRef.current) nextRotationAtRef.current = Date.now() + intervalMs;
+  }, [currentPageId, config.pageAutoRotateEnabled, config.pageAutoRotateIntervalSec, hasMultiplePages]);
+
+  // Manage the rotation interval lifecycle when auto-rotate is enabled and user is not active
+  useEffect(() => {
+    if (!config.pageAutoRotateEnabled || !hasMultiplePages || isUserActive) {
+      if (rotationIntervalRef.current) {
+        window.clearInterval(rotationIntervalRef.current);
+        rotationIntervalRef.current = null;
+      }
+      if (!config.pageAutoRotateEnabled || !hasMultiplePages) {
+        setRotationProgress(0);
+      }
+      return;
+    }
+
+    if (rotationIntervalRef.current) window.clearInterval(rotationIntervalRef.current);
+    const intervalMs = config.pageAutoRotateIntervalSec * 1000;
+    rotationIntervalRef.current = window.setInterval(() => {
+      goToNextPage();
+      nextRotationAtRef.current = Date.now() + intervalMs;
+    }, intervalMs);
+    nextRotationAtRef.current = Date.now() + intervalMs;
+
+    // start RAF to update progress bar
+    function rafTick() {
+      const next = nextRotationAtRef.current;
+      if (next && config.pageAutoRotateEnabled && hasMultiplePages && !isUserActive) {
+        const now = Date.now();
+        const remaining = Math.max(0, next - now);
+        const progress = Math.min(1, Math.max(0, 1 - remaining / intervalMs));
+        setRotationProgress(progress);
+      }
+      rafRef.current = requestAnimationFrame(rafTick);
+    }
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(rafTick);
+    return () => {
+      if (rotationIntervalRef.current) {
+        window.clearInterval(rotationIntervalRef.current);
+        rotationIntervalRef.current = null;
+      }
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [config.pageAutoRotateEnabled, config.pageAutoRotateIntervalSec, hasMultiplePages, goToNextPage, isUserActive]);
 
   return (
     <div className={`app${isDashboardMode ? ' app--dashboard' : ''}${error ? ' app--with-error' : ''}`} ref={appRef}>
@@ -8132,8 +8220,8 @@ export default function App() {
               aria-pressed={config.pageAutoRotateEnabled}
               disabled={!hasMultiplePages}
             >
-              <FontAwesomeIcon icon={faScroll} />
-              {config.pageAutoRotateEnabled ? 'Auto Rotate: On' : 'Auto Rotate: Off'}
+              <FontAwesomeIcon icon={config.pageAutoRotateEnabled ? faPause : faPlay} />
+              {config.pageAutoRotateEnabled ? 'Pause' : 'Play'}
             </button>
             <button
               type="button"
@@ -8143,6 +8231,14 @@ export default function App() {
             >
               <FontAwesomeIcon icon={faGear} /> Config
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {config.pageAutoRotateEnabled && hasMultiplePages ? (
+        <div className={`page-rotation-progress${isUserActive ? ' page-rotation-progress--paused' : ''}`} aria-hidden="true">
+          <div className="page-rotation-progress__track">
+            <div className="page-rotation-progress__bar" style={{ width: `${Math.round(rotationProgress * 100)}%` }} />
           </div>
         </div>
       ) : null}
