@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/service.js",
-    "dev": "ts-node -r tsconfig-paths/register src/service.ts",
+    "dev": "ts-node src/service.ts",
     "watch": "tsc --watch"
   },
   "keywords": [

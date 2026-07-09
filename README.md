@@ -32,6 +32,10 @@ Utilities, services, and userscripts for improving workflows in FTD Mercury and 
    - Scanner Browser Bridge unified installer: `1.0.0` (`opos-bridge-unified-v1.0.0`)
    - Weather Widget Shim installer: `1.0.0` (`weather-xoap-shim-v1.0.0`)
    - MercuryHQ Single Request Barcode userscript: `0.4.33`
+4. **Mercury WOI SMTP Gateway added**
+   - New standalone SMTP/POP3 gateway for Mercury WOI intake and local queueing
+   - Includes optional forwarding to an external mailbox and a Windows installer build flow
+   - Manual GitHub Actions release workflow is available for packaging releases
 
 ## Components
 
@@ -51,6 +55,10 @@ Utilities, services, and userscripts for improving workflows in FTD Mercury and 
    - Path: `mercury-orders-tv-dashboard/`
    - Type: Live workflow bridge + React kiosk dashboard + Windows installer flow
    - README: `mercury-orders-tv-dashboard/README.md`
+5. **Mercury WOI SMTP Gateway**
+   - Path: `mercury-woi-smtp-gw/`
+   - Type: Standalone SMTP/POP3 gateway for Mercury WOI with local queueing, optional forwarding, and Windows installer packaging
+   - README: `mercury-woi-smtp-gw/README.md`
 
 ## Quick Start (Dashboard Live Mode)
 
@@ -77,6 +85,7 @@ Then open `http://127.0.0.1:5173`.
 - `scanner-browser-bridge/` - OPOS bridge service + installers
 - `weather-widget-shim/` - weather compatibility shim + installers
 - `mercury-orders-tv-dashboard/` - TV dashboard, workflow bridge, installers, SOAP references
+- `mercury-woi-smtp-gw/` - standalone WOI SMTP/POP3 gateway, installer scripts, and release workflow
 
 ## Legal Disclaimer
 

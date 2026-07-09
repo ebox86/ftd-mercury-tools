@@ -1,26 +1,51 @@
 # Mercury WOI SMTP Gateway
 
-Standalone service that provides a local SMTP/POP3 gateway for Mercury's Web Order Interface (WOI). This gateway:
+This project provides a lightweight local SMTP/POP3 gateway for Mercury's Web Order Interface (WOI). It is designed for environments where WOI email submissions need to be accepted locally, queued, and later retrieved by Mercury over POP3.
 
-- **Accepts WOI emails over SMTP** on a configurable local port (default 2525)
-- **Queues messages locally** in an `.eml` file queue
-- **Serves messages via POP3** on a configurable port (default 1110) for Mercury to collect
-- **Optionally forwards messages** to an external mailbox (e.g., Gmail, Brevo, etc.)
+## What it does
 
-## Use Case
+- Accepts WOI emails over SMTP on a configurable local port (default `2525`)
+- Stores each message as an `.eml` file in a local queue
+- Serves queued messages to Mercury over POP3 on a configurable port (default `1110`)
+- Optionally forwards accepted messages to an external mailbox using SMTP
 
-This gateway decouples WOI email submission from Mercury's polling mechanism:
+## How the flow works
 
-1. Fax parser (or other system) sends WOI email to localhost:2525 (SMTP)
-2. Gateway queues the message and optionally forwards it to an external mailbox
-3. Mercury polls localhost:1110 (POP3) at its configured interval and retrieves queued messages
-4. Mercury processes and imports the WOI orders
+1. A sender such as the fax parser or another workflow submits a WOI email to `127.0.0.1:2525`.
+2. The gateway stores the message locally and optionally forwards it to an external mailbox.
+3. Mercury polls `127.0.0.1:1110` at its configured interval and retrieves the queued message.
+4. Mercury processes and imports the WOI order.
+
+## Quick start
+
+### Prerequisites
+
+- Node.js 20 or newer
+- npm
+- Windows PowerShell 5.1+ for service installation
+
+### Run locally
+
+```powershell
+npm install
+npm run build
+npm start
+```
+
+The service starts on `127.0.0.1:2525` for SMTP intake and `127.0.0.1:1110` for POP3 polling by default.
+
+### Run in development mode
+
+```powershell
+npm install
+npm run dev
+```
 
 ## Configuration
 
-Configuration is stored at `C:\ProgramData\FTD\WoiSmtpGateway\gateway-config.json` (or override via `WOI_GATEWAY_CONFIG_DIR`).
+Configuration is stored at `C:\ProgramData\FTD\WoiSmtpGateway\gateway-config.json` unless you override it with `WOI_GATEWAY_CONFIG_DIR`.
 
-### Example Config
+### Example configuration
 
 ```json
 {
@@ -38,146 +63,106 @@ Configuration is stored at `C:\ProgramData\FTD\WoiSmtpGateway\gateway-config.jso
 }
 ```
 
-### Configuration Fields
+### Configuration fields
 
 | Field | Default | Description |
 |---|---|---|
-| `bindAddress` | `127.0.0.1` | IP address to bind SMTP/POP3 servers to |
-| `smtpPort` | `2525` | Port for SMTP intake (where WOI emails arrive) |
-| `pop3Port` | `1110` | Port for POP3 service (where Mercury retrieves messages) |
-| `forwardEnabled` | `false` | Enable external mailbox forwarding |
-| `forwardToAddress` | `woi-inbox@example.com` | External mailbox to forward messages to |
-| `forwardSmtpHost` | `smtp.example.com` | SMTP host for the external mailbox provider |
-| `forwardSmtpPort` | `587` | SMTP port (typically 587 for TLS, 465 for SSL) |
-| `forwardUsername` | `woi-user@example.com` | SMTP username (app password for Gmail/Brevo) |
-| `forwardPassword` | `` | SMTP password or app password |
+| `bindAddress` | `127.0.0.1` | IP address to bind the SMTP and POP3 servers to |
+| `smtpPort` | `2525` | Port for SMTP intake |
+| `pop3Port` | `1110` | Port for POP3 delivery to Mercury |
+| `forwardEnabled` | `false` | Enables forwarding to an external mailbox |
+| `forwardToAddress` | `woi-inbox@example.com` | Destination mailbox for forwarded messages |
+| `forwardSmtpHost` | `smtp.example.com` | SMTP host for the external provider |
+| `forwardSmtpPort` | `587` | SMTP port for the external provider |
+| `forwardUsername` | `woi-user@example.com` | SMTP username or app password |
+| `forwardPassword` | empty | SMTP password or app password |
 
-## Running
+## Mercury configuration
 
-### Development
+Configure Mercury Administration → Web Order Interface to poll this gateway with the following values:
 
-```bash
-npm install
-npm run dev
-```
-
-### Production Build
-
-```bash
-npm install
-npm run build
-npm start
-```
-
-## Mercury Configuration
-
-Configure Mercury Administration → Web Order Interface to poll this gateway:
-
-| Mercury Setting | Value |
+| Mercury setting | Value |
 |---|---|
-| Server (POP3 host) | `127.0.0.1` |
+| POP3 host | `127.0.0.1` |
 | Port | `1110` (or your configured `pop3Port`) |
 | Use SSL | No |
-| Username | Any non-empty value (e.g., `mercury-woi`) |
+| Username | Any non-empty value, for example `mercury-woi` |
 | Password | Any non-empty value |
 | Subject line filter | `Online Order` |
 
-## Logs
+> The POP3 implementation accepts any non-empty `USER`/`PASS` pair, so the values above can be simple placeholders.
 
-Console output shows:
+## Logs and queue location
 
-- SMTP server startup and email intake
-- Message queueing
-- POP3 session activity
-- Forwarding attempts (if enabled)
-- Error details
-
-## Port Notes
-
-- **IPv4 loopback only**: Uses `127.0.0.1` explicitly, not `localhost`, to ensure IPv4 binding
-- **Port conflict**: Ensure ports 2525 and 1110 are not in use by other services
+The service writes startup, queueing, POP3, and forwarding activity to the console. The queue is stored at `C:\ProgramData\FTD\WoiSmtpGateway\mailqueue`, with each message saved as an `.eml` file named like `msg_<timestamp>_<random>.eml`.
 
 ## Troubleshooting
 
-**Messages not appearing in Mercury:**
-- Check Mercury WOI settings point to the correct host/port
-- Verify `smtpPort` and `pop3Port` in the config
-- Check service logs for SMTP/POP3 connection errors
+- Messages do not appear in Mercury: verify the POP3 host/port and that the service is still running.
+- Forwarding fails: verify the SMTP host, port, username, and password in the config.
+- Port conflicts: make sure `2525` and `1110` are not already in use by another application.
 
-**Forwarding failures:**
-- Verify SMTP host, port, and credentials are correct
-- Check firewall rules allow outbound SMTP
-- Enable `forwardEnabled` in config
-
-**Queue location:**
-- Queue is stored at `C:\ProgramData\FTD\WoiSmtpGateway\mailqueue`
-- Each message is a `.eml` file named `msg_<timestamp>_<random>.eml`
-
-## Building & Installation
+## Building and installing
 
 ### Prerequisites
 
-- **Node.js 20+** with npm
-- **PowerShell 5.1+** (Windows native)
-- **Inno Setup 6** (for building the installer)
-  - Download: https://jrsoftware.org/isdl.php
-  - Install to default location (e.g., `C:\Program Files (x86)\Inno Setup 6\`)
+- Node.js 20+ with npm
+- PowerShell 5.1+ (Windows native)
+- Inno Setup 6 for building the installer
 
-### Build Installer
+### Build the installer
 
 Use the PowerShell build script to package the gateway with a bundled Node.js runtime:
 
 ```powershell
 # From the mercury-woi-smtp-gw directory
-$nodePath = "C:\path\to\node" # Path to Node.js bin/ folder containing node.exe
+$nodePath = "C:\path\to\node" # Path to the folder that contains node.exe
 & .\tools\build-installer.ps1 -Version "1.0.0" -NodeRuntimeDir $nodePath
 ```
 
 The script will:
-1. Copy the Node.js runtime to the staging area
-2. Run `npm install` and `npm run build` to compile TypeScript
-3. Stage all files (runtime, compiled service, scripts)
-4. Invoke Inno Setup to create the Windows installer
+1. Copy the Node.js runtime into the staging folder.
+2. Run `npm install` and `npm run build`.
+3. Stage the compiled service, scripts, and runtime files.
+4. Invoke Inno Setup to create the Windows installer.
 
 Output: `dist/FTD.WoiSmtpGateway.Setup.1.0.0.exe`
 
-### Install from Installer
+### Install from the installer
 
 Run the generated `.exe` as Administrator:
 
 ```powershell
-& ".\dist\FTD.WoiSmtpGateway.Setup.1.0.0.exe"
+& .\dist\FTD.WoiSmtpGateway.Setup.1.0.0.exe
 ```
 
 The installer will:
 1. Extract files to `C:\FTDTools\WoiSmtpGateway\`
-2. Register the Windows service (FTD WOI SMTP Gateway)
+2. Register the Windows service named `FTD WOI SMTP Gateway`
 3. Start the service automatically
-4. Configure it to auto-start on system reboot
+4. Configure it to start automatically on reboot
 
-### Manual Service Management
-
-If you need to manage the service manually:
+### Manual service management
 
 ```powershell
-# Install service (run as Administrator)
+# Install the service (run as Administrator)
 & "C:\FTDTools\WoiSmtpGateway\service\install-woi-smtp-gateway.ps1"
 
-# Uninstall service (run as Administrator)
+# Uninstall the service (run as Administrator)
 & "C:\FTDTools\WoiSmtpGateway\service\uninstall-woi-smtp-gateway.ps1"
 
 # Check service status
 Get-Service "FTD WOI SMTP Gateway"
 
-# Start/stop service
+# Start or stop the service
 Start-Service "FTD WOI SMTP Gateway"
 Stop-Service "FTD WOI SMTP Gateway"
 ```
 
-### Service Details
+### Service details
 
-- **Service Name**: FTD WOI SMTP Gateway
-- **Install Location**: `C:\FTDTools\WoiSmtpGateway\`
-- **Config Location**: `C:\ProgramData\FTD\WoiSmtpGateway\gateway-config.json`
-- **Log Location**: `C:\ProgramData\FTD\WoiSmtpGateway\logs\`
-- **Queue Location**: `C:\ProgramData\FTD\WoiSmtpGateway\mailqueue\`
+- Service name: `FTD WOI SMTP Gateway`
+- Install location: `C:\FTDTools\WoiSmtpGateway\`
+- Config location: `C:\ProgramData\FTD\WoiSmtpGateway\gateway-config.json`
+- Log location: `C:\ProgramData\FTD\WoiSmtpGateway\logs\`
+- Queue location: `C:\ProgramData\FTD\WoiSmtpGateway\mailqueue\`
