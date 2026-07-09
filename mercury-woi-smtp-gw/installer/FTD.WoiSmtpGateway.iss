@@ -69,8 +69,3 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 ; Optional: Clean up old files on upgrade
 Type: filesandordirs; Name: "{app}\service\*.js"
 
-[Code]
-function InitializeWizard: Boolean;
-begin
-  Result := True;
-end;
