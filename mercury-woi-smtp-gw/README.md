@@ -8,6 +8,7 @@ This project provides a lightweight local SMTP/POP3 gateway for Mercury's Web Or
 - Stores each message as an `.eml` file in a local queue
 - Serves queued messages to Mercury over POP3 on a configurable port (default `1110`)
 - Optionally forwards accepted messages to an external mailbox using SMTP
+- Runs as a Windows service through a small service host that supervises the Node.js gateway process
 - Installs a tray configuration app for editing gateway ports and forwarding settings
 
 ## How the flow works
@@ -126,8 +127,9 @@ $nodePath = "C:\path\to\node" # Path to the folder that contains node.exe
 The script will:
 1. Copy the Node.js runtime into the staging folder.
 2. Run `npm install` and `npm run build`.
-3. Stage the compiled service, scripts, tray configuration app, and runtime files.
-4. Invoke Inno Setup to create the Windows installer.
+3. Publish the Windows service host.
+4. Stage the compiled service, scripts, tray configuration app, and runtime files.
+5. Invoke Inno Setup to create the Windows installer.
 
 Output: `dist/FTD.WoiSmtpGateway.Setup.1.0.0.exe`
 
@@ -167,6 +169,7 @@ Stop-Service "FTD WOI SMTP Gateway"
 
 - Service name: `FTD WOI SMTP Gateway`
 - Install location: `C:\FTDTools\WoiSmtpGateway\`
+- Service host: `C:\FTDTools\WoiSmtpGateway\service-runtime\FTD.WoiSmtpGateway.ServiceHost.exe`
 - Config location: `C:\ProgramData\FTD\WoiSmtpGateway\gateway-config.json`
 - Log location: `C:\ProgramData\FTD\WoiSmtpGateway\logs\`
 - Queue location: `C:\ProgramData\FTD\WoiSmtpGateway\mailqueue\`

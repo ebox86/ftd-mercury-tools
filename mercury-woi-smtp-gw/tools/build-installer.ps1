@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory = $true)] [string]$Version,
   [Parameter(Mandatory = $true)] [string]$NodeRuntimeDir,
+  [string]$ServiceHostRuntimeIdentifier = "win-x64",
   [string]$Publisher    = "ebox86.com",
   [string]$PublisherUrl = "https://github.com/example/ftd-mercury-tools"
 )
@@ -11,6 +12,7 @@ $ErrorActionPreference = "Stop"
 $scriptRoot    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot   = Split-Path -Parent $scriptRoot
 $installerIss  = Join-Path $projectRoot "installer\FTD.WoiSmtpGateway.iss"
+$serviceHostCsproj = Join-Path $projectRoot "service-host\FTD.WoiSmtpGateway.ServiceHost\FTD.WoiSmtpGateway.ServiceHost.csproj"
 $configAppRoot = Join-Path $projectRoot "config-app"
 $stageRoot     = Join-Path $projectRoot "artifacts\installer\stage"
 $distRoot      = Join-Path $projectRoot "dist"
@@ -18,7 +20,9 @@ $distRoot      = Join-Path $projectRoot "dist"
 # Verify prerequisites
 
 if (-not (Test-Path $installerIss)) { throw "Installer script not found: $installerIss" }
+if (-not (Test-Path $serviceHostCsproj)) { throw "Service host project not found: $serviceHostCsproj" }
 if (-not (Test-Path $configAppRoot)) { throw "Config app folder not found: $configAppRoot" }
+if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { throw "dotnet CLI not found on PATH." }
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw "npm not found on PATH." }
 
 $NodeRuntimeDir = [System.IO.Path]::GetFullPath($NodeRuntimeDir)
@@ -55,9 +59,10 @@ if (-not $iscc) {
 if (Test-Path $stageRoot) { Remove-Item -Recurse -Force $stageRoot }
 $stageRuntime    = Join-Path $stageRoot "runtime"
 $stageServiceDir = Join-Path $stageRoot "service"
+$stageServiceRuntime = Join-Path $stageRoot "service-runtime"
 $stageConfigApp  = Join-Path $stageRoot "config-app"
 
-New-Item -ItemType Directory -Path $stageRuntime, $stageServiceDir, $stageConfigApp | Out-Null
+New-Item -ItemType Directory -Path $stageRuntime, $stageServiceDir, $stageServiceRuntime, $stageConfigApp | Out-Null
 
 # 1. Copy bundled Node.js runtime
 
@@ -91,12 +96,24 @@ if (Test-Path $serviceModules) {
 Copy-Item (Join-Path $projectRoot "service\install-woi-smtp-gateway.ps1")   -Destination $stageServiceDir
 Copy-Item (Join-Path $projectRoot "service\uninstall-woi-smtp-gateway.ps1") -Destination $stageServiceDir
 
-# 3. Copy tray configuration app
+# 3. Build C# service host
+
+Write-Host "Publishing C# service host ($ServiceHostRuntimeIdentifier)..."
+dotnet publish $serviceHostCsproj `
+  --configuration Release `
+  --runtime $ServiceHostRuntimeIdentifier `
+  --output $stageServiceRuntime `
+  --no-self-contained `
+  /p:PublishSingleFile=true
+
+if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit code $LASTEXITCODE)." }
+
+# 4. Copy tray configuration app
 
 Write-Host "Staging tray configuration app..."
 Copy-Item -Path (Join-Path $configAppRoot "*") -Destination $stageConfigApp -Recurse
 
-# 4. Run InnoSetup
+# 5. Run InnoSetup
 
 if (-not (Test-Path $distRoot)) { New-Item -ItemType Directory -Path $distRoot | Out-Null }
 

@@ -1,4 +1,5 @@
 param(
+  [string]$AppRoot     = "C:\FTDTools\WoiSmtpGateway",
   [string]$ServiceName = "FTD WOI SMTP Gateway"
 )
 
@@ -14,6 +15,21 @@ function Assert-Admin {
 }
 
 Assert-Admin
+
+$serviceHostExe = Join-Path $AppRoot "service-runtime\FTD.WoiSmtpGateway.ServiceHost.exe"
+if (Test-Path $serviceHostExe) {
+  Write-Host "Uninstalling service '$ServiceName'..."
+  & $serviceHostExe `
+    "--service-uninstall" `
+    "--service-name=$ServiceName"
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "Service uninstallation failed (exit code $LASTEXITCODE)."
+  }
+
+  Write-Host "Service '$ServiceName' uninstalled successfully." -ForegroundColor Green
+  exit 0
+}
 
 $existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if (-not $existingService) {

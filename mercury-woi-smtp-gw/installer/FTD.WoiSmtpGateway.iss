@@ -48,6 +48,10 @@ Source: "{#StageDir}\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion 
 ; Service files (compiled JavaScript)
 Source: "{#StageDir}\service\*"; DestDir: "{app}\service"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; C# Windows service host
+Source: "{#StageDir}\service-runtime\FTD.WoiSmtpGateway.ServiceHost.exe"; DestDir: "{app}\service-runtime"; Flags: ignoreversion
+Source: "{#StageDir}\service-runtime\*.dll"; DestDir: "{app}\service-runtime"; Flags: ignoreversion skipifsourcedoesntexist
+
 ; Tray/configuration app
 Source: "{#StageDir}\config-app\*"; DestDir: "{app}\config-app"; Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -84,7 +88,7 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
   Flags: runhidden waituntilterminated; RunOnceId: "FTD.WoiSmtpGateway.ExitTray"
 
 ; Uninstall the Windows service
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\service\uninstall-woi-smtp-gateway.ps1"""; \
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\service\uninstall-woi-smtp-gateway.ps1"" -AppRoot ""{app}"""; \
   Flags: runhidden waituntilterminated; RunOnceId: "FTD.WoiSmtpGateway.Uninstall.Service"
 
 [InstallDelete]
