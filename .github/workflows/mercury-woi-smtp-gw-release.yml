@@ -7,9 +7,6 @@ on:
         description: "Semantic version (example: 1.0.0)"
         required: true
         type: string
-  push:
-    tags:
-      - "mercury-woi-smtp-gw-v*"
 
 permissions:
   contents: write
