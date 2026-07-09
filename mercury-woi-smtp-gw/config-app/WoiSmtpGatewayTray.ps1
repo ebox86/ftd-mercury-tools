@@ -6,7 +6,10 @@ param(
 Set-StrictMode -Version 2
 $ErrorActionPreference = "Stop"
 
-$script:ServiceName = "FTD WOI SMTP Gateway"
+$script:ProductName = "FTD Mercury Mail Gateway"
+$script:PrimaryServiceName = "FTD Mercury Mail Gateway"
+$script:LegacyServiceNames = @("FTD WOI SMTP Gateway")
+$script:ServiceName = $script:PrimaryServiceName
 $script:MutexName = "FTD.WoiSmtpGateway.ConfigTray"
 $script:ShowEventName = "FTD.WoiSmtpGateway.ConfigTray.Show"
 $script:ExitEventName = "FTD.WoiSmtpGateway.ConfigTray.Exit"
@@ -56,8 +59,53 @@ $script:Ui = @{}
 $script:Menu = @{}
 $script:MainForm = $null
 $script:NotifyIcon = $null
+$script:AppIcon = $null
 $script:Exiting = $false
 $script:ShownTrayHint = $false
+
+function New-GatewayIcon {
+  $bitmap = New-Object System.Drawing.Bitmap 32, 32
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $graphics.Clear([System.Drawing.Color]::Transparent)
+
+  $background = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+    (New-Object System.Drawing.Rectangle(0, 0, 32, 32)),
+    [System.Drawing.Color]::FromArgb(26, 89, 140),
+    [System.Drawing.Color]::FromArgb(30, 132, 86),
+    45
+  )
+  $graphics.FillEllipse($background, 2, 2, 28, 28)
+
+  $whitePen = New-Object System.Drawing.Pen([System.Drawing.Color]::White, 2)
+  $graphics.DrawRectangle($whitePen, 8, 11, 16, 11)
+  $graphics.DrawLine($whitePen, 8, 11, 16, 17)
+  $graphics.DrawLine($whitePen, 24, 11, 16, 17)
+
+  $background.Dispose()
+  $whitePen.Dispose()
+  $graphics.Dispose()
+
+  return [System.Drawing.Icon]::FromHandle($bitmap.GetHicon())
+}
+
+function Get-AppIcon {
+  if ($script:AppIcon -ne $null) {
+    return $script:AppIcon
+  }
+
+  $iconPath = Join-Path $PSScriptRoot "app-icon.ico"
+  if (Test-Path $iconPath) {
+    try {
+      $script:AppIcon = New-Object System.Drawing.Icon($iconPath)
+      return $script:AppIcon
+    }
+    catch { }
+  }
+
+  $script:AppIcon = New-GatewayIcon
+  return $script:AppIcon
+}
 
 function Get-ConfigDir {
   if (-not [string]::IsNullOrWhiteSpace($env:WOI_GATEWAY_CONFIG_DIR)) {
@@ -90,10 +138,10 @@ function New-DefaultConfig {
     smtpPort = 2525
     pop3Port = 1110
     forwardEnabled = $false
-    forwardToAddress = "woi-inbox@example.com"
+    forwardToAddress = "orders@example.com"
     forwardSmtpHost = "smtp.example.com"
     forwardSmtpPort = 587
-    forwardUsername = "woi-user@example.com"
+    forwardUsername = "orders@example.com"
     forwardPassword = ""
   }
 
@@ -212,12 +260,34 @@ function Test-IsAdministrator {
   return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Get-GatewayServiceInfo {
+  $names = @($script:PrimaryServiceName) + $script:LegacyServiceNames
+  foreach ($name in $names) {
+    if ([string]::IsNullOrWhiteSpace($name)) {
+      continue
+    }
+
+    $service = Get-Service -Name $name -ErrorAction SilentlyContinue
+    if ($null -ne $service) {
+      $script:ServiceName = $name
+      return [pscustomobject]@{
+        Name = $name
+        Status = [string]$service.Status
+        IsLegacy = ($name -ne $script:PrimaryServiceName)
+      }
+    }
+  }
+
+  $script:ServiceName = $script:PrimaryServiceName
+  return $null
+}
+
 function Get-ServiceStateText {
-  $service = Get-Service -Name $script:ServiceName -ErrorAction SilentlyContinue
-  if ($null -eq $service) {
+  $info = Get-GatewayServiceInfo
+  if ($null -eq $info) {
     return "Not installed"
   }
-  return [string]$service.Status
+  return [string]$info.Status
 }
 
 function Set-FooterStatus([string]$message, [bool]$isError) {
@@ -236,7 +306,8 @@ function Set-FooterStatus([string]$message, [bool]$isError) {
 }
 
 function Update-ServiceStatus {
-  $status = Get-ServiceStateText
+  $serviceInfo = Get-GatewayServiceInfo
+  $status = if ($null -eq $serviceInfo) { "Not installed" } else { [string]$serviceInfo.Status }
 
   if ($script:Ui.ContainsKey("ServiceBadge")) {
     $badge = $script:Ui["ServiceBadge"]
@@ -261,12 +332,24 @@ function Update-ServiceStatus {
     $script:Ui["ServiceStatusValue"].Text = $status
   }
 
+  if ($script:Ui.ContainsKey("ServiceNameValue")) {
+    $script:Ui["ServiceNameValue"].Text = if ($null -eq $serviceInfo) {
+      $script:PrimaryServiceName
+    }
+    elseif ($serviceInfo.IsLegacy) {
+      "$($serviceInfo.Name) (legacy)"
+    }
+    else {
+      $serviceInfo.Name
+    }
+  }
+
   if ($script:Menu.ContainsKey("Status")) {
     $script:Menu["Status"].Text = "Service: $status"
   }
 
   if ($script:NotifyIcon -ne $null) {
-    $script:NotifyIcon.Text = "FTD WOI SMTP Gateway - $status"
+    $script:NotifyIcon.Text = "$script:ProductName - $status"
   }
 }
 
@@ -283,14 +366,14 @@ function Invoke-ElevatedServiceCommand([string]$command) {
 }
 
 function Invoke-ServiceAction([string]$action) {
-  $service = Get-Service -Name $script:ServiceName -ErrorAction SilentlyContinue
-  if ($null -eq $service) {
+  $serviceInfo = Get-GatewayServiceInfo
+  if ($null -eq $serviceInfo) {
     Set-FooterStatus "Service is not installed." $true
     Update-ServiceStatus
     return
   }
 
-  $escapedName = $script:ServiceName.Replace("'", "''")
+  $escapedName = $serviceInfo.Name.Replace("'", "''")
   switch ($action) {
     "Start" {
       $command = "Start-Service -Name '$escapedName'"
@@ -441,6 +524,7 @@ function Populate-UiFromConfig {
   $script:Ui["ForwardUsername"].Text = [string]$gateway["forwardUsername"]
   $script:Ui["ForwardPassword"].Text = [string]$gateway["forwardPassword"]
   $script:Ui["ConfigPath"].Text = Get-ConfigPath
+  Update-MercuryGuide
 }
 
 function Read-ConfigFromUi {
@@ -497,12 +581,14 @@ function Build-GatewayPage {
   Add-SectionHeader $table "Local mail gateway"
 
   $script:Ui["BindAddress"] = New-TextBox 360 $false
+  $script:Ui["BindAddress"].Add_TextChanged({ Update-MercuryGuide })
   Add-Row $table "Bind address" $script:Ui["BindAddress"]
 
   $script:Ui["SmtpPort"] = New-PortSpinner
   Add-Row $table "SMTP intake port" $script:Ui["SmtpPort"]
 
   $script:Ui["Pop3Port"] = New-PortSpinner
+  $script:Ui["Pop3Port"].Add_ValueChanged({ Update-MercuryGuide })
   Add-Row $table "POP3 port for Mercury" $script:Ui["Pop3Port"]
 
   $note = New-Object System.Windows.Forms.Label
@@ -516,6 +602,150 @@ function Build-GatewayPage {
   return $page
 }
 
+function Update-MercuryGuide {
+  if (-not $script:Ui.ContainsKey("MercuryGrid")) {
+    return
+  }
+
+  $server = "127.0.0.1"
+  if ($script:Ui.ContainsKey("BindAddress")) {
+    $configured = $script:Ui["BindAddress"].Text.Trim()
+    if (-not [string]::IsNullOrWhiteSpace($configured) -and $configured -ne "0.0.0.0") {
+      $server = $configured
+    }
+  }
+
+  $port = 1110
+  if ($script:Ui.ContainsKey("Pop3Port")) {
+    $port = [int]$script:Ui["Pop3Port"].Value
+  }
+
+  $grid = $script:Ui["MercuryGrid"]
+  $grid.Rows.Clear()
+  [void]$grid.Rows.Add(
+    $server,
+    "Your Store Name",
+    "POP3",
+    [string]$port,
+    "order@localhost",
+    "password",
+    "Online Order",
+    "None",
+    "",
+    "",
+    ""
+  )
+
+  if ($script:Ui.ContainsKey("MercuryPolling")) {
+    $script:Ui["MercuryPolling"].Text = "Polling Interval: 3 minutes"
+  }
+}
+
+function Copy-MercuryGuide {
+  if (-not $script:Ui.ContainsKey("MercuryGrid")) {
+    return
+  }
+
+  $grid = $script:Ui["MercuryGrid"]
+  if ($grid.Rows.Count -eq 0) {
+    Update-MercuryGuide
+  }
+
+  $headers = @()
+  foreach ($column in $grid.Columns) {
+    $headers += $column.HeaderText
+  }
+
+  $values = @()
+  foreach ($cell in $grid.Rows[0].Cells) {
+    $values += [string]$cell.Value
+  }
+
+  [System.Windows.Forms.Clipboard]::SetText(($headers -join "`t") + [Environment]::NewLine + ($values -join "`t"))
+  Set-FooterStatus "Mercury settings copied." $false
+}
+
+function Build-MercuryPage {
+  $page = New-Object System.Windows.Forms.TabPage
+  $page.Text = "Mercury"
+  $page.BackColor = [System.Drawing.Color]::White
+
+  $panel = New-Object System.Windows.Forms.Panel
+  $panel.Dock = [System.Windows.Forms.DockStyle]::Fill
+  $panel.Padding = New-Object System.Windows.Forms.Padding(16, 14, 16, 12)
+  $panel.BackColor = [System.Drawing.Color]::White
+
+  $title = New-Object System.Windows.Forms.Label
+  $title.Text = "Incoming Mail Server entry"
+  $title.AutoSize = $true
+  $title.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
+  $title.ForeColor = [System.Drawing.Color]::FromArgb(35, 58, 84)
+  $title.Location = New-Object System.Drawing.Point(16, 14)
+
+  $hint = New-Object System.Windows.Forms.Label
+  $hint.Text = "Use these values in Mercury's Incoming Mail Server grid. The account and password can be any non-empty values."
+  $hint.AutoSize = $true
+  $hint.ForeColor = [System.Drawing.Color]::FromArgb(94, 104, 116)
+  $hint.Location = New-Object System.Drawing.Point(16, 38)
+
+  $grid = New-Object System.Windows.Forms.DataGridView
+  $grid.Location = New-Object System.Drawing.Point(16, 68)
+  $grid.Size = New-Object System.Drawing.Size(660, 118)
+  $grid.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+  $grid.AllowUserToAddRows = $false
+  $grid.AllowUserToDeleteRows = $false
+  $grid.AllowUserToResizeRows = $false
+  $grid.RowHeadersVisible = $false
+  $grid.ReadOnly = $true
+  $grid.BackgroundColor = [System.Drawing.Color]::White
+  $grid.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+  $grid.SelectionMode = [System.Windows.Forms.DataGridViewSelectionMode]::FullRowSelect
+  $grid.ScrollBars = [System.Windows.Forms.ScrollBars]::Both
+  $grid.AutoSizeColumnsMode = [System.Windows.Forms.DataGridViewAutoSizeColumnsMode]::DisplayedCells
+  $grid.ColumnHeadersHeightSizeMode = [System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode]::AutoSize
+
+  foreach ($name in @(
+    "Server",
+    "Store",
+    "Protocol",
+    "Port",
+    "Account",
+    "Password",
+    "Subject",
+    "Encryption",
+    "Encryption PW",
+    "Referral Code",
+    "Send Errors To"
+  )) {
+    [void]$grid.Columns.Add($name.Replace(" ", ""), $name)
+  }
+
+  $script:Ui["MercuryGrid"] = $grid
+
+  $script:Ui["MercuryPolling"] = New-Object System.Windows.Forms.Label
+  $script:Ui["MercuryPolling"].AutoSize = $true
+  $script:Ui["MercuryPolling"].Location = New-Object System.Drawing.Point(16, 202)
+  $script:Ui["MercuryPolling"].ForeColor = [System.Drawing.Color]::FromArgb(31, 45, 61)
+
+  $copyButton = New-Object System.Windows.Forms.Button
+  $copyButton.Text = "Copy Table"
+  $copyButton.Width = 94
+  $copyButton.Height = 28
+  $copyButton.Location = New-Object System.Drawing.Point(16, 232)
+  $copyButton.Add_Click({ Copy-MercuryGuide })
+
+  $note = New-Object System.Windows.Forms.Label
+  $note.Text = "If you change the POP3 port on the Gateway tab, save and restart this service, then update the Port value in Mercury to match."
+  $note.AutoSize = $true
+  $note.ForeColor = [System.Drawing.Color]::FromArgb(94, 104, 116)
+  $note.Location = New-Object System.Drawing.Point(16, 274)
+
+  $panel.Controls.AddRange(@($title, $hint, $grid, $script:Ui["MercuryPolling"], $copyButton, $note))
+  $page.Controls.Add($panel)
+  Update-MercuryGuide
+  return $page
+}
+
 function Build-ForwardingPage {
   $page = New-Object System.Windows.Forms.TabPage
   $page.Text = "Forwarding"
@@ -525,7 +755,7 @@ function Build-ForwardingPage {
   Add-SectionHeader $table "External SMTP forwarding"
 
   $script:Ui["ForwardEnabled"] = New-Object System.Windows.Forms.CheckBox
-  $script:Ui["ForwardEnabled"].Text = "Forward accepted WOI mail"
+  $script:Ui["ForwardEnabled"].Text = "Forward accepted mail"
   $script:Ui["ForwardEnabled"].AutoSize = $true
   $script:Ui["ForwardEnabled"].Margin = New-Object System.Windows.Forms.Padding(3, 5, 3, 8)
   Add-Row $table "Forwarding" $script:Ui["ForwardEnabled"]
@@ -571,6 +801,11 @@ function Build-ServicePage {
   $script:Ui["ServiceStatusValue"].AutoSize = $true
   $script:Ui["ServiceStatusValue"].Margin = New-Object System.Windows.Forms.Padding(3, 7, 3, 8)
   Add-Row $table "Status" $script:Ui["ServiceStatusValue"]
+
+  $script:Ui["ServiceNameValue"] = New-Object System.Windows.Forms.Label
+  $script:Ui["ServiceNameValue"].AutoSize = $true
+  $script:Ui["ServiceNameValue"].Margin = New-Object System.Windows.Forms.Padding(3, 7, 3, 8)
+  Add-Row $table "Service name" $script:Ui["ServiceNameValue"]
 
   $buttons = New-Object System.Windows.Forms.FlowLayoutPanel
   $buttons.AutoSize = $true
@@ -675,12 +910,12 @@ function Exit-Application {
 
 function Build-MainForm {
   $form = New-Object System.Windows.Forms.Form
-  $form.Text = "FTD WOI SMTP Gateway Configuration"
+  $form.Text = "$script:ProductName Configuration"
   $form.Size = New-Object System.Drawing.Size(720, 500)
   $form.MinimumSize = New-Object System.Drawing.Size(650, 460)
   $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
   $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-  $form.Icon = [System.Drawing.SystemIcons]::Application
+  $form.Icon = Get-AppIcon
 
   $root = New-Object System.Windows.Forms.TableLayoutPanel
   $root.Dock = [System.Windows.Forms.DockStyle]::Fill
@@ -696,7 +931,7 @@ function Build-MainForm {
   $header.BackColor = [System.Drawing.Color]::FromArgb(246, 248, 250)
 
   $title = New-Object System.Windows.Forms.Label
-  $title.Text = "FTD WOI SMTP Gateway"
+  $title.Text = $script:ProductName
   $title.AutoSize = $true
   $title.Font = New-Object System.Drawing.Font("Segoe UI", 10.5, [System.Drawing.FontStyle]::Bold)
   $title.ForeColor = [System.Drawing.Color]::FromArgb(31, 45, 61)
@@ -723,6 +958,7 @@ function Build-MainForm {
   $tabs = New-Object System.Windows.Forms.TabControl
   $tabs.Dock = [System.Windows.Forms.DockStyle]::Fill
   $tabs.Controls.Add((Build-GatewayPage))
+  $tabs.Controls.Add((Build-MercuryPage))
   $tabs.Controls.Add((Build-ForwardingPage))
   $tabs.Controls.Add((Build-ServicePage))
 
@@ -796,7 +1032,7 @@ function Build-MainForm {
       $sender.Hide()
       if (-not $script:ShownTrayHint -and $script:NotifyIcon -ne $null) {
         $script:ShownTrayHint = $true
-        $script:NotifyIcon.ShowBalloonTip(2500, "FTD WOI SMTP Gateway", "Configuration is still available from the tray icon.", [System.Windows.Forms.ToolTipIcon]::Info)
+        $script:NotifyIcon.ShowBalloonTip(2500, $script:ProductName, "Configuration is still available from the tray icon.", [System.Windows.Forms.ToolTipIcon]::Info)
       }
     }
   })
@@ -849,8 +1085,8 @@ function Build-TrayIcon {
   $menu.Add_Opening({ Update-ServiceStatus })
 
   $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
-  $notifyIcon.Icon = [System.Drawing.SystemIcons]::Application
-  $notifyIcon.Text = "FTD WOI SMTP Gateway"
+  $notifyIcon.Icon = Get-AppIcon
+  $notifyIcon.Text = $script:ProductName
   $notifyIcon.ContextMenuStrip = $menu
   $notifyIcon.Visible = $true
   $notifyIcon.Add_DoubleClick({ Show-MainForm })

@@ -10,7 +10,7 @@ internal enum ServiceCommand { None, Install, Uninstall, Start, Stop, Status }
 internal sealed class HostOptions
 {
   public ServiceCommand Command { get; init; } = ServiceCommand.None;
-  public string ServiceName { get; init; } = "FTD WOI SMTP Gateway";
+  public string ServiceName { get; init; } = "FTD Mercury Mail Gateway";
   public string StartMode { get; init; } = "auto";
   public string NodeExePath { get; init; } = string.Empty;
   public string ScriptPath { get; init; } = string.Empty;
@@ -45,7 +45,7 @@ internal sealed class HostOptions
     return new HostOptions
     {
       Command = command,
-      ServiceName = p.Get("service-name", "FTD WOI SMTP Gateway"),
+      ServiceName = p.Get("service-name", "FTD Mercury Mail Gateway"),
       StartMode = p.Get("start-mode", "auto"),
       NodeExePath = Path.GetFullPath(p.Get("node-exe", defaultNodePath)),
       ScriptPath = Path.GetFullPath(p.Get("script-path", defaultScriptPath)),
@@ -113,7 +113,7 @@ internal sealed class NodeProcessHostedService : BackgroundService
     _stdoutWriter = CreateWriter(_options.StdOutLogPath);
     _stderrWriter = CreateWriter(_options.StdErrLogPath);
 
-    _logger.LogInformation("Starting WOI SMTP gateway service. Script: {Script}", _options.ScriptPath);
+    _logger.LogInformation("Starting Mercury mail gateway service. Script: {Script}", _options.ScriptPath);
 
     while (!stoppingToken.IsCancellationRequested)
     {

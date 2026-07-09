@@ -1,6 +1,7 @@
 param(
   [string]$AppRoot     = "C:\FTDTools\WoiSmtpGateway",
-  [string]$ServiceName = "FTD WOI SMTP Gateway"
+  [string]$ServiceName = "FTD Mercury Mail Gateway",
+  [string[]]$LegacyServiceNames = @("FTD WOI SMTP Gateway")
 )
 
 Set-StrictMode -Version 2
@@ -17,35 +18,54 @@ function Assert-Admin {
 Assert-Admin
 
 $serviceHostExe = Join-Path $AppRoot "service-runtime\FTD.WoiSmtpGateway.ServiceHost.exe"
-if (Test-Path $serviceHostExe) {
-  Write-Host "Uninstalling service '$ServiceName'..."
-  & $serviceHostExe `
-    "--service-uninstall" `
-    "--service-name=$ServiceName"
-
-  if ($LASTEXITCODE -ne 0) {
-    throw "Service uninstallation failed (exit code $LASTEXITCODE)."
+function Uninstall-ServiceByName([string]$name) {
+  if ([string]::IsNullOrWhiteSpace($name)) {
+    return
   }
 
-  Write-Host "Service '$ServiceName' uninstalled successfully." -ForegroundColor Green
-  exit 0
+  $existingService = Get-Service -Name $name -ErrorAction SilentlyContinue
+  if (-not $existingService) {
+    return
+  }
+
+  if (Test-Path $serviceHostExe) {
+    Write-Host "Uninstalling service '$name'..."
+    & $serviceHostExe `
+      "--service-uninstall" `
+      "--service-name=$name"
+
+    if ($LASTEXITCODE -ne 0) {
+      throw "Service uninstallation failed for '$name' (exit code $LASTEXITCODE)."
+    }
+
+    Write-Host "Service '$name' uninstalled successfully." -ForegroundColor Green
+    return
+  }
+
+  Write-Host "Uninstalling service '$name'..."
+
+  Stop-Service -Name $name -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 500
+
+  sc.exe delete "$name" | Out-Null
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "Service deletion failed for '$name' (exit code $LASTEXITCODE)."
+  }
+
+  Write-Host "Service '$name' uninstalled successfully." -ForegroundColor Green
 }
 
-$existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-if (-not $existingService) {
+$removedAny = $false
+$names = @($ServiceName) + $LegacyServiceNames
+foreach ($name in $names) {
+  $service = Get-Service -Name $name -ErrorAction SilentlyContinue
+  if ($service) {
+    Uninstall-ServiceByName $name
+    $removedAny = $true
+  }
+}
+
+if (-not $removedAny) {
   Write-Host "Service '$ServiceName' not found. Nothing to uninstall."
-  exit 0
 }
-
-Write-Host "Uninstalling service '$ServiceName'..."
-
-Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-Start-Sleep -Milliseconds 500
-
-sc.exe delete "$ServiceName" | Out-Null
-
-if ($LASTEXITCODE -ne 0) {
-  throw "Service deletion failed (exit code $LASTEXITCODE)."
-}
-
-Write-Host "Service '$ServiceName' uninstalled successfully." -ForegroundColor Green

@@ -1,7 +1,8 @@
 param(
   [string]$AppRoot       = "C:\FTDTools\WoiSmtpGateway",
-  [string]$ServiceName   = "FTD WOI SMTP Gateway",
-  [string]$StartMode     = "auto"
+  [string]$ServiceName   = "FTD Mercury Mail Gateway",
+  [string]$StartMode     = "auto",
+  [string[]]$LegacyServiceNames = @("FTD WOI SMTP Gateway")
 )
 
 Set-StrictMode -Version 2
@@ -35,6 +36,21 @@ if (-not (Test-Path $scriptPath)) {
 $logDir = Join-Path $env:ProgramData "FTD\WoiSmtpGateway\logs"
 if (-not (Test-Path $logDir)) {
   New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
+
+foreach ($legacyName in $LegacyServiceNames) {
+  if ([string]::IsNullOrWhiteSpace($legacyName) -or $legacyName -eq $ServiceName) {
+    continue
+  }
+
+  $legacyService = Get-Service -Name $legacyName -ErrorAction SilentlyContinue
+  if ($legacyService) {
+    Write-Host "Removing legacy service '$legacyName'..."
+    Stop-Service -Name $legacyName -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+    sc.exe delete "$legacyName" | Out-Null
+    Start-Sleep -Milliseconds 500
+  }
 }
 
 Write-Host "Installing service '$ServiceName'..."
