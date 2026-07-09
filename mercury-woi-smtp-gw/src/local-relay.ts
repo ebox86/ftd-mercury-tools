@@ -1,13 +1,9 @@
 import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
-import { SMTPServer } from 'smtp-server';
+import { SMTPServer, SMTPServerDataStream } from 'smtp-server';
 import * as nodemailer from 'nodemailer';
-import { getConfigDir, loadConfig, resolveMailboxTargets } from './config';
-
-export function getQueueDir(): string {
-  return path.join(getConfigDir(), 'mailqueue');
-}
+import { getQueueDir, getGatewayConfig } from './config';
 
 function ensureQueueDir(): string {
   const dir = getQueueDir();
@@ -16,29 +12,27 @@ function ensureQueueDir(): string {
 }
 
 // ── SMTP server ───────────────────────────────────────────────────────────────
-// Accepts the WOI email from nodemailer and writes it as an .eml file to the
+// Accepts WOI emails from the fax parser and writes them as .eml files to the
 // queue directory for Mercury to collect via POP3.
 
 async function forwardToExternalMailbox(message: Buffer): Promise<void> {
-  const config = loadConfig();
-  const gateway = config.mailGateway;
-  if (!gateway.forwardEnabled || !gateway.forwardToAddress?.trim()) return;
+  const config = getGatewayConfig();
+  if (!config.forwardEnabled || !config.forwardToAddress?.trim()) return;
 
-  const targets = resolveMailboxTargets(loadConfig());
   const transport = nodemailer.createTransport({
-    host: gateway.forwardSmtpHost,
-    port: gateway.forwardSmtpPort,
-    secure: gateway.forwardSmtpPort === 465,
-    requireTLS: gateway.forwardSmtpPort !== 465,
+    host: config.forwardSmtpHost,
+    port: config.forwardSmtpPort,
+    secure: config.forwardSmtpPort === 465,
+    requireTLS: config.forwardSmtpPort !== 465,
     auth: {
-      user: gateway.forwardUsername || gateway.forwardToAddress,
-      pass: gateway.forwardPassword,
+      user: config.forwardUsername,
+      pass: config.forwardPassword,
     },
   });
 
   await transport.sendMail({
-    from: gateway.forwardUsername || gateway.forwardToAddress,
-    to: targets.error || gateway.forwardToAddress,
+    from: config.forwardUsername,
+    to: config.forwardToAddress,
     raw: message,
   });
 }
@@ -50,7 +44,7 @@ export async function startSmtpServer(port: number, bindAddress = '127.0.0.1'): 
     secure: false,
     authOptional: true,
     disabledCommands: ['STARTTLS'],
-    onData(stream, _session, callback) {
+    onData(stream: SMTPServerDataStream, _session: any, callback: (error?: Error | null) => void) {
       const chunks: Buffer[] = [];
       stream.on('data', (chunk: Buffer) => chunks.push(chunk));
       stream.on('end', async () => {
@@ -59,18 +53,18 @@ export async function startSmtpServer(port: number, bindAddress = '127.0.0.1'): 
         const message = Buffer.concat(chunks);
         try {
           fs.writeFileSync(fullPath, message);
-          console.log(`[Relay/SMTP] Queued: ${filename}`);
+          console.log(`[WOI-GW/SMTP] Queued: ${filename}`);
           try {
             await forwardToExternalMailbox(message);
-            console.log(`[Relay/SMTP] Forwarded to ${loadConfig().mailGateway.forwardToAddress}`);
+            console.log(`[WOI-GW/SMTP] Forwarded to ${getGatewayConfig().forwardToAddress}`);
           } catch (forwardErr: unknown) {
             const error = forwardErr instanceof Error ? forwardErr.message : String(forwardErr);
-            console.warn(`[Relay/SMTP] Forward failed: ${error}`);
+            console.warn(`[WOI-GW/SMTP] Forward failed: ${error}`);
           }
           callback();
         } catch (err: unknown) {
           const error = err instanceof Error ? err : new Error(String(err));
-          console.error(`[Relay/SMTP] Store failed: ${error.message}`);
+          console.error(`[WOI-GW/SMTP] Store failed: ${error.message}`);
           callback(error);
         }
       });
@@ -86,13 +80,13 @@ export async function startSmtpServer(port: number, bindAddress = '127.0.0.1'): 
     server.once('error', onError);
     server.listen(port, bindAddress, () => {
       server.off('error', onError);
-      console.log(`[Relay/SMTP] Listening on ${bindAddress}:${port}`);
+      console.log(`[WOI-GW/SMTP] Listening on ${bindAddress}:${port}`);
       resolve();
     });
   });
 
   server.on('error', (err: Error) =>
-    console.error(`[Relay/SMTP] ${err.message}`)
+    console.error(`[WOI-GW/SMTP] ${err.message}`)
   );
 
   return server;
@@ -233,7 +227,7 @@ export async function startPop3Server(port: number, bindAddress = '127.0.0.1'): 
             for (const m of toDelete) {
               try { fs.unlinkSync(path.join(queueDir, m)); } catch { /* non-fatal */ }
             }
-            console.log(`[Relay/POP3] Session closed — deleted ${toDelete.size} message(s)`);
+            console.log(`[WOI-GW/POP3] Session closed — deleted ${toDelete.size} message(s)`);
             send('+OK bye');
             socket.end();
             break;
@@ -255,13 +249,13 @@ export async function startPop3Server(port: number, bindAddress = '127.0.0.1'): 
     server.once('error', onError);
     server.listen(port, bindAddress, () => {
       server.off('error', onError);
-      console.log(`[Relay/POP3] Listening on ${bindAddress}:${port}`);
+      console.log(`[WOI-GW/POP3] Listening on ${bindAddress}:${port}`);
       resolve();
     });
   });
 
   server.on('error', (err: Error) =>
-    console.error(`[Relay/POP3] ${err.message}`)
+    console.error(`[WOI-GW/POP3] ${err.message}`)
   );
 
   return server;

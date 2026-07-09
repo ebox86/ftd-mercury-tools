@@ -52,13 +52,13 @@ Settings are stored at `C:\ProgramData\FTD\FaxOrderParser\config.json` and manag
 | `pollIntervalSeconds` | `10` | How often to check the folder |
 | `fileFormat` | `PDF` | `PDF` or `TIF` (TIF mode also picks up `.jpg`/`.jpeg`) |
 | `processedSubfolder` | `processed` | Subfolder where processed files are moved |
-| `email.senderAddress` | `faxparser@localhost.local` | From address used on outgoing WOI emails |
-| `email.senderPassword` | _(empty)_ | SMTP password — leave blank for unauthenticated local relay |
-| `email.smtpUsername` | _(empty)_ | SMTP login if different from sender address |
-| `email.recipientAddress` | `order@localhost.local` | The local WOI mailbox address |
+| `email.senderAddress` | `your-gmail-address@gmail.com` | From address used on outgoing WOI emails |
+| `email.senderPassword` | _(empty)_ | Gmail app password for the sender account |
+| `email.smtpUsername` | `your-gmail-address@gmail.com` | SMTP login if different from sender address |
+| `email.recipientAddress` | `your-gmail-address@gmail.com` | The mailbox that receives the WOI message |
 | `email.subjectLine` | `Online Order` | Must match the subject configured in Mercury Administration → WOI |
-| `email.smtpHost` | `127.0.0.1` | SMTP host for the built-in local relay |
-| `email.smtpPort` | `2525` | SMTP port for the built-in local relay |
+| `email.smtpHost` | `smtp.gmail.com` | SMTP host for the Gmail transport |
+| `email.smtpPort` | `587` | SMTP port for the Gmail transport |
 | `email.encryptionPassword` | _(empty)_ | Optional WOI body encryption password |
 | `email.encryptionAlgorithm` | `None` | `None`, `TripleDES`, `DES`, `RC2`, or `Rijndael` (CBC/PKCS7) |
 | `localRelay.enabled` | `true` | Starts the bundled localhost SMTP/POP3 relay with the service |
@@ -91,13 +91,13 @@ Mercury polls this POP3 mailbox on its own schedule (typically every few minutes
 
 ---
 
-## Built-in Local Mail Relay
+## Built-in Local Mail Gateway
 
-The fax parser ships with a localhost-only SMTP/POP3 relay, so hMailServer is no longer required. The service accepts WOI email from Nodemailer on SMTP port `2525`, stores it under `C:\ProgramData\FTD\FaxOrderParser\mailqueue`, and serves the queue to Mercury over POP3 port `1110`.
+The fax parser ships with a loopback-only SMTP/POP3 gateway for local queueing, while the outbound WOI email uses Gmail SMTP by default. The parser sends the WOI message through `smtp.gmail.com:587` using the sender Gmail address and an app password, and the local relay can still queue or hand off messages as needed.
 
-### Why a local relay?
+### Why a local gateway?
 
-Mercury polls a POP3 mailbox directly. The fax parser submits emails over SMTP. A local mail server sits between them, accepting the SMTP submission from the parser and holding messages in a POP3 mailbox for Mercury to collect. This keeps everything on the local Windows machine with no internet dependency.
+Mercury polls a POP3 mailbox directly. The fax parser submits mail over SMTP to the local machine itself. A loopback-only gateway sits between them, accepting the SMTP submission from the parser and holding messages in a POP3 mailbox for Mercury to collect. This keeps everything on the local Windows machine with no internet dependency.
 
 Default relay config:
 

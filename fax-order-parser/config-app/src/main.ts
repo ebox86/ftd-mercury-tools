@@ -30,6 +30,7 @@ const DEFAULT_CONFIG = {
     senderPassword: '',
     smtpUsername: '',
     recipientAddress: 'order@localhost.local',
+    errorRecipientAddress: 'order-error@localhost.local',
     smtpHost: '127.0.0.1',
     smtpPort: 2525,
     subjectLine: 'Online Order',

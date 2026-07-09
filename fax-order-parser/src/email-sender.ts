@@ -1,7 +1,7 @@
 import * as forge from 'node-forge';
 import * as nodemailer from 'nodemailer';
 import { FaxOrderFields } from './index';
-import { EmailConfig, DEFAULT_FIELD_MAP } from './config';
+import { EmailConfig, DEFAULT_FIELD_MAP, resolveMailboxTargets } from './config';
 
 // ── OCR field resolution ───────────────────────────────────────────────────────
 
@@ -339,10 +339,13 @@ export async function sendWoiEmail(
     body = encryptWoiBody(body, emailConfig.encryptionPassword, algo);
   }
 
+  const targets = resolveMailboxTargets({ email: emailConfig } as any);
+
   const transport = nodemailer.createTransport({
     host: emailConfig.smtpHost,
     port: emailConfig.smtpPort,
-    secure: false,
+    secure: emailConfig.smtpPort === 465,
+    requireTLS: emailConfig.smtpPort !== 465,
     ...(emailConfig.senderPassword?.trim() ? {
       auth: {
         user: emailConfig.smtpUsername || emailConfig.senderAddress,
@@ -357,7 +360,7 @@ export async function sendWoiEmail(
   // card message break that parsing.
   const rawMessage = [
     `From: <${emailConfig.senderAddress}>`,
-    `To: <${emailConfig.recipientAddress}>`,
+    `To: <${targets.primary}>`,
     `Subject: ${emailConfig.subjectLine}`,
     `MIME-Version: 1.0`,
     `Content-Type: text/plain; charset=us-ascii`,
@@ -366,11 +369,23 @@ export async function sendWoiEmail(
     body,
   ].join('\r\n');
 
-  await transport.sendMail({
-    envelope: {
-      from: emailConfig.senderAddress,
-      to:   emailConfig.recipientAddress,
-    },
-    raw: rawMessage,
-  });
+  const recipients = [targets.primary, targets.error].filter(Boolean);
+  let lastError: unknown;
+
+  for (const recipient of recipients) {
+    try {
+      await transport.sendMail({
+        envelope: {
+          from: emailConfig.senderAddress,
+          to: recipient,
+        },
+        raw: rawMessage.replace(/To: <[^>]+>/, `To: <${recipient}>`),
+      });
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }

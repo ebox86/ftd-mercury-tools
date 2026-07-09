@@ -1,0 +1,158 @@
+name: Mercury WOI SMTP Gateway Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semantic version (example: 1.0.0)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "mercury-woi-smtp-gw-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    env:
+      NODE_RUNTIME_VERSION: v20.19.0
+
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag:     ${{ steps.meta.outputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version metadata
+        id: meta
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}"
+          } else {
+            $refName = "${{ github.ref_name }}"
+            $prefix  = "mercury-woi-smtp-gw-v"
+            if (-not $refName.StartsWith($prefix)) {
+              throw "Tag must use prefix '$prefix'. Got: $refName"
+            }
+            $version = $refName.Substring($prefix.Length)
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') {
+            throw "Invalid version format: $version"
+          }
+
+          $tag = "mercury-woi-smtp-gw-v$version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag"         >> $env:GITHUB_OUTPUT
+          Write-Host "Version=$version  Tag=$tag"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+
+      - name: Validate PowerShell scripts
+        run: |
+          $files = @(
+            "mercury-woi-smtp-gw/service/install-woi-smtp-gateway.ps1",
+            "mercury-woi-smtp-gw/service/uninstall-woi-smtp-gateway.ps1",
+            "mercury-woi-smtp-gw/tools/build-installer.ps1"
+          )
+          foreach ($file in $files) {
+            $raw = Get-Content -Raw -Path $file
+            [void][scriptblock]::Create($raw)
+            Write-Host "Parsed OK: $file"
+          }
+
+      - name: Install Inno Setup compiler
+        run: choco upgrade innosetup --no-progress -y
+
+      - name: Download bundled Node.js runtime
+        id: tooling
+        run: |
+          $toolsRoot = Join-Path $PWD "mercury-woi-smtp-gw\artifacts\tooling-local"
+          New-Item -ItemType Directory -Path $toolsRoot -Force | Out-Null
+
+          function Invoke-DownloadWithRetry {
+            param(
+              [Parameter(Mandatory)] [string]$Uri,
+              [Parameter(Mandatory)] [string]$OutFile,
+              [int]$Attempts     = 3,
+              [int]$DelaySeconds = 3
+            )
+            $lastError = $null
+            for ($i = 1; $i -le $Attempts; $i++) {
+              try {
+                if (Test-Path $OutFile) { Remove-Item -Force $OutFile }
+                Invoke-WebRequest -Uri $Uri -OutFile $OutFile
+                return
+              } catch {
+                $lastError = $_
+                if ($i -lt $Attempts) { Start-Sleep -Seconds $DelaySeconds }
+              }
+            }
+            throw $lastError ?? "Download failed: $Uri"
+          }
+
+          $nodeZipName = "node-$env:NODE_RUNTIME_VERSION-win-x64.zip"
+          $nodeZip     = Join-Path $toolsRoot $nodeZipName
+          $nodeExtract = Join-Path $toolsRoot "node-runtime"
+
+          Invoke-DownloadWithRetry `
+            -Uri    "https://nodejs.org/dist/$env:NODE_RUNTIME_VERSION/$nodeZipName" `
+            -OutFile $nodeZip
+
+          if (Test-Path $nodeExtract) { Remove-Item -Recurse -Force $nodeExtract }
+          Expand-Archive -Path $nodeZip -DestinationPath $nodeExtract -Force
+
+          $nodeRuntimeDir = Join-Path $nodeExtract "node-$env:NODE_RUNTIME_VERSION-win-x64"
+          if (-not (Test-Path (Join-Path $nodeRuntimeDir "node.exe"))) {
+            throw "node.exe not found in extracted runtime: $nodeRuntimeDir"
+          }
+
+          "node_runtime_dir=$nodeRuntimeDir" >> $env:GITHUB_OUTPUT
+
+      - name: Build Mercury WOI SMTP Gateway installer
+        run: |
+          $publisherUrl = "https://github.com/${{ github.repository }}"
+          .\mercury-woi-smtp-gw\tools\build-installer.ps1 `
+            -Version       "${{ steps.meta.outputs.version }}" `
+            -Publisher     "ebox86.com" `
+            -PublisherUrl  $publisherUrl `
+            -NodeRuntimeDir "${{ steps.tooling.outputs.node_runtime_dir }}"
+
+      - name: Hash installer
+        id: hash
+        run: |
+          $version   = "${{ steps.meta.outputs.version }}"
+          $installer = Join-Path $PWD "mercury-woi-smtp-gw\dist\FTD.WoiSmtpGateway.Setup.$version.exe"
+          if (-not (Test-Path $installer)) {
+            throw "Installer not found: $installer"
+          }
+
+          $hash     = (Get-FileHash -Path $installer -Algorithm SHA256).Hash.ToUpperInvariant()
+          $hashFile = "$installer.sha256.txt"
+          Set-Content -Path $hashFile -Value "$hash  $(Split-Path -Leaf $installer)"
+
+          "installer=$installer" >> $env:GITHUB_OUTPUT
+          "hash=$hash"           >> $env:GITHUB_OUTPUT
+          "hash_file=$hashFile"  >> $env:GITHUB_OUTPUT
+
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: Mercury WOI SMTP Gateway ${{ steps.meta.outputs.version }}
+          make_latest: false
+          files: |
+            ${{ steps.hash.outputs.installer }}
+            ${{ steps.hash.outputs.hash_file }}

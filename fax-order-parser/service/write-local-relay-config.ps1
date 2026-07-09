@@ -118,14 +118,28 @@ Set-PropertyValue -Object $localRelay -Name "enabled" -Value $true
 Set-PropertyValue -Object $localRelay -Name "smtpPort" -Value $effectiveSmtpPort
 Set-PropertyValue -Object $localRelay -Name "pop3Port" -Value $effectivePop3Port
 
+$mailGateway = Ensure-ObjectProperty -Object $config -Name "mailGateway"
+Set-PropertyValue -Object $mailGateway -Name "enabled" -Value $true
+Set-PropertyValue -Object $mailGateway -Name "mode" -Value "built-in-relay"
+Set-PropertyValue -Object $mailGateway -Name "bindAddress" -Value "127.0.0.1"
+Set-PropertyValue -Object $mailGateway -Name "smtpPort" -Value $effectiveSmtpPort
+Set-PropertyValue -Object $mailGateway -Name "pop3Port" -Value $effectivePop3Port
+Set-PropertyValue -Object $mailGateway -Name "forwardEnabled" -Value $true
+Set-PropertyValue -Object $mailGateway -Name "forwardToAddress" -Value "your-gmail-address@gmail.com"
+Set-PropertyValue -Object $mailGateway -Name "forwardSmtpHost" -Value "smtp.gmail.com"
+Set-PropertyValue -Object $mailGateway -Name "forwardSmtpPort" -Value 587
+Set-PropertyValue -Object $mailGateway -Name "forwardUsername" -Value "your-gmail-address@gmail.com"
+Set-PropertyValue -Object $mailGateway -Name "forwardPassword" -Value ""
+
 $email = Ensure-ObjectProperty -Object $config -Name "email"
-Set-PropertyValue -Object $email -Name "senderAddress" -Value "faxparser@localhost.local"
+Set-PropertyValue -Object $email -Name "senderAddress" -Value "your-gmail-address@gmail.com"
 Set-PropertyValue -Object $email -Name "senderPassword" -Value ""
-Set-PropertyValue -Object $email -Name "smtpUsername" -Value ""
-Set-PropertyValue -Object $email -Name "recipientAddress" -Value "order@localhost.local"
+Set-PropertyValue -Object $email -Name "smtpUsername" -Value "your-gmail-address@gmail.com"
+Set-PropertyValue -Object $email -Name "recipientAddress" -Value "your-gmail-address@gmail.com"
+Set-PropertyValue -Object $email -Name "errorRecipientAddress" -Value "your-gmail-address@gmail.com"
 Set-DefaultProperty -Object $email -Name "subjectLine" -Value "Online Order"
-Set-PropertyValue -Object $email -Name "smtpHost" -Value "127.0.0.1"
-Set-PropertyValue -Object $email -Name "smtpPort" -Value $effectiveSmtpPort
+Set-PropertyValue -Object $email -Name "smtpHost" -Value "smtp.gmail.com"
+Set-PropertyValue -Object $email -Name "smtpPort" -Value 587
 Set-PropertyValue -Object $email -Name "encryptionPassword" -Value ""
 Set-PropertyValue -Object $email -Name "encryptionAlgorithm" -Value "None"
 

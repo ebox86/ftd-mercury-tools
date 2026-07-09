@@ -89,7 +89,7 @@ Name: "{userdesktop}\{#MyAppName} Configuration"; Filename: "{app}\config-app\Fa
 ; Create or migrate config.json to the bundled localhost SMTP/POP3 relay before the service starts
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\service\write-local-relay-config.ps1"" -ConfigDir ""{commonappdata}\FTD\FaxOrderParser"" -WatchFolder ""C:\received_faxes"""; \
-  StatusMsg: "Configuring built-in local mail relay..."; \
+  StatusMsg: "Configuring built-in local mail gateway..."; \
   Flags: runhidden waituntilterminated
 
 ; Install and start the Windows service after all files are placed

@@ -28,6 +28,9 @@ internal sealed class AppConfig
   [JsonPropertyName("localRelay")]
   public LocalRelayConfig LocalRelay { get; set; } = new();
 
+  [JsonPropertyName("mailGateway")]
+  public MailGatewayConfig MailGateway { get; set; } = new();
+
   [JsonPropertyName("processing")]
   public ProcessingConfig Processing { get; set; } = new();
 
@@ -83,6 +86,42 @@ internal sealed class LocalRelayConfig
   public int Pop3Port { get; set; } = 1110;
 }
 
+internal sealed class MailGatewayConfig
+{
+  [JsonPropertyName("enabled")]
+  public bool Enabled { get; set; } = true;
+
+  [JsonPropertyName("mode")]
+  public string Mode { get; set; } = "built-in-relay";
+
+  [JsonPropertyName("bindAddress")]
+  public string BindAddress { get; set; } = "127.0.0.1";
+
+  [JsonPropertyName("smtpPort")]
+  public int SmtpPort { get; set; } = 2525;
+
+  [JsonPropertyName("pop3Port")]
+  public int Pop3Port { get; set; } = 1110;
+
+  [JsonPropertyName("forwardEnabled")]
+  public bool ForwardEnabled { get; set; } = true;
+
+  [JsonPropertyName("forwardToAddress")]
+  public string ForwardToAddress { get; set; } = "your-gmail-address@gmail.com";
+
+  [JsonPropertyName("forwardSmtpHost")]
+  public string ForwardSmtpHost { get; set; } = "smtp.gmail.com";
+
+  [JsonPropertyName("forwardSmtpPort")]
+  public int ForwardSmtpPort { get; set; } = 587;
+
+  [JsonPropertyName("forwardUsername")]
+  public string ForwardUsername { get; set; } = "your-gmail-address@gmail.com";
+
+  [JsonPropertyName("forwardPassword")]
+  public string ForwardPassword { get; set; } = string.Empty;
+}
+
 internal sealed class ProcessingConfig
 {
   [JsonPropertyName("useOrderPlacedDateWhenDeliveryDateMissing")]
@@ -135,6 +174,9 @@ internal sealed class EmailConfig
 
   [JsonPropertyName("recipientAddress")]
   public string RecipientAddress { get; set; } = "order@localhost.local";
+
+  [JsonPropertyName("errorRecipientAddress")]
+  public string ErrorRecipientAddress { get; set; } = "order-error@localhost.local";
 
   [JsonPropertyName("subjectLine")]
   public string SubjectLine { get; set; } = "Online Order";

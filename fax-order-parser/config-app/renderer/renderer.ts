@@ -71,6 +71,7 @@ async function loadConfig(): Promise<void> {
   ($<HTMLInputElement>('senderAddress')).value      = String(email['senderAddress'] ?? '');
   ($<HTMLInputElement>('senderPassword')).value     = String(email['senderPassword'] ?? '');
   ($<HTMLInputElement>('recipientAddress')).value   = String(email['recipientAddress'] ?? '');
+  ($<HTMLInputElement>('errorRecipientAddress')).value = String(email['errorRecipientAddress'] ?? '');
   ($<HTMLInputElement>('subjectLine')).value        = String(email['subjectLine'] ?? '');
   ($<HTMLInputElement>('encryptionPassword')).value = String(email['encryptionPassword'] ?? '');
   ($<HTMLSelectElement>('encryptionAlgorithm')).value = String(email['encryptionAlgorithm'] ?? 'None');
@@ -88,6 +89,7 @@ async function saveConfig(): Promise<void> {
       senderAddress:      $<HTMLInputElement>('senderAddress').value.trim(),
       senderPassword:     $<HTMLInputElement>('senderPassword').value,
       recipientAddress:   $<HTMLInputElement>('recipientAddress').value.trim(),
+      errorRecipientAddress: $<HTMLInputElement>('errorRecipientAddress').value.trim(),
       subjectLine:        $<HTMLInputElement>('subjectLine').value.trim(),
       encryptionPassword: $<HTMLInputElement>('encryptionPassword').value,
       encryptionAlgorithm:$<HTMLSelectElement>('encryptionAlgorithm').value as any,

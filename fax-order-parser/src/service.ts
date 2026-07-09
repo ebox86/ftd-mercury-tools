@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import chokidar from 'chokidar';
-import { FaxParserConfig, loadConfig } from './config';
+import { FaxParserConfig, loadConfig, resolveMailGatewayConfig } from './config';
 import { appendLogEntry, readLogEntries } from './logger';
 import { sendWoiEmail, getMissingRequiredFields } from './email-sender';
 import { runOcr, runOcrFull, parseOrderFields, detectFieldBboxes, deliveryDateFromOrderPlacedDate, FaxOrderFields } from './index';
@@ -193,11 +193,13 @@ async function startWatcher(): Promise<void> {
   // Reload config on every file event so settings changes take effect without restart.
   const config = loadConfig();
 
-  // Start built-in SMTP/POP3 relay if enabled
-  const smtpServer = config.localRelay.enabled ? await startSmtpServer(config.localRelay.smtpPort) : null;
-  const pop3Server = config.localRelay.enabled ? await startPop3Server(config.localRelay.pop3Port)  : null;
-  if (config.localRelay.enabled)
-    console.log(`[FaxParser] Local relay enabled — SMTP :${config.localRelay.smtpPort}  POP3 :${config.localRelay.pop3Port}`);
+  // Start the loopback-only local mail gateway if enabled.
+  const gateway = resolveMailGatewayConfig(config);
+  const smtpServer = gateway.enabled ? await startSmtpServer(gateway.smtpPort, gateway.bindAddress) : null;
+  const pop3Server = gateway.enabled ? await startPop3Server(gateway.pop3Port, gateway.bindAddress) : null;
+  if (gateway.enabled) {
+    console.log(`[FaxParser] Local mail gateway enabled — SMTP :${gateway.smtpPort}  POP3 :${gateway.pop3Port} (${gateway.bindAddress})`);
+  }
 
   const watchFolder = config.watchFolder;
   const pollInterval = config.pollIntervalSeconds * 1000;

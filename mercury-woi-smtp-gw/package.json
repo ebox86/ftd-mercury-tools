@@ -1,0 +1,32 @@
+{
+  "name": "mercury-woi-smtp-gw",
+  "version": "1.0.0",
+  "description": "Standalone Mercury WOI SMTP/POP3 Gateway - accepts and queues WOI emails for Mercury to collect",
+  "main": "dist/service.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/service.js",
+    "dev": "ts-node -r tsconfig-paths/register src/service.ts",
+    "watch": "tsc --watch"
+  },
+  "keywords": [
+    "mercury",
+    "woi",
+    "smtp",
+    "pop3",
+    "gateway"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "nodemailer": "^6.9.7",
+    "smtp-server": "^3.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/nodemailer": "^6.4.14",
+    "@types/smtp-server": "^3.5.8",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

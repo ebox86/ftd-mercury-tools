@@ -106,6 +106,7 @@ internal sealed class MainForm : Form
   private TextBox        _senderPasswordBox    = null!;
   private TextBox        _smtpUsernameBox      = null!;
   private TextBox        _recipientAddressBox  = null!;
+  private TextBox        _errorRecipientAddressBox = null!;
   private TextBox        _subjectLineBox       = null!;
   private TextBox        _smtpHostBox          = null!;
   private NumericUpDown  _smtpPortSpinner      = null!;
@@ -432,7 +433,7 @@ internal sealed class MainForm : Form
     // Local relay group
     var relayGroup = new GroupBox
     {
-      Text   = "Built-in Local Mail Relay  (replaces hMailServer)",
+      Text   = "Local Mail Gateway  (loopback only, no external SMTP)",
       Width  = 600,
       Height = 130,
       Margin = new Padding(0, 14, 0, 0),
@@ -440,7 +441,7 @@ internal sealed class MainForm : Form
 
     _relayEnabledCheck = new CheckBox
     {
-      Text     = "Enable built-in SMTP / POP3 relay",
+      Text     = "Enable loopback local SMTP / POP3 gateway",
       AutoSize = true,
       Location = new Point(10, 22),
       Font     = new Font("Segoe UI", 9f, FontStyle.Bold),
@@ -462,8 +463,7 @@ internal sealed class MainForm : Form
 
     var relayHint = new Label
     {
-      Text      = "When enabled: set email SMTP host → 127.0.0.1 and port → SMTP port above.\r\n" +
-                  "In Mercury Administration → WOI: set POP3 host → 127.0.0.1 and port → POP3 port above.",
+      Text      = "When enabled: mail stays on the local machine only. The parser sends to 127.0.0.1:SMTP port above, and Mercury polls 127.0.0.1:POP3 port above.",
       AutoSize  = false,
       Width     = 570,
       Height    = 34,
@@ -518,6 +518,7 @@ internal sealed class MainForm : Form
     _senderPasswordBox   = new TextBox { Width = 320, UseSystemPasswordChar = true };
     _smtpUsernameBox     = new TextBox { Width = 420 };
     _recipientAddressBox = new TextBox { Width = 420 };
+    _errorRecipientAddressBox = new TextBox { Width = 420 };
     _subjectLineBox      = new TextBox { Width = 360 };
 
     panel.Controls.Add(FieldLabel("Sender Email Address (From)"));
@@ -533,6 +534,9 @@ internal sealed class MainForm : Form
 
     panel.Controls.Add(FieldLabel("Recipient Email Address (WOI inbox)"));
     panel.Controls.Add(_recipientAddressBox);
+
+    panel.Controls.Add(FieldLabel("Error Mailbox (WOI reject / fail fallback)"));
+    panel.Controls.Add(_errorRecipientAddressBox);
 
     panel.Controls.Add(FieldLabel("Email Subject Line"));
     panel.Controls.Add(_subjectLineBox);
@@ -892,6 +896,7 @@ internal sealed class MainForm : Form
       _senderPasswordBox.Text   = cfg.Email.SenderPassword;
       _smtpUsernameBox.Text     = cfg.Email.SmtpUsername;
       _recipientAddressBox.Text = cfg.Email.RecipientAddress;
+      _errorRecipientAddressBox.Text = cfg.Email.ErrorRecipientAddress;
       _subjectLineBox.Text      = cfg.Email.SubjectLine;
       _smtpHostBox.Text         = cfg.Email.SmtpHost;
       _smtpPortSpinner.Value    = Math.Clamp(cfg.Email.SmtpPort, 1, 65535);
@@ -916,12 +921,13 @@ internal sealed class MainForm : Form
 
   private void ApplyLocalRelayEmailDefaults()
   {
-    _senderAddressBox.Text = LocalRelaySenderAddress;
+    _senderAddressBox.Text = "faxparser@localhost.local";
     _senderPasswordBox.Clear();
     _smtpUsernameBox.Clear();
-    _recipientAddressBox.Text = LocalRelayRecipientAddress;
-    _smtpHostBox.Text = LocalRelayHost;
-    _smtpPortSpinner.Value = _relaySmtpPortSpinner.Value;
+    _recipientAddressBox.Text = "order@localhost.local";
+    _errorRecipientAddressBox.Text = "order-error@localhost.local";
+    _smtpHostBox.Text = "127.0.0.1";
+    _smtpPortSpinner.Value = 2525;
     _encryptionPasswordBox.Clear();
 
     var noneIndex = _encryptionAlgorithmCombo.Items.IndexOf("None");
@@ -944,6 +950,7 @@ internal sealed class MainForm : Form
         SenderPassword   = _senderPasswordBox.Text,
         SmtpUsername     = _smtpUsernameBox.Text.Trim(),
         RecipientAddress = _recipientAddressBox.Text.Trim(),
+        ErrorRecipientAddress = _errorRecipientAddressBox.Text.Trim(),
         SubjectLine      = _subjectLineBox.Text.Trim(),
         SmtpHost         = _smtpHostBox.Text.Trim(),
         SmtpPort         = (int)_smtpPortSpinner.Value,
@@ -955,6 +962,20 @@ internal sealed class MainForm : Form
         Enabled  = _relayEnabledCheck.Checked,
         SmtpPort = (int)_relaySmtpPortSpinner.Value,
         Pop3Port = (int)_relayPop3PortSpinner.Value,
+      },
+      MailGateway = new MailGatewayConfig
+      {
+        Enabled         = _relayEnabledCheck.Checked,
+        Mode            = "built-in-relay",
+        BindAddress     = "127.0.0.1",
+        SmtpPort        = (int)_relaySmtpPortSpinner.Value,
+        Pop3Port        = (int)_relayPop3PortSpinner.Value,
+        ForwardEnabled  = true,
+        ForwardToAddress = "your-gmail-address@gmail.com",
+        ForwardSmtpHost  = "smtp.gmail.com",
+        ForwardSmtpPort  = 587,
+        ForwardUsername  = "your-gmail-address@gmail.com",
+        ForwardPassword  = string.Empty,
       },
       Processing = new ProcessingConfig
       {
