@@ -25,17 +25,28 @@ if (-not (Test-Path (Join-Path $NodeRuntimeDir "node.exe"))) {
 }
 
 # Check InnoSetup
-$isccOnPath = Get-Command ISCC.exe -ErrorAction SilentlyContinue
 $isccCandidates = @(
   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
   "C:\Program Files\Inno Setup 6\ISCC.exe",
   (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe")
-) | Where-Object { $_ -and (Test-Path $_) }
-if ($isccOnPath -and (Test-Path $isccOnPath.Source)) {
+)
+
+$isccOnPath = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+if ($isccOnPath -and $isccOnPath.Source) {
   $isccCandidates += $isccOnPath.Source
 }
-if (-not $isccCandidates) { throw "Inno Setup 6 (ISCC.exe) not found. Install from https://jrsoftware.org/isdl.php" }
-$iscc = @($isccCandidates)[0]
+
+$iscc = $null
+foreach ($candidate in $isccCandidates) {
+  if ($candidate -and (Test-Path $candidate)) {
+    $iscc = [string]$candidate
+    break
+  }
+}
+
+if (-not $iscc) {
+  throw "Inno Setup 6 (ISCC.exe) not found. Install from https://jrsoftware.org/isdl.php"
+}
 
 # Clean / create stage
 

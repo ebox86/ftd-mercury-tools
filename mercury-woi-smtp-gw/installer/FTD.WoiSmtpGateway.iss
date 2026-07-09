@@ -48,6 +48,9 @@ Source: "{#StageDir}\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion 
 ; Service files (compiled JavaScript)
 Source: "{#StageDir}\service\*"; DestDir: "{app}\service"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; Ensure the service directory exists
+; (Inno Setup will create it automatically when copying files)
+
 ; Service management scripts
 Source: "{#StageDir}\service\install-woi-smtp-gateway.ps1"; DestDir: "{app}\service"; Flags: ignoreversion
 Source: "{#StageDir}\service\uninstall-woi-smtp-gateway.ps1"; DestDir: "{app}\service"; Flags: ignoreversion
