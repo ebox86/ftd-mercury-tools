@@ -8,6 +8,7 @@ This project provides a lightweight local SMTP/POP3 gateway for Mercury's Web Or
 - Stores each message as an `.eml` file in a local queue
 - Serves queued messages to Mercury over POP3 on a configurable port (default `1110`)
 - Optionally forwards accepted messages to an external mailbox using SMTP
+- Installs a tray configuration app for editing gateway ports and forwarding settings
 
 ## How the flow works
 
@@ -44,6 +45,8 @@ npm run dev
 ## Configuration
 
 Configuration is stored at `C:\ProgramData\FTD\WoiSmtpGateway\gateway-config.json` unless you override it with `WOI_GATEWAY_CONFIG_DIR`.
+
+Installed builds include a tray configuration app. Open it from the notification-area icon or from Start Menu -> `FTD WOI SMTP Gateway` -> `FTD WOI SMTP Gateway Configuration`. Use `Save and Restart` after changing the bind address, SMTP intake port, or POP3 port so the Windows service recreates its listening sockets.
 
 ### Example configuration
 
@@ -123,7 +126,7 @@ $nodePath = "C:\path\to\node" # Path to the folder that contains node.exe
 The script will:
 1. Copy the Node.js runtime into the staging folder.
 2. Run `npm install` and `npm run build`.
-3. Stage the compiled service, scripts, and runtime files.
+3. Stage the compiled service, scripts, tray configuration app, and runtime files.
 4. Invoke Inno Setup to create the Windows installer.
 
 Output: `dist/FTD.WoiSmtpGateway.Setup.1.0.0.exe`
@@ -140,7 +143,8 @@ The installer will:
 1. Extract files to `C:\FTDTools\WoiSmtpGateway\`
 2. Register the Windows service named `FTD WOI SMTP Gateway`
 3. Start the service automatically
-4. Configure it to start automatically on reboot
+4. Install the tray configuration app and Start Menu shortcuts
+5. Start the tray icon for the current user and configure it to start at login
 
 ### Manual service management
 
@@ -166,3 +170,4 @@ Stop-Service "FTD WOI SMTP Gateway"
 - Config location: `C:\ProgramData\FTD\WoiSmtpGateway\gateway-config.json`
 - Log location: `C:\ProgramData\FTD\WoiSmtpGateway\logs\`
 - Queue location: `C:\ProgramData\FTD\WoiSmtpGateway\mailqueue\`
+- Tray/config app: `C:\FTDTools\WoiSmtpGateway\config-app\WoiSmtpGatewayTray.ps1`

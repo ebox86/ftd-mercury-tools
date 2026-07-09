@@ -48,6 +48,9 @@ Source: "{#StageDir}\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion 
 ; Service files (compiled JavaScript)
 Source: "{#StageDir}\service\*"; DestDir: "{app}\service"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; Tray/configuration app
+Source: "{#StageDir}\config-app\*"; DestDir: "{app}\config-app"; Flags: ignoreversion recursesubdirs createallsubdirs
+
 ; Ensure the service directory exists
 ; (Inno Setup will create it automatically when copying files)
 
@@ -55,15 +58,34 @@ Source: "{#StageDir}\service\*"; DestDir: "{app}\service"; Flags: ignoreversion 
 Source: "{#StageDir}\service\install-woi-smtp-gateway.ps1"; DestDir: "{app}\service"; Flags: ignoreversion
 Source: "{#StageDir}\service\uninstall-woi-smtp-gateway.ps1"; DestDir: "{app}\service"; Flags: ignoreversion
 
+[Dirs]
+Name: "{commonappdata}\FTD\WoiSmtpGateway"; Permissions: users-modify
+Name: "{commonappdata}\FTD\WoiSmtpGateway\logs"; Permissions: users-modify
+Name: "{commonappdata}\FTD\WoiSmtpGateway\mailqueue"; Permissions: users-modify
+
+[Icons]
+Name: "{group}\{#MyAppName} Configuration"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\config-app\WoiSmtpGatewayTray.ps1"""; WorkingDir: "{app}\config-app"
+Name: "{group}\Start {#MyAppName} Tray Icon"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\config-app\WoiSmtpGatewayTray.ps1"" -Tray"; WorkingDir: "{app}\config-app"
+Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
+Name: "{commonstartup}\{#MyAppName} Tray Icon"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\config-app\WoiSmtpGatewayTray.ps1"" -Tray"; WorkingDir: "{app}\config-app"
+
 [Run]
 ; Install the Windows service after files are copied
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\service\install-woi-smtp-gateway.ps1"""; \
-  Flags: runhidden shellexec; StatusMsg: "Installing Windows service..."; Verb: runas
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\service\install-woi-smtp-gateway.ps1"" -AppRoot ""{app}"""; \
+  Flags: runhidden waituntilterminated; StatusMsg: "Installing Windows service..."
+
+; Start the per-user tray icon after installation
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\config-app\WoiSmtpGatewayTray.ps1"" -Tray"; \
+  Flags: nowait runasoriginaluser skipifsilent; StatusMsg: "Starting tray configuration app..."
 
 [UninstallRun]
+; Stop the tray app before files are removed
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\config-app\WoiSmtpGatewayTray.ps1"" -ExitExisting"; \
+  Flags: runhidden waituntilterminated; RunOnceId: "FTD.WoiSmtpGateway.ExitTray"
+
 ; Uninstall the Windows service
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\service\uninstall-woi-smtp-gateway.ps1"""; \
-  Flags: runhidden shellexec; Verb: runas
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\service\uninstall-woi-smtp-gateway.ps1"""; \
+  Flags: runhidden waituntilterminated; RunOnceId: "FTD.WoiSmtpGateway.Uninstall.Service"
 
 [InstallDelete]
 ; Optional: Clean up old files on upgrade

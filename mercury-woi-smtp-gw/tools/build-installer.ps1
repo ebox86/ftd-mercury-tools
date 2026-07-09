@@ -11,12 +11,14 @@ $ErrorActionPreference = "Stop"
 $scriptRoot    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot   = Split-Path -Parent $scriptRoot
 $installerIss  = Join-Path $projectRoot "installer\FTD.WoiSmtpGateway.iss"
+$configAppRoot = Join-Path $projectRoot "config-app"
 $stageRoot     = Join-Path $projectRoot "artifacts\installer\stage"
 $distRoot      = Join-Path $projectRoot "dist"
 
 # Verify prerequisites
 
 if (-not (Test-Path $installerIss)) { throw "Installer script not found: $installerIss" }
+if (-not (Test-Path $configAppRoot)) { throw "Config app folder not found: $configAppRoot" }
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw "npm not found on PATH." }
 
 $NodeRuntimeDir = [System.IO.Path]::GetFullPath($NodeRuntimeDir)
@@ -51,10 +53,11 @@ if (-not $iscc) {
 # Clean / create stage
 
 if (Test-Path $stageRoot) { Remove-Item -Recurse -Force $stageRoot }
-$stageRuntime   = Join-Path $stageRoot "runtime"
+$stageRuntime    = Join-Path $stageRoot "runtime"
 $stageServiceDir = Join-Path $stageRoot "service"
+$stageConfigApp  = Join-Path $stageRoot "config-app"
 
-New-Item -ItemType Directory -Path $stageRuntime, $stageServiceDir | Out-Null
+New-Item -ItemType Directory -Path $stageRuntime, $stageServiceDir, $stageConfigApp | Out-Null
 
 # 1. Copy bundled Node.js runtime
 
@@ -88,7 +91,12 @@ if (Test-Path $serviceModules) {
 Copy-Item (Join-Path $projectRoot "service\install-woi-smtp-gateway.ps1")   -Destination $stageServiceDir
 Copy-Item (Join-Path $projectRoot "service\uninstall-woi-smtp-gateway.ps1") -Destination $stageServiceDir
 
-# 3. Run InnoSetup
+# 3. Copy tray configuration app
+
+Write-Host "Staging tray configuration app..."
+Copy-Item -Path (Join-Path $configAppRoot "*") -Destination $stageConfigApp -Recurse
+
+# 4. Run InnoSetup
 
 if (-not (Test-Path $distRoot)) { New-Item -ItemType Directory -Path $distRoot | Out-Null }
 
