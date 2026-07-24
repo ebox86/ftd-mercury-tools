@@ -1,7 +1,8 @@
 ﻿import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -558,7 +559,16 @@ function enforceLiveCacheSizeLimit() {
 async function getLiveCachedPayload(cacheKey, ttlMs, loader, bypass = false) {
   const effectiveTtlMs = clampCacheTtlMs(ttlMs);
   if (bypass || effectiveTtlMs <= 0) {
-    return { payload: await loader(), cacheStatus: 'BYPASS' };
+    try {
+      return { payload: await loader(), cacheStatus: 'BYPASS' };
+    } catch (error) {
+      const stale = liveApiResponseCache.get(cacheKey);
+      if (stale) {
+        console.warn(`Live fetch failed for ${cacheKey}, serving stale cache: ${String(error?.message || error)}`);
+        return { payload: stale.payload, cacheStatus: 'STALE-ERROR' };
+      }
+      throw error;
+    }
   }
 
   const now = Date.now();
@@ -587,6 +597,14 @@ async function getLiveCachedPayload(cacheKey, ttlMs, loader, bypass = false) {
   try {
     const payload = await pending;
     return { payload, cacheStatus: 'MISS' };
+  } catch (error) {
+    // A Mercury SOAP fault (e.g. the dashboard truncation bug) shouldn't blank out
+    // the dashboard if we still have a previous good response for this scope.
+    if (cached) {
+      console.warn(`Live refresh failed for ${cacheKey}, serving stale cache: ${String(error?.message || error)}`);
+      return { payload: cached.payload, cacheStatus: 'STALE-ERROR' };
+    }
+    throw error;
   } finally {
     liveApiInFlight.delete(cacheKey);
   }
@@ -4053,6 +4071,146 @@ const server = createServer(async (req, res) => {
   sendJson(res, 404, { error: 'Not found', path: pathname });
 });
 
+// ── Ticket text-length guard ─────────────────────────────────────────────────
+// Mercury's GetDashboardEventsNow throws "String or binary data would be
+// truncated" (breaking both this bridge's events feed and Mercury's own
+// mobile app sync) when an active ticket's DELIVERY_INST/SPECIAL_INST grows
+// past whatever fixed-width buffer its internal dashboard proc uses. The
+// base FTD.TICKET columns are varchar(max), so nothing on Mercury's side
+// stops an order (e.g. a wire-in order) from landing with an oversized
+// field. This periodically finds active tickets that cross a safe
+// threshold and trims them before they can trip the dashboard query,
+// logging the original text first so nothing is lost silently.
+// Incident: 2026-07-23, ticket 386446 / order 380186, SPECIAL_INST at 1054 chars.
+
+const ticketGuardEnabled = !/^(0|false|no)$/i.test(String(process.env.MERCURY_TICKET_GUARD_ENABLED ?? '1').trim());
+const ticketGuardIntervalMs = Number(process.env.MERCURY_TICKET_GUARD_INTERVAL_MS || 5 * 60 * 1000);
+const ticketGuardMaxLen = Number(process.env.MERCURY_TICKET_TEXT_MAX_LEN || 850);
+const ticketGuardTruncateLen = Number(process.env.MERCURY_TICKET_TEXT_TRUNCATE_LEN || 700);
+const ticketGuardSqlServer = String(process.env.MERCURY_SQL_SERVER || 'localhost').trim();
+const ticketGuardSqlDatabase = String(process.env.MERCURY_SQL_DATABASE || 'store').trim();
+const ticketGuardFields = ['SPECIAL_INST', 'DELIVERY_INST'];
+
+const ticketGuardAuditDir = join(process.env['PROGRAMDATA'] || 'C:\\ProgramData', 'FTD', 'MercuryDashboardBridge');
+const ticketGuardAuditPath = join(ticketGuardAuditDir, 'ticket-text-guard-audit.log');
+
+function findSqlcmdPath() {
+  const candidates = [
+    String(process.env.MERCURY_SQLCMD_PATH || '').trim(),
+    'C:\\Program Files\\Microsoft SQL Server\\Client SDK\\ODBC\\130\\Tools\\Binn\\SQLCMD.EXE',
+    'C:\\Program Files (x86)\\Microsoft SQL Server\\Client SDK\\ODBC\\130\\Tools\\Binn\\SQLCMD.EXE',
+    'C:\\Program Files\\Microsoft SQL Server\\Client SDK\\ODBC\\110\\Tools\\Binn\\SQLCMD.EXE',
+    'C:\\Program Files (x86)\\Microsoft SQL Server\\Client SDK\\ODBC\\110\\Tools\\Binn\\SQLCMD.EXE',
+    'sqlcmd.exe',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (candidate === 'sqlcmd.exe' || existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+const ticketGuardSqlcmdPath = findSqlcmdPath();
+
+function runSqlcmd(query) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      ticketGuardSqlcmdPath,
+      ['-S', ticketGuardSqlServer, '-E', '-d', ticketGuardSqlDatabase, '-W', '-h', '-1', '-s', '|', '-Q', query],
+      { timeout: 20000, windowsHide: true },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(`sqlcmd failed: ${error.message}${stderr ? ` (${String(stderr).trim()})` : ''}`));
+          return;
+        }
+        resolve(String(stdout || ''));
+      }
+    );
+  });
+}
+
+function parseSqlcmdRows(stdout) {
+  return String(stdout || '')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line && !/^-+$/.test(line) && !/^\(\d+ rows? affected\)$/i.test(line))
+    .map(line => line.split('|').map(cell => cell.trim()));
+}
+
+function appendTicketGuardAudit(entry) {
+  try {
+    mkdirSync(ticketGuardAuditDir, { recursive: true });
+    appendFileSync(ticketGuardAuditPath, `${JSON.stringify({ timestamp: new Date().toISOString(), ...entry })}\n`, 'utf8');
+  } catch (error) {
+    console.warn(`[TicketGuard] Failed to write audit log: ${String(error?.message || error)}`);
+  }
+}
+
+async function runTicketTextGuardOnce() {
+  const findSql = `SET NOCOUNT ON; SELECT t.ID, t.SALE_ID, t.USER_REFERENCE, ${ticketGuardFields.map(f => `LEN(t.${f})`).join(', ')
+    } FROM FTD.TICKET t WHERE t.DELIVERED_IND = 0 AND (${ticketGuardFields.map(f => `ISNULL(LEN(t.${f}),0) > ${ticketGuardMaxLen}`).join(' OR ')
+    });`;
+
+  const rows = parseSqlcmdRows(await runSqlcmd(findSql));
+
+  for (const row of rows) {
+    const [idRaw, saleIdRaw, userReference, ...lens] = row;
+    const ticketId = Number(idRaw);
+    if (!Number.isInteger(ticketId) || ticketId <= 0) continue;
+
+    for (let i = 0; i < ticketGuardFields.length; i += 1) {
+      const field = ticketGuardFields[i];
+      const len = Number(lens[i]);
+      if (!Number.isFinite(len) || len <= ticketGuardMaxLen) continue;
+
+      try {
+        const original = await runSqlcmd(`SET NOCOUNT ON; SELECT ${field} FROM FTD.TICKET WHERE ID = ${ticketId};`);
+        appendTicketGuardAudit({
+          ticketId,
+          saleId: saleIdRaw,
+          userReference,
+          field,
+          originalLength: len,
+          truncatedToLength: ticketGuardTruncateLen,
+          originalValue: original.trim()
+        });
+
+        await runSqlcmd(
+          `SET NOCOUNT ON; UPDATE FTD.TICKET SET ${field} = LEFT(${field}, ${ticketGuardTruncateLen}) WHERE ID = ${ticketId} AND LEN(${field}) > ${ticketGuardMaxLen};`
+        );
+
+        console.warn(
+          `[TicketGuard] Truncated ${field} on ticket ${ticketId} (order ${saleIdRaw}/${userReference}): ${len} -> ${ticketGuardTruncateLen} chars. Full original text saved to ${ticketGuardAuditPath}`
+        );
+      } catch (error) {
+        console.warn(`[TicketGuard] Failed to truncate ${field} on ticket ${ticketId}: ${String(error?.message || error)}`);
+      }
+    }
+  }
+}
+
+function startTicketTextGuard() {
+  if (!ticketGuardEnabled) {
+    console.log('[TicketGuard] Disabled via MERCURY_TICKET_GUARD_ENABLED.');
+    return;
+  }
+  if (!ticketGuardSqlcmdPath) {
+    console.warn('[TicketGuard] sqlcmd.exe not found (set MERCURY_SQLCMD_PATH) — guard disabled.');
+    return;
+  }
+  console.log(
+    `[TicketGuard] Watching FTD.TICKET.${ticketGuardFields.join('/')} on ${ticketGuardSqlServer}/${ticketGuardSqlDatabase} ` +
+    `every ${Math.round(ticketGuardIntervalMs / 1000)}s (max ${ticketGuardMaxLen} chars, truncates to ${ticketGuardTruncateLen}).`
+  );
+  const tick = () => {
+    runTicketTextGuardOnce().catch(error => {
+      console.warn(`[TicketGuard] Check failed: ${String(error?.message || error)}`);
+    });
+  };
+  tick();
+  setInterval(tick, Math.max(30000, ticketGuardIntervalMs));
+}
+
 server.listen(port, host, () => {
   console.log(`Live bridge listening on http://${host}:${port} -> ${liveMercuryBaseUrl}`);
+  startTicketTextGuard();
 });
