@@ -7122,9 +7122,10 @@ export default function App() {
   useEffect(() => {
     const target = tickerClockRef.current;
     if (!target || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(entries => {
-      const width = entries[0]?.contentRect?.width;
-      if (typeof width === 'number') setTickerClockWidth(width);
+    // offsetWidth (not contentRect, which excludes padding/border) so this matches the box's
+    // actual on-screen footprint -- otherwise the progress bar starts under the clock's edge.
+    const observer = new ResizeObserver(() => {
+      setTickerClockWidth(target.offsetWidth);
     });
     observer.observe(target);
     return () => observer.disconnect();

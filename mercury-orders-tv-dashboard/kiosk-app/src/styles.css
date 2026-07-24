@@ -731,12 +731,14 @@ body {
   gap: 8px;
   padding: 5px 10px;
   border-bottom: 1px solid #b8c0cb;
-  background: var(--ticker-clock-bg, #0b1220);
+  border-left: 4px solid var(--ticker-clock-text, #ffb300);
+  background: #dde4ec;
 }
 
 .lane--critical .lane__header {
   background: #f3dade;
   border-bottom-color: #c47d85;
+  border-left-color: #b9202c;
 }
 
 .lane__header h2 {
@@ -746,10 +748,6 @@ body {
   font-family: Consolas, "Courier New", monospace;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: var(--ticker-clock-text, #ffb300);
-}
-
-.lane--critical .lane__header h2 {
   color: #3a4a5a;
 }
 
@@ -2663,8 +2661,9 @@ body {
 
 /* Pane header cap */
 .page2__pane-title {
-  background: var(--ticker-clock-bg, #0b1220);
+  background: #dde4ec;
   border-bottom: 1px solid #b8c0cb;
+  border-left: 4px solid var(--ticker-clock-text, #ffb300);
   padding: 6px 12px;
   min-height: 34px;
   box-sizing: border-box;
@@ -2673,7 +2672,7 @@ body {
   font-family: Consolas, "Courier New", monospace;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: var(--ticker-clock-text, #ffb300);
+  color: #3a4a5a;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3025,8 +3024,9 @@ body {
   justify-content: space-between;
   gap: 10px;
   padding: 8px 10px;
-  background: var(--ticker-clock-bg, #0b1220);
+  background: #dde4ec;
   border-bottom: 1px solid #b8c0cb;
+  border-left: 4px solid var(--ticker-clock-text, #ffb300);
 }
 
 .page2__chart-title {
@@ -3035,7 +3035,7 @@ body {
   font-family: Consolas, "Courier New", monospace;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: var(--ticker-clock-text, #ffb300);
+  color: #3a4a5a;
 }
 
 .page2__chart-body {
@@ -3057,7 +3057,7 @@ body {
   gap: 5px;
   font-size: 11px;
   font-weight: 600;
-  color: #c9d3e4;
+  color: #6a7e96;
 }
 
 .page2__chart-svg {
@@ -3113,9 +3113,10 @@ body {
   justify-content: space-between;
   gap: 10px;
   padding: 8px 10px;
-  background: var(--ticker-clock-bg, #0b1220);
+  background: #dde4ec;
   border-bottom: 1px solid #b8c0cb;
-  color: var(--ticker-clock-text, #ffb300);
+  border-left: 4px solid var(--ticker-clock-text, #ffb300);
+  color: #3a4a5a;
   font-size: 16px;
   font-weight: 800;
   font-family: Consolas, "Courier New", monospace;
@@ -3791,15 +3792,16 @@ body {
 
 /* Unified cap style — used by all weather panels (conditions, radar, hourly) */
 .weather-page__panel-title {
-  background: var(--ticker-clock-bg, #0b1220);
+  background: #dde4ec;
   border-bottom: 1px solid #b8c0cb;
+  border-left: 4px solid var(--ticker-clock-text, #ffb300);
   padding: 8px 10px;
   font-size: 16px;
   font-weight: 800;
   font-family: Consolas, "Courier New", monospace;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: var(--ticker-clock-text, #ffb300);
+  color: #3a4a5a;
   display: flex;
   align-items: center;
   justify-content: space-between;
