@@ -48,6 +48,22 @@ $env:MERCURY_BASE_URL='http://localhost/WsMercuryWebAPI'
 
 - The bridge is live-only and intended for real Mercury data.
 - Avoid committing raw payloads that contain sensitive customer information.
+- On a Mercury SOAP fault, cached endpoints (`events-now`, `undelivered-orders`, etc.) fall back to the last known-good response instead of erroring, so the dashboard doesn't blank out. Check the `X-Mercury-Cache` response header (`STALE-ERROR` means it's serving a fallback) if data looks out of date.
+
+## Ticket Text Guard
+
+Mercury's `GetDashboardEventsNow` throws a SQL truncation fault (breaking this bridge's `events-now`/`events` endpoints *and* Mercury's own mobile app sync) when an active ticket's `DELIVERY_INST` or `SPECIAL_INST` grows past whatever fixed-width buffer its internal dashboard proc uses, even though the underlying columns are unbounded. See incident 2026-07-23 (ticket 386446 / order 380186, `SPECIAL_INST` at 1054 chars).
+
+The bridge now runs a periodic guard (via `sqlcmd.exe`, Windows-authenticated) that finds active tickets crossing a safe length, logs the original text to `%PROGRAMDATA%\FTD\MercuryDashboardBridge\ticket-text-guard-audit.log`, then trims the field before it can trip the dashboard query.
+
+Environment variables:
+
+- `MERCURY_TICKET_GUARD_ENABLED` — set to `0` to disable (default on)
+- `MERCURY_TICKET_GUARD_INTERVAL_MS` — check interval, default `300000` (5 min)
+- `MERCURY_TICKET_TEXT_MAX_LEN` — trigger threshold, default `850`
+- `MERCURY_TICKET_TEXT_TRUNCATE_LEN` — length to trim to, default `700`
+- `MERCURY_SQL_SERVER` / `MERCURY_SQL_DATABASE` — default `localhost` / `store`
+- `MERCURY_SQLCMD_PATH` — override if `sqlcmd.exe` isn't in one of the default SQL Server Client SDK locations
 
 ## Windows Installer + Service
 

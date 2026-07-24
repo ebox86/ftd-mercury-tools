@@ -138,7 +138,9 @@
       "PowerShell([System.IO.Directory]::GetFiles\\(\"C:\\\\received_faxes\"\\) | ForEach-Object { [System.IO.Path]::GetFileName\\($_\\) })",
       "Bash(taskkill /IM FaxParserConfig.exe /F)",
       "Bash(exit 0)",
-      "PowerShell(Stop-Process -Name \"FaxParserConfig\" -Force -ErrorAction SilentlyContinue)"
+      "PowerShell(Stop-Process -Name \"FaxParserConfig\" -Force -ErrorAction SilentlyContinue)",
+      "Bash(where sqlcmd *)",
+      "Bash(where osql *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Florist\\Downloads\\avatars - ccef\\ccef",

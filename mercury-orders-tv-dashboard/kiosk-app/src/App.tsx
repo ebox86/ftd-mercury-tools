@@ -4,13 +4,12 @@ import {
   faArrowUp,
   faArrowDown,
   faCalendarDay,
-  faClock,
   faCircleCheck,
+  faClock,
   faChevronLeft,
   faChevronRight,
   faFloppyDisk,
   faGear,
-  faInbox,
   faMagnifyingGlass,
   faMinus,
   faDownLeftAndUpRightToCenter,
@@ -67,6 +66,12 @@ import { normalizeWeatherZip, prefetchWeatherTicker } from './ticker/modules/wea
 import { DEFAULT_STORE_HOURS_CONFIG, type StoreHoursConfig } from './ticker/modules/storeHours';
 import type { TickerModuleId, WeatherTickerSnapshot } from './ticker/types';
 import { fetchWeatherForecast, fetchRadarFrames, latLonToTile, weatherCodeDisplay, ccefIconName, degreesToCompass, type WeatherForecastData, type RadarFrame } from './lib/weatherForecast';
+import type { SettingsSectionId, SoundLibraryEntry } from './settings/types';
+import { SETTINGS_SECTIONS } from './settings/sections';
+import { SettingsSidebarNav } from './settings/SettingsSidebarNav';
+import { TickerPreviewPanel } from './settings/TickerPreviewPanel';
+import { GatingPreviewPanel } from './settings/GatingPreviewPanel';
+import { SoundLibraryTable } from './settings/SoundLibraryTable';
 import appPackage from '../package.json';
 
 type GroupedCards = Record<StatusStage, BoardCard[]>;
@@ -162,23 +167,41 @@ interface AskCandidateAttempt {
 type AudioAlertKind = 'marketplace' | 'today';
 type AlertSoundPreset = 'alarm_pulse' | 'classic_ding' | 'bright_beep' | 'custom_upload';
 type ClockFormat = '12h' | '24h';
+type TickerDateFormat = 'md' | 'md_yy' | 'md_yyyy';
+type HourlyToneKind = 'beep' | 'custom';
 type DashboardPageId = 'alerts_active' | 'page2' | 'weather' | 'delivery_map';
+
+const DEFAULT_SOUND_LIBRARY: SoundLibraryEntry[] = [
+  { id: 'alarm_pulse', name: 'Alarm Pulse', kind: 'preset', presetTone: 'alarm_pulse' },
+  { id: 'classic_ding', name: 'Classic Ding', kind: 'preset', presetTone: 'classic_ding' },
+  { id: 'bright_beep', name: 'Bright Beep', kind: 'preset', presetTone: 'bright_beep' },
+];
+
 interface DashboardUserConfig {
   pollMs: number;
   flashMs: number;
   askStaleHours: number;
   mercuryBaseUrl: string;
+  soapNamespace: string;
   marketplaceDings: number;
   todayDings: number;
   dingGapMs: number;
-  soundPreset: AlertSoundPreset;
-  customSoundDataUrl: string;
-  marketplaceSoundPreset: AlertSoundPreset;
-  marketplaceCustomSoundDataUrl: string;
+  soundLibrary: SoundLibraryEntry[];
+  todaySoundId: string;
+  marketplaceSoundId: string;
   customLogoDataUrl: string;
   clockFormat: ClockFormat;
   clockFlashColons: boolean;
   clockShowNanoseconds: boolean;
+  tickerDateFormat: TickerDateFormat;
+  tickerClockBgColor: string;
+  tickerClockTextColor: string;
+  tickerClockBorderColor: string;
+  hourlyToneEnabled: boolean;
+  hourlyToneKind: HourlyToneKind;
+  hourlyToneBeepDurationMs: number;
+  hourlyToneCustomSoundId: string;
+  hourlyToneFrequencyHz: number;
   tickerScrollDurationSec: number;
   tickerWeatherZip: string;
   tickerModules: TickerModuleId[];
@@ -274,17 +297,26 @@ const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
   flashMs: DEFAULT_FLASH_MS,
   askStaleHours: DEFAULT_ASK_STALE_HOURS,
   mercuryBaseUrl: '',
+  soapNamespace: '',
   marketplaceDings: DEFAULT_MARKETPLACE_DINGS,
   todayDings: DEFAULT_TODAY_DINGS,
   dingGapMs: DEFAULT_DING_GAP_MS,
-  soundPreset: 'alarm_pulse',
-  customSoundDataUrl: '',
-  marketplaceSoundPreset: 'alarm_pulse',
-  marketplaceCustomSoundDataUrl: '',
+  soundLibrary: DEFAULT_SOUND_LIBRARY,
+  todaySoundId: 'alarm_pulse',
+  marketplaceSoundId: 'alarm_pulse',
   customLogoDataUrl: '',
   clockFormat: '12h',
   clockFlashColons: true,
   clockShowNanoseconds: false,
+  tickerDateFormat: 'md',
+  tickerClockBgColor: '#0b1220',
+  tickerClockTextColor: '#ffb300',
+  tickerClockBorderColor: '#ffb300',
+  hourlyToneEnabled: false,
+  hourlyToneKind: 'beep',
+  hourlyToneBeepDurationMs: 400,
+  hourlyToneCustomSoundId: '',
+  hourlyToneFrequencyHz: 880,
   tickerScrollDurationSec: 22,
   tickerWeatherZip: '15212',
   tickerModules: normalizeTickerModuleIds(undefined),
@@ -1122,6 +1154,27 @@ function normalizeClockFormat(value: unknown): ClockFormat {
   return value === '24h' ? '24h' : '12h';
 }
 
+function normalizeTickerDateFormat(value: unknown): TickerDateFormat {
+  return value === 'md_yy' || value === 'md_yyyy' ? value : 'md';
+}
+
+function normalizeHexColor(value: unknown, fallback: string): string {
+  const raw = String(value || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : fallback;
+}
+
+function normalizeHourlyToneKind(value: unknown): HourlyToneKind {
+  return value === 'custom' ? 'custom' : 'beep';
+}
+
+function formatTickerDate(date: Date, format: TickerDateFormat): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  if (format === 'md_yy') return `${month}/${day}/${String(date.getFullYear()).slice(-2)}`;
+  if (format === 'md_yyyy') return `${month}/${day}/${date.getFullYear()}`;
+  return `${month}/${day}`;
+}
+
 function normalizeToggle(value: unknown, fallback: boolean): boolean {
   if (value === undefined || value === null || value === '') return fallback;
   const normalized = String(value).trim().toLowerCase();
@@ -1563,18 +1616,54 @@ function pageDescription(pageId: DashboardPageId): string {
   return 'Page';
 }
 
+function createSoundLibraryEntryId(): string {
+  return `sound-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function normalizeSoundLibraryEntries(raw: unknown): SoundLibraryEntry[] {
+  const input = Array.isArray(raw) ? raw : [];
+  const entries: SoundLibraryEntry[] = [];
+  const seenIds = new Set<string>();
+  for (const item of input) {
+    const candidate = item as Partial<SoundLibraryEntry> | null | undefined;
+    const id = normalizeConfigText(candidate?.id, 80).trim();
+    if (!id || seenIds.has(id)) continue;
+    if (candidate?.kind === 'custom') {
+      const dataUrl = String(candidate?.dataUrl || '').trim();
+      if (!dataUrl) continue;
+      const name = normalizeConfigText(candidate?.name, 60).trim() || 'Custom sound';
+      entries.push({ id, name, kind: 'custom', dataUrl });
+    } else {
+      const defaultEntry = DEFAULT_SOUND_LIBRARY.find(entry => entry.id === id);
+      const presetTone = candidate?.presetTone === 'classic_ding' || candidate?.presetTone === 'bright_beep' || candidate?.presetTone === 'alarm_pulse'
+        ? candidate.presetTone
+        : (defaultEntry?.presetTone || 'alarm_pulse');
+      const name = normalizeConfigText(candidate?.name, 60).trim() || defaultEntry?.name || 'Preset sound';
+      entries.push({ id, name, kind: 'preset', presetTone });
+    }
+    seenIds.add(id);
+    if (entries.length >= 40) break;
+  }
+  return entries.length ? entries : DEFAULT_SOUND_LIBRARY.map(entry => ({ ...entry }));
+}
+
 function pickServerConfigFields(raw: Partial<DashboardUserConfig> | null | undefined): Partial<DashboardUserConfig> {
   return {
     pollMs: raw?.pollMs,
     flashMs: raw?.flashMs,
     askStaleHours: raw?.askStaleHours,
     mercuryBaseUrl: raw?.mercuryBaseUrl,
+    soapNamespace: raw?.soapNamespace,
     marketplaceDings: raw?.marketplaceDings,
     todayDings: raw?.todayDings,
     dingGapMs: raw?.dingGapMs,
     clockFormat: raw?.clockFormat,
     clockFlashColons: raw?.clockFlashColons,
     clockShowNanoseconds: raw?.clockShowNanoseconds,
+    tickerDateFormat: raw?.tickerDateFormat,
+    tickerClockBgColor: raw?.tickerClockBgColor,
+    tickerClockTextColor: raw?.tickerClockTextColor,
+    tickerClockBorderColor: raw?.tickerClockBorderColor,
     tickerScrollDurationSec: raw?.tickerScrollDurationSec,
     customLogoDataUrl: raw?.customLogoDataUrl,
     tickerWeatherZip: raw?.tickerWeatherZip,
@@ -1603,10 +1692,14 @@ function pickServerConfigFields(raw: Partial<DashboardUserConfig> | null | undef
 
 function pickClientConfigFields(raw: Partial<DashboardUserConfig> | null | undefined): Partial<DashboardUserConfig> {
   return {
-    soundPreset: raw?.soundPreset,
-    customSoundDataUrl: raw?.customSoundDataUrl,
-    marketplaceSoundPreset: raw?.marketplaceSoundPreset,
-    marketplaceCustomSoundDataUrl: raw?.marketplaceCustomSoundDataUrl,
+    soundLibrary: raw?.soundLibrary,
+    todaySoundId: raw?.todaySoundId,
+    marketplaceSoundId: raw?.marketplaceSoundId,
+    hourlyToneEnabled: raw?.hourlyToneEnabled,
+    hourlyToneKind: raw?.hourlyToneKind,
+    hourlyToneBeepDurationMs: raw?.hourlyToneBeepDurationMs,
+    hourlyToneCustomSoundId: raw?.hourlyToneCustomSoundId,
+    hourlyToneFrequencyHz: raw?.hourlyToneFrequencyHz,
     enabledPageIds: raw?.enabledPageIds,
     pageAutoRotateEnabled: raw?.pageAutoRotateEnabled,
     pageAutoRotateIntervalSec: raw?.pageAutoRotateIntervalSec,
@@ -1622,22 +1715,73 @@ function sanitizeClientConfig(raw: Partial<DashboardUserConfig> | null | undefin
 }
 
 function sanitizeDashboardConfig(raw: Partial<DashboardUserConfig> | null | undefined): DashboardUserConfig {
+  const legacy = raw as (Partial<DashboardUserConfig> & {
+    soundPreset?: unknown;
+    customSoundDataUrl?: unknown;
+    marketplaceSoundPreset?: unknown;
+    marketplaceCustomSoundDataUrl?: unknown;
+  }) | null | undefined;
+
+  let soundLibrary: SoundLibraryEntry[];
+  let todaySoundId: string;
+  let marketplaceSoundId: string;
+  if (Array.isArray(raw?.soundLibrary)) {
+    soundLibrary = normalizeSoundLibraryEntries(raw?.soundLibrary);
+    todaySoundId = normalizeConfigText(raw?.todaySoundId, 80).trim();
+    marketplaceSoundId = normalizeConfigText(raw?.marketplaceSoundId, 80).trim();
+  } else {
+    // Legacy configs (pre sound-library) only had a preset id + one custom-upload data URL per alert kind.
+    soundLibrary = DEFAULT_SOUND_LIBRARY.map(entry => ({ ...entry }));
+    const migrateLegacySound = (presetRaw: unknown, customUrlRaw: unknown): string => {
+      const preset = normalizeSoundPreset(presetRaw);
+      const dataUrl = String(customUrlRaw || '').trim();
+      if (preset === 'custom_upload' && dataUrl) {
+        const id = createSoundLibraryEntryId();
+        soundLibrary = [...soundLibrary, { id, name: 'Uploaded sound', kind: 'custom', dataUrl }];
+        return id;
+      }
+      return preset === 'custom_upload' ? 'alarm_pulse' : preset;
+    };
+    todaySoundId = migrateLegacySound(legacy?.soundPreset, legacy?.customSoundDataUrl);
+    marketplaceSoundId = migrateLegacySound(legacy?.marketplaceSoundPreset, legacy?.marketplaceCustomSoundDataUrl);
+  }
+  const soundLibraryIds = new Set(soundLibrary.map(entry => entry.id));
+  if (!soundLibraryIds.has(todaySoundId)) todaySoundId = soundLibrary[0]?.id || 'alarm_pulse';
+  if (!soundLibraryIds.has(marketplaceSoundId)) marketplaceSoundId = soundLibrary[0]?.id || 'alarm_pulse';
+
+  let hourlyToneCustomSoundId = normalizeConfigText(raw?.hourlyToneCustomSoundId, 80).trim();
+  const hourlyToneCustomEntry = soundLibrary.find(entry => entry.id === hourlyToneCustomSoundId && entry.kind === 'custom');
+  if (!hourlyToneCustomEntry) {
+    hourlyToneCustomSoundId = soundLibrary.find(entry => entry.kind === 'custom')?.id || '';
+  }
+  let hourlyToneKind = normalizeHourlyToneKind(raw?.hourlyToneKind);
+  if (hourlyToneKind === 'custom' && !hourlyToneCustomSoundId) hourlyToneKind = 'beep';
+
   return {
     pollMs: clampInteger(raw?.pollMs, 15000, 60000, DEFAULT_DASHBOARD_CONFIG.pollMs),
     flashMs: clampInteger(raw?.flashMs, 10000, 600000, DEFAULT_DASHBOARD_CONFIG.flashMs),
     askStaleHours: clampInteger(raw?.askStaleHours, 1, 72, DEFAULT_DASHBOARD_CONFIG.askStaleHours),
     mercuryBaseUrl: normalizeMercuryBaseUrl(raw?.mercuryBaseUrl),
+    soapNamespace: normalizeConfigText(raw?.soapNamespace, 200).trim(),
     marketplaceDings: clampInteger(raw?.marketplaceDings, 1, 9, DEFAULT_DASHBOARD_CONFIG.marketplaceDings),
     todayDings: clampInteger(raw?.todayDings, 1, 9, DEFAULT_DASHBOARD_CONFIG.todayDings),
     dingGapMs: clampInteger(raw?.dingGapMs, 250, 2500, DEFAULT_DASHBOARD_CONFIG.dingGapMs),
-    soundPreset: normalizeSoundPreset(raw?.soundPreset),
-    customSoundDataUrl: String(raw?.customSoundDataUrl || '').trim(),
-    marketplaceSoundPreset: normalizeSoundPreset(raw?.marketplaceSoundPreset),
-    marketplaceCustomSoundDataUrl: String(raw?.marketplaceCustomSoundDataUrl || '').trim(),
+    soundLibrary,
+    todaySoundId,
+    marketplaceSoundId,
     customLogoDataUrl: String(raw?.customLogoDataUrl || '').trim(),
     clockFormat: normalizeClockFormat(raw?.clockFormat),
     clockFlashColons: normalizeToggle(raw?.clockFlashColons, DEFAULT_DASHBOARD_CONFIG.clockFlashColons),
     clockShowNanoseconds: normalizeToggle(raw?.clockShowNanoseconds, DEFAULT_DASHBOARD_CONFIG.clockShowNanoseconds),
+    tickerDateFormat: normalizeTickerDateFormat(raw?.tickerDateFormat),
+    tickerClockBgColor: normalizeHexColor(raw?.tickerClockBgColor, DEFAULT_DASHBOARD_CONFIG.tickerClockBgColor),
+    tickerClockTextColor: normalizeHexColor(raw?.tickerClockTextColor, DEFAULT_DASHBOARD_CONFIG.tickerClockTextColor),
+    tickerClockBorderColor: normalizeHexColor(raw?.tickerClockBorderColor, DEFAULT_DASHBOARD_CONFIG.tickerClockBorderColor),
+    hourlyToneEnabled: normalizeToggle(raw?.hourlyToneEnabled, DEFAULT_DASHBOARD_CONFIG.hourlyToneEnabled),
+    hourlyToneKind,
+    hourlyToneBeepDurationMs: clampInteger(raw?.hourlyToneBeepDurationMs, 100, 3000, DEFAULT_DASHBOARD_CONFIG.hourlyToneBeepDurationMs),
+    hourlyToneCustomSoundId,
+    hourlyToneFrequencyHz: clampInteger(raw?.hourlyToneFrequencyHz, 200, 2000, DEFAULT_DASHBOARD_CONFIG.hourlyToneFrequencyHz),
     tickerScrollDurationSec: clampInteger(raw?.tickerScrollDurationSec, 8, 80, DEFAULT_DASHBOARD_CONFIG.tickerScrollDurationSec),
     tickerWeatherZip: normalizeWeatherZip(raw?.tickerWeatherZip),
     tickerModules: normalizeTickerModuleIds(raw?.tickerModules),
@@ -1684,11 +1828,14 @@ function buildSoundConfigForAlertKind(baseRaw: DashboardUserConfig, kind: AudioA
   if (kind === 'marketplace') {
     return sanitizeDashboardConfig({
       ...base,
-      soundPreset: base.marketplaceSoundPreset,
-      customSoundDataUrl: base.marketplaceCustomSoundDataUrl,
+      todaySoundId: base.marketplaceSoundId,
     });
   }
   return base;
+}
+
+function resolveSoundLibraryEntry(soundLibrary: SoundLibraryEntry[], id: string): SoundLibraryEntry {
+  return soundLibrary.find(entry => entry.id === id) || soundLibrary[0] || DEFAULT_SOUND_LIBRARY[0];
 }
 
 function isDashboardConfigEqual(leftRaw: DashboardUserConfig, rightRaw: DashboardUserConfig): boolean {
@@ -1698,17 +1845,26 @@ function isDashboardConfigEqual(leftRaw: DashboardUserConfig, rightRaw: Dashboar
     && left.flashMs === right.flashMs
     && left.askStaleHours === right.askStaleHours
     && left.mercuryBaseUrl === right.mercuryBaseUrl
+    && left.soapNamespace === right.soapNamespace
     && left.marketplaceDings === right.marketplaceDings
     && left.todayDings === right.todayDings
     && left.dingGapMs === right.dingGapMs
-    && left.soundPreset === right.soundPreset
-    && left.customSoundDataUrl === right.customSoundDataUrl
-    && left.marketplaceSoundPreset === right.marketplaceSoundPreset
-    && left.marketplaceCustomSoundDataUrl === right.marketplaceCustomSoundDataUrl
+    && JSON.stringify(left.soundLibrary) === JSON.stringify(right.soundLibrary)
+    && left.todaySoundId === right.todaySoundId
+    && left.marketplaceSoundId === right.marketplaceSoundId
     && left.customLogoDataUrl === right.customLogoDataUrl
     && left.clockFormat === right.clockFormat
     && left.clockFlashColons === right.clockFlashColons
     && left.clockShowNanoseconds === right.clockShowNanoseconds
+    && left.tickerDateFormat === right.tickerDateFormat
+    && left.tickerClockBgColor === right.tickerClockBgColor
+    && left.tickerClockTextColor === right.tickerClockTextColor
+    && left.tickerClockBorderColor === right.tickerClockBorderColor
+    && left.hourlyToneEnabled === right.hourlyToneEnabled
+    && left.hourlyToneKind === right.hourlyToneKind
+    && left.hourlyToneBeepDurationMs === right.hourlyToneBeepDurationMs
+    && left.hourlyToneCustomSoundId === right.hourlyToneCustomSoundId
+    && left.hourlyToneFrequencyHz === right.hourlyToneFrequencyHz
     && left.tickerScrollDurationSec === right.tickerScrollDurationSec
     && left.tickerWeatherZip === right.tickerWeatherZip
     && left.tickerModules.join('|') === right.tickerModules.join('|')
@@ -3828,7 +3984,7 @@ export default function App() {
   const [isAudioAlertsEnabled, setIsAudioAlertsEnabled] = useState<boolean>(() => initialAudioAlertsEnabled());
   const [isDashboardMode, setIsDashboardMode] = useState<boolean>(() => initialDashboardMode());
   const [isConfigOpen, setIsConfigOpen] = useState(false);
-  const [configTab, setConfigTab] = useState<'server' | 'client'>('server');
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('pages');
   const [pageSettingsPageId, setPageSettingsPageId] = useState<DashboardPageId | ''>('');
   const [tickerModuleSettingsId, setTickerModuleSettingsId] = useState<TickerModuleId | ''>('');
   const [currentPageId, setCurrentPageId] = useState<DashboardPageId>('alerts_active');
@@ -3857,8 +4013,11 @@ export default function App() {
   const pendingListRef = useRef<HTMLDivElement | null>(null);
   const activeListRef = useRef<HTMLDivElement | null>(null);
   const deliveryMapFullscreenRef = useRef<HTMLDivElement | null>(null);
-  const soundUploadRef = useRef<HTMLInputElement | null>(null);
-  const marketplaceSoundUploadRef = useRef<HTMLInputElement | null>(null);
+  const tickerClockRef = useRef<HTMLDivElement | null>(null);
+  const [tickerClockWidth, setTickerClockWidth] = useState(0);
+  const libraryUploadRef = useRef<HTMLInputElement | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [previewPlayingSoundId, setPreviewPlayingSoundId] = useState<string>('');
   const logoUploadRef = useRef<HTMLInputElement | null>(null);
   const unresolvedAskLogRef = useRef<Map<string, string>>(new Map());
   const activePaneSpinnerRequestedRef = useRef(true);
@@ -3876,9 +4035,17 @@ export default function App() {
   const deliveryMapGeocodeCacheRef = useRef<Map<string, Omit<DeliveryMapPin, 'xPercent' | 'yPercent'> | null>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioAlertsEnabledRef = useRef(isAudioAlertsEnabled);
+  const hourlyToneConfigRef = useRef(config);
   const audioAlertSnapshotReadyRef = useRef(false);
   const alertedItemKeysRef = useRef<Set<string>>(new Set());
   const alertPlaybackQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const stopSoundPreview = useCallback(() => {
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    setPreviewPlayingSoundId('');
+  }, []);
   const askDebugEnabled = useMemo(() => isAskDebugEnabledFromBrowser(), []);
   const enabledPages = useMemo(() => {
     const ids = normalizeEnabledPageIds(config.enabledPageIds);
@@ -3913,7 +4080,7 @@ export default function App() {
   );
   const dashboardTitle = useMemo(() => {
     const shopName = config.shopName.trim();
-    return shopName ? `${shopName} TV Dashboard` : 'TV Dashboard';
+    return shopName ? `${shopName} - Operations Dashboard` : 'Operations Dashboard';
   }, [config.shopName]);
   const deliveryMapOrigin = useMemo(
     () => deliveryMapShopPoint(config),
@@ -3980,10 +4147,11 @@ export default function App() {
   const playAlertSound = useCallback(async (configOverride?: DashboardUserConfig) => {
     if (typeof window === 'undefined') return;
     const soundConfig = sanitizeDashboardConfig(configOverride || config);
+    const soundEntry = resolveSoundLibraryEntry(soundConfig.soundLibrary, soundConfig.todaySoundId);
 
-    if (soundConfig.soundPreset === 'custom_upload' && soundConfig.customSoundDataUrl) {
+    if (soundEntry.kind === 'custom' && soundEntry.dataUrl) {
       try {
-        const audio = new Audio(soundConfig.customSoundDataUrl);
+        const audio = new Audio(soundEntry.dataUrl);
         audio.preload = 'auto';
         audio.volume = 1;
         await audio.play();
@@ -4013,7 +4181,7 @@ export default function App() {
     if (audioContext.state !== 'running') return;
 
     const now = audioContext.currentTime;
-    const preset = soundConfig.soundPreset === 'custom_upload' ? 'alarm_pulse' : soundConfig.soundPreset;
+    const preset = soundEntry.kind === 'custom' ? 'alarm_pulse' : (soundEntry.presetTone || 'alarm_pulse');
 
     if (preset === 'classic_ding') {
       const masterGain = audioContext.createGain();
@@ -4119,6 +4287,62 @@ export default function App() {
       compressor.disconnect();
     }, 1200);
   }, [config]);
+  const playHourlyTone = useCallback(async (configOverride?: DashboardUserConfig) => {
+    if (typeof window === 'undefined') return;
+    const toneConfig = sanitizeDashboardConfig(configOverride || config);
+
+    if (toneConfig.hourlyToneKind === 'custom') {
+      const entry = toneConfig.soundLibrary.find(candidate => candidate.id === toneConfig.hourlyToneCustomSoundId);
+      if (entry?.kind === 'custom' && entry.dataUrl) {
+        try {
+          const audio = new Audio(entry.dataUrl);
+          audio.preload = 'auto';
+          audio.volume = 1;
+          await audio.play();
+        } catch {
+          // Ignore playback failures (e.g. autoplay restrictions).
+        }
+      }
+      return;
+    }
+
+    const windowWithWebkit = window as Window & { webkitAudioContext?: typeof AudioContext };
+    const AudioContextCtor = globalThis.AudioContext || windowWithWebkit.webkitAudioContext;
+    if (!AudioContextCtor) return;
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContextCtor();
+    }
+    const audioContext = audioContextRef.current;
+    if (!audioContext) return;
+    if (audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch {
+        return;
+      }
+    }
+    if (audioContext.state !== 'running') return;
+
+    const durationSec = clampInteger(toneConfig.hourlyToneBeepDurationMs, 100, 3000, DEFAULT_DASHBOARD_CONFIG.hourlyToneBeepDurationMs) / 1000;
+    const now = audioContext.currentTime;
+    const gain = audioContext.createGain();
+    gain.connect(audioContext.destination);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.6, now + 0.02);
+    gain.gain.setValueAtTime(0.6, now + Math.max(0.03, durationSec - 0.05));
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
+
+    const frequencyHz = clampInteger(toneConfig.hourlyToneFrequencyHz, 200, 2000, DEFAULT_DASHBOARD_CONFIG.hourlyToneFrequencyHz);
+    const osc = audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(frequencyHz, now);
+    osc.connect(gain);
+    osc.start(now);
+    osc.stop(now + durationSec + 0.02);
+    window.setTimeout(() => {
+      gain.disconnect();
+    }, (durationSec + 0.1) * 1000);
+  }, [config]);
   const queueAlertDings = useCallback((count: number, options?: { configOverride?: DashboardUserConfig }) => {
     const dingCount = Math.max(0, Math.min(12, Math.floor(Number(count) || 0)));
     if (dingCount <= 0) return;
@@ -4144,6 +4368,7 @@ export default function App() {
     setConfigMessage('');
     setPageSettingsPageId('');
     setTickerModuleSettingsId('');
+    setSettingsSection('pages');
     setIsConfigOpen(true);
   }, [config]);
   const cancelConfigChanges = useCallback(() => {
@@ -4153,10 +4378,10 @@ export default function App() {
     setPageSettingsPageId('');
     setTickerModuleSettingsId('');
     setIsConfigOpen(false);
-    if (soundUploadRef.current) soundUploadRef.current.value = '';
-    if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
+    stopSoundPreview();
+    if (libraryUploadRef.current) libraryUploadRef.current.value = '';
     if (logoUploadRef.current) logoUploadRef.current.value = '';
-  }, [config]);
+  }, [config, stopSoundPreview]);
   const saveConfigChanges = useCallback(async () => {
     const nextConfig = editingConfig;
     if (isDashboardConfigEqual(nextConfig, config)) return;
@@ -4173,10 +4398,10 @@ export default function App() {
     setPageSettingsPageId('');
     setTickerModuleSettingsId('');
     setIsConfigOpen(false);
-    if (soundUploadRef.current) soundUploadRef.current.value = '';
-    if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
+    stopSoundPreview();
+    if (libraryUploadRef.current) libraryUploadRef.current.value = '';
     if (logoUploadRef.current) logoUploadRef.current.value = '';
-  }, [config, editingConfig]);
+  }, [config, editingConfig, stopSoundPreview]);
   const updateConfigNumber = useCallback((key: keyof DashboardUserConfig, valueRaw: string) => {
     const value = Number(valueRaw);
     setConfigDraft(previous => {
@@ -4184,6 +4409,17 @@ export default function App() {
       return sanitizeDashboardConfig({ ...base, [key]: Number.isFinite(value) ? value : base[key] });
     });
   }, [config]);
+  // Unlike updateConfigNumber, this does not clamp on every keystroke -- typing "500" into a
+  // field with min=100 would otherwise snap to 100 after the first digit, then to 1000 after the
+  // second, making it impossible to ever type the intended value. Clamping happens on blur instead.
+  const updateConfigNumberRaw = useCallback((key: keyof DashboardUserConfig, valueRaw: string) => {
+    const value = Number(valueRaw);
+    if (!Number.isFinite(value)) return;
+    setConfigDraft(previous => ({ ...(previous || config), [key]: value }));
+  }, [config]);
+  const commitConfigNumberDraft = useCallback(() => {
+    setConfigDraft(previous => (previous ? sanitizeDashboardConfig(previous) : previous));
+  }, []);
   const updateDeliveryMapClientZoomAdjustment = useCallback((delta: number) => {
     setDeliveryMapClientZoomAdjustment(previous => {
       const current = previous ?? config.deliveryMapZoomAdjustment;
@@ -4294,10 +4530,10 @@ export default function App() {
     setPageSettingsPageId('');
     setTickerModuleSettingsId('');
     setConfigMessage('Config reset to defaults.');
-    if (soundUploadRef.current) soundUploadRef.current.value = '';
-    if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
+    stopSoundPreview();
+    if (libraryUploadRef.current) libraryUploadRef.current.value = '';
     if (logoUploadRef.current) logoUploadRef.current.value = '';
-  }, []);
+  }, [stopSoundPreview]);
   const toggleTickerModuleInDraft = useCallback((moduleId: TickerModuleId, enabled: boolean) => {
     setConfigDraft(previous => {
       const base = sanitizeDashboardConfig(previous || config);
@@ -4310,7 +4546,7 @@ export default function App() {
       });
     });
   }, [config]);
-  const handleCustomSoundUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+  const uploadSoundToLibrary = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     if (!String(file.type || '').toLowerCase().startsWith('audio/')) {
@@ -4325,69 +4561,81 @@ export default function App() {
     }
     try {
       const dataUrl = await readFileAsDataUrl(file);
-      const nextConfig = sanitizeDashboardConfig({
-        ...(configDraft || config),
-        soundPreset: 'custom_upload',
-        customSoundDataUrl: dataUrl,
+      const id = createSoundLibraryEntryId();
+      const name = file.name.replace(/\.[^/.]+$/, '').trim() || 'Uploaded sound';
+      setConfigDraft(previous => {
+        const base = sanitizeDashboardConfig(previous || config);
+        return sanitizeDashboardConfig({
+          ...base,
+          soundLibrary: [...base.soundLibrary, { id, name, kind: 'custom', dataUrl }],
+        });
       });
-      setConfigDraft(nextConfig);
-      setConfigMessage(`Custom sound loaded: ${file.name}`);
-      queueAlertDings(1, { configOverride: nextConfig });
+      setConfigMessage(`Sound added to library: ${file.name}`);
     } catch {
-      setConfigMessage('Failed to load custom sound file.');
+      setConfigMessage('Failed to load audio file.');
     }
-  }, [config, configDraft, queueAlertDings]);
-  const handleMarketplaceCustomSoundUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!String(file.type || '').toLowerCase().startsWith('audio/')) {
-      setConfigMessage('Please upload an audio file (wav, mp3, ogg, etc).');
-      event.target.value = '';
-      return;
-    }
-    if (file.size > UPLOAD_MAX_BYTES) {
-      setConfigMessage('Audio file is too large. Keep it under 4 MB.');
-      event.target.value = '';
-      return;
-    }
-    try {
-      const dataUrl = await readFileAsDataUrl(file);
-      const nextConfig = sanitizeDashboardConfig({
-        ...(configDraft || config),
-        marketplaceSoundPreset: 'custom_upload',
-        marketplaceCustomSoundDataUrl: dataUrl,
-      });
-      setConfigDraft(nextConfig);
-      setConfigMessage(`Delivery-service sound loaded: ${file.name}`);
-      queueAlertDings(1, { configOverride: buildSoundConfigForAlertKind(nextConfig, 'marketplace') });
-    } catch {
-      setConfigMessage('Failed to load delivery-service sound file.');
-    }
-  }, [config, configDraft, queueAlertDings]);
-  const clearCustomSound = useCallback(() => {
+    event.target.value = '';
+  }, [config]);
+  const renameSoundLibraryEntry = useCallback((id: string, name: string) => {
     setConfigDraft(previous => {
       const base = sanitizeDashboardConfig(previous || config);
       return sanitizeDashboardConfig({
         ...base,
-        customSoundDataUrl: '',
-        soundPreset: base.soundPreset === 'custom_upload' ? 'alarm_pulse' : base.soundPreset,
+        soundLibrary: base.soundLibrary.map(entry => (entry.id === id ? { ...entry, name } : entry)),
       });
     });
-    setConfigMessage('Custom sound cleared.');
-    if (soundUploadRef.current) soundUploadRef.current.value = '';
   }, [config]);
-  const clearMarketplaceCustomSound = useCallback(() => {
+  const moveSoundLibraryEntry = useCallback((id: string, direction: -1 | 1) => {
     setConfigDraft(previous => {
       const base = sanitizeDashboardConfig(previous || config);
+      const index = base.soundLibrary.findIndex(entry => entry.id === id);
+      const targetIndex = index + direction;
+      if (index === -1 || targetIndex < 0 || targetIndex >= base.soundLibrary.length) return base;
+      const nextLibrary = [...base.soundLibrary];
+      [nextLibrary[index], nextLibrary[targetIndex]] = [nextLibrary[targetIndex], nextLibrary[index]];
+      return sanitizeDashboardConfig({ ...base, soundLibrary: nextLibrary });
+    });
+  }, [config]);
+  const removeSoundLibraryEntry = useCallback((id: string) => {
+    if (previewPlayingSoundId === id) stopSoundPreview();
+    setConfigDraft(previous => {
+      const base = sanitizeDashboardConfig(previous || config);
+      const nextLibrary = base.soundLibrary.filter(entry => entry.id !== id);
+      if (!nextLibrary.length) return base;
+      const fallbackId = nextLibrary[0].id;
       return sanitizeDashboardConfig({
         ...base,
-        marketplaceCustomSoundDataUrl: '',
-        marketplaceSoundPreset: base.marketplaceSoundPreset === 'custom_upload' ? 'alarm_pulse' : base.marketplaceSoundPreset,
+        soundLibrary: nextLibrary,
+        todaySoundId: base.todaySoundId === id ? fallbackId : base.todaySoundId,
+        marketplaceSoundId: base.marketplaceSoundId === id ? fallbackId : base.marketplaceSoundId,
       });
     });
-    setConfigMessage('Delivery-service sound cleared.');
-    if (marketplaceSoundUploadRef.current) marketplaceSoundUploadRef.current.value = '';
-  }, [config]);
+  }, [config, previewPlayingSoundId, stopSoundPreview]);
+  const playSoundPreview = useCallback((id: string) => {
+    const library = editingConfig.soundLibrary;
+    const entry = resolveSoundLibraryEntry(library, id);
+    stopSoundPreview();
+    if (entry.kind === 'custom' && entry.dataUrl) {
+      const audio = new Audio(entry.dataUrl);
+      previewAudioRef.current = audio;
+      setPreviewPlayingSoundId(entry.id);
+      audio.onended = () => setPreviewPlayingSoundId(previous => (previous === entry.id ? '' : previous));
+      audio.play().catch(() => setPreviewPlayingSoundId(''));
+      return;
+    }
+    setPreviewPlayingSoundId(entry.id);
+    void playAlertSound(sanitizeDashboardConfig({ ...editingConfig, todaySoundId: entry.id }));
+    window.setTimeout(() => {
+      setPreviewPlayingSoundId(previous => (previous === entry.id ? '' : previous));
+    }, 900);
+  }, [editingConfig, playAlertSound, stopSoundPreview]);
+  const toggleSoundPreview = useCallback((id: string) => {
+    if (previewPlayingSoundId === id) {
+      stopSoundPreview();
+    } else {
+      playSoundPreview(id);
+    }
+  }, [previewPlayingSoundId, playSoundPreview, stopSoundPreview]);
   const handleLogoUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -6199,6 +6447,9 @@ export default function App() {
       const delayMs = Math.max(1000, nextHour.getTime() - now.getTime());
       timeoutId = window.setTimeout(() => {
         syncTodayAnchor();
+        if (hourlyToneConfigRef.current.hourlyToneEnabled) {
+          void playHourlyTone(hourlyToneConfigRef.current);
+        }
         scheduleTopOfHourCheck();
       }, delayMs);
     };
@@ -6234,6 +6485,10 @@ export default function App() {
   useEffect(() => {
     audioAlertsEnabledRef.current = isAudioAlertsEnabled;
   }, [isAudioAlertsEnabled]);
+
+  useEffect(() => {
+    hourlyToneConfigRef.current = config;
+  }, [config]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -6402,7 +6657,7 @@ export default function App() {
   }, [currentPageId]);
 
   useEffect(() => {
-    if (!isConfigOpen || configTab !== 'server') {
+    if (!isConfigOpen || settingsSection !== 'shop') {
       setShopAddressSuggestions([]);
       setShopAddressSuggestionError('');
       setIsShopAddressSuggesting(false);
@@ -6446,7 +6701,7 @@ export default function App() {
       window.clearTimeout(timer);
     };
   }, [
-    configTab,
+    settingsSection,
     editingConfig.shopAddress,
     editingConfig.shopAddressLatitude,
     editingConfig.shopAddressLongitude,
@@ -6849,17 +7104,31 @@ export default function App() {
     return String(nanos).padStart(9, '0');
   }, [config.clockShowNanoseconds, tickerNow]);
   const tickerDateLabel = useMemo(
-    () => tickerNow.toLocaleDateString([], {
-      month: '2-digit',
-      day: '2-digit',
-      year: '2-digit',
-    }),
-    [tickerNow],
+    () => formatTickerDate(tickerNow, config.tickerDateFormat),
+    [tickerNow, config.tickerDateFormat],
   );
   const tickerScrollDurationStyle = useMemo(
     () => ({ '--ticker-scroll-duration': `${config.tickerScrollDurationSec}s` } as CSSProperties),
     [config.tickerScrollDurationSec],
   );
+  const tickerClockStyle = useMemo(
+    () => ({
+      '--ticker-clock-bg': config.tickerClockBgColor,
+      '--ticker-clock-text': config.tickerClockTextColor,
+      '--ticker-clock-border': config.tickerClockBorderColor,
+    } as CSSProperties),
+    [config.tickerClockBgColor, config.tickerClockTextColor, config.tickerClockBorderColor],
+  );
+  useEffect(() => {
+    const target = tickerClockRef.current;
+    if (!target || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(entries => {
+      const width = entries[0]?.contentRect?.width;
+      if (typeof width === 'number') setTickerClockWidth(width);
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, []);
   const tickerItems = useMemo(() => buildTickerItems({
     enabledModuleIds: config.tickerModules,
     weatherZip: config.tickerWeatherZip,
@@ -6916,6 +7185,98 @@ export default function App() {
     () => tickerErrorText || buildTickerScrollText(tickerItems),
     [tickerErrorText, tickerItems],
   );
+
+  // Draft preview for the Ticker settings section: mirrors tickerItems/tickerScrollText above,
+  // but built from the unsaved editingConfig so the preview updates live before Save.
+  const settingsTickerPreviewItems = useMemo(() => {
+    if (!isConfigOpen) return [];
+    return buildTickerItems({
+      enabledModuleIds: editingConfig.tickerModules,
+      weatherZip: editingConfig.tickerWeatherZip,
+      weatherSnapshot: weatherTickerSnapshot,
+      storeHours: editingConfig.storeHours,
+      completion: {
+        dayLabel: selectedDayCountLabel,
+        completed: selectedDayOrderCompleted,
+        total: selectedDayOrderTotal,
+        percent: selectedDayCompletionPercent,
+      },
+      intake: {
+        pendingCount: pendingTickets.length,
+        newOrderCount: uncreatedTicketCount,
+        staleAskCount: staleAskTicketCount,
+        marketplaceCount: marketplacePendingTicketCount,
+      },
+      exceptionWatch: {
+        dayLabel: selectedDayCountLabel,
+        exceptionCount: selectedDayExceptionCount,
+      },
+      newOrders: {
+        windowMinutes: NEW_ORDER_PULSE_WINDOW_MINUTES,
+        count: newOrdersPulse.currentCount,
+        previousCount: newOrdersPulse.previousCount,
+      },
+    });
+  }, [
+    isConfigOpen,
+    editingConfig.tickerModules,
+    editingConfig.tickerWeatherZip,
+    editingConfig.storeHours,
+    weatherTickerSnapshot,
+    selectedDayCountLabel,
+    selectedDayOrderCompleted,
+    selectedDayOrderTotal,
+    selectedDayCompletionPercent,
+    pendingTickets.length,
+    uncreatedTicketCount,
+    staleAskTicketCount,
+    marketplacePendingTicketCount,
+    selectedDayExceptionCount,
+    newOrdersPulse,
+  ]);
+  const settingsTickerPreviewText = useMemo(
+    () => buildTickerScrollText(settingsTickerPreviewItems) || 'No ticker modules enabled',
+    [settingsTickerPreviewItems],
+  );
+  const settingsTickerPreviewHourLabel = useMemo(() => {
+    const hours24 = tickerNow.getHours();
+    if (editingConfig.clockFormat === '24h') return String(hours24).padStart(2, '0');
+    const hours12 = hours24 % 12 || 12;
+    return String(hours12).padStart(2, '0');
+  }, [editingConfig.clockFormat, tickerNow]);
+  const settingsTickerPreviewMinuteLabel = tickerMinuteLabel;
+  const settingsTickerPreviewSecondLabel = tickerSecondLabel;
+  const settingsTickerPreviewMeridiemLabel = useMemo(
+    () => (editingConfig.clockFormat === '24h' ? '' : (tickerNow.getHours() >= 12 ? 'PM' : 'AM')),
+    [editingConfig.clockFormat, tickerNow],
+  );
+  const settingsTickerPreviewSeparatorsVisible = editingConfig.clockFlashColons ? tickerNow.getSeconds() % 2 === 0 : true;
+  const settingsTickerPreviewDateLabel = useMemo(
+    () => formatTickerDate(tickerNow, editingConfig.tickerDateFormat),
+    [tickerNow, editingConfig.tickerDateFormat],
+  );
+
+  // Illustrative (non-live) sample cards for the Order Gating settings section, mirroring the
+  // three gate types below using the current draft's own values.
+  const settingsGatingPreview = useMemo(() => {
+    const currencySymbol = editingConfig.currencySymbol || '$';
+    const sampleAmount = Math.max(0, editingConfig.minOrderThreshold - 3);
+    const firstZip = editingConfig.gateZipCodes[0] || '15212';
+    const firstSenderRule = editingConfig.blockedSenderRules.find(rule => rule.enabled) || null;
+    return {
+      sampleAmountLabel: formatGateCurrencyAmount(sampleAmount, currencySymbol),
+      thresholdLabel: formatGateCurrencyAmount(editingConfig.minOrderThreshold, currencySymbol),
+      firstZip,
+      isZipWatchlist: editingConfig.zipGateMode === 'watchlist',
+      firstSenderPattern: firstSenderRule?.pattern || 'BloomNet',
+    };
+  }, [
+    editingConfig.currencySymbol,
+    editingConfig.minOrderThreshold,
+    editingConfig.gateZipCodes,
+    editingConfig.zipGateMode,
+    editingConfig.blockedSenderRules,
+  ]);
 
   const toggleDashboardMode = useCallback(async () => {
     const nextMode = !isDashboardMode;
@@ -7085,7 +7446,7 @@ export default function App() {
   }, [config.pageAutoRotateEnabled, config.pageAutoRotateIntervalSec, hasMultiplePages, goToNextPage, isUserActive]);
 
   return (
-    <div className={`app${isDashboardMode ? ' app--dashboard' : ''}${error ? ' app--with-error' : ''}`} ref={appRef}>
+    <div className={`app${isDashboardMode ? ' app--dashboard' : ''}${error ? ' app--with-error' : ''}`} style={tickerClockStyle} ref={appRef}>
       <div className="app__version-badge" title={`Dashboard version ${APP_VERSION_LABEL}`}>
         {APP_VERSION_LABEL}
       </div>
@@ -7138,43 +7499,50 @@ export default function App() {
           </div>
         </div>
         <div className="app__controls app__controls--compact">
-              <button
-                type="button"
-                aria-pressed={includeNextDay}
-                className={`app__control-btn app__control-btn--toggle${includeNextDay ? ' app__control-btn--toggle-active' : ''}`}
-                onClick={() => {
-                  setIncludeNextDay(previous => !previous);
-                }}
-              >
-                <span className="app__control-icon" aria-hidden="true">
-                  <FontAwesomeIcon icon={faCalendarDay} />
-                </span>
-                <span className="app__control-label">
-                  <span className="app__control-line">Include</span>
-                  <span className="app__control-line">next day</span>
-                </span>
-              </button>
-              <button
-                type="button"
-                aria-pressed={showCompleted}
-                className={`app__control-btn app__control-btn--toggle${showCompleted ? ' app__control-btn--toggle-active' : ''}`}
-                onClick={() => {
-                  requestActiveOrdersRefreshSpinner();
-                  setShowCompleted(previous => !previous);
-                }}
-              >
-                <span className="app__control-icon" aria-hidden="true">
-                  <FontAwesomeIcon icon={faCircleCheck} />
-                </span>
-                <span className="app__control-label">
-                  <span className="app__control-line">Show</span>
-                  <span className="app__control-line">completed</span>
-                </span>
-              </button>
+              {!isDashboardMode ? (
+                <>
+                  <button
+                    type="button"
+                    className={`app__control-btn app__control-btn--icon-only app__control-btn--toggle${config.pageAutoRotateEnabled ? ' app__control-btn--toggle-active' : ''}`}
+                    onClick={togglePageAutoRotate}
+                    title="Toggle auto page rotation"
+                    aria-pressed={config.pageAutoRotateEnabled}
+                    disabled={!hasMultiplePages}
+                  >
+                    <FontAwesomeIcon icon={config.pageAutoRotateEnabled ? faPause : faPlay} />
+                  </button>
+                  <div className="app__rotation-chip" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button
+                      type="button"
+                      className="app__rotation-arrow"
+                      title="Previous page"
+                      style={{ border: 'none', background: 'none', padding: 0, marginRight: 4, cursor: hasMultiplePages ? 'pointer' : 'default', fontSize: 16, lineHeight: 1 }}
+                      aria-label="Previous page"
+                      onClick={goToPreviousPage}
+                      disabled={!hasMultiplePages}
+                    >
+                      <FontAwesomeIcon icon={faChevronLeft} />
+                    </button>
+                    <span className="app__rotation-page-label">{`Page ${currentPageIndex + 1}/${enabledPages.length}`}</span>
+                    <button
+                      type="button"
+                      className="app__rotation-arrow"
+                      title="Next page"
+                      style={{ border: 'none', background: 'none', padding: 0, marginLeft: 4, cursor: hasMultiplePages ? 'pointer' : 'default', fontSize: 16, lineHeight: 1 }}
+                      aria-label="Next page"
+                      onClick={goToNextPage}
+                      disabled={!hasMultiplePages}
+                    >
+                      <FontAwesomeIcon icon={faChevronRight} />
+                    </button>
+                  </div>
+                </>
+              ) : null}
               <button
                 type="button"
                 aria-pressed={isAudioAlertsEnabled}
-                className={`app__control-btn app__control-btn--toggle${isAudioAlertsEnabled ? ' app__control-btn--toggle-active' : ''}`}
+                title={isAudioAlertsEnabled ? 'Audio alerts enabled' : 'Audio alerts disabled'}
+                className={`app__control-btn app__control-btn--icon-only app__control-btn--toggle${isAudioAlertsEnabled ? ' app__control-btn--toggle-active' : ''}`}
                 onClick={() => {
                   setIsAudioAlertsEnabled(previous => {
                     const nextEnabled = !previous;
@@ -7185,701 +7553,690 @@ export default function App() {
                   });
                 }}
               >
-                <span className="app__control-icon" aria-hidden="true">
-                  <FontAwesomeIcon icon={faVolumeHigh} />
-                </span>
-                <span className="app__control-label">
-                  <span className="app__control-line">Audio</span>
-                  <span className="app__control-line">alerts</span>
-                </span>
+                <FontAwesomeIcon icon={faVolumeHigh} />
               </button>
               <button
                 type="button"
                 aria-pressed={isAutoScrollEnabled}
-                className={`app__control-btn app__control-btn--toggle${isAutoScrollEnabled ? ' app__control-btn--toggle-active' : ''}`}
+                title={isAutoScrollEnabled ? 'Auto-scroll enabled' : 'Auto-scroll disabled'}
+                className={`app__control-btn app__control-btn--icon-only app__control-btn--toggle${isAutoScrollEnabled ? ' app__control-btn--toggle-active' : ''}`}
                 onClick={() => {
                   setIsAutoScrollEnabled(previous => !previous);
                 }}
               >
-                <span className="app__control-icon" aria-hidden="true">
-                  <FontAwesomeIcon icon={faScroll} />
-                </span>
-                <span className="app__control-label">
-                  <span className="app__control-line">Auto-scroll</span>
-                  <span className="app__control-line">enabled</span>
-                </span>
+                <FontAwesomeIcon icon={faScroll} />
               </button>
-              {isDashboardMode ? (
-                <button
-                  type="button"
-                  className="app__control-btn"
-                  onClick={openConfigPage}
-                  title="Open dashboard configuration"
-                >
-                  <span className="app__control-icon" aria-hidden="true">
-                    <FontAwesomeIcon icon={faGear} />
-                  </span>
-                  <span className="app__control-label">
-                    <span className="app__control-line">Config</span>
-                  </span>
-                </button>
-              ) : null}
               <button
                 type="button"
-                className="app__control-btn app__control-btn--primary"
+                className="app__control-btn app__control-btn--icon-only"
+                onClick={openConfigPage}
+                title="Open dashboard configuration"
+              >
+                <FontAwesomeIcon icon={faGear} />
+              </button>
+              <button
+                type="button"
+                title={isDashboardMode ? 'Exit fullscreen' : 'Fullscreen'}
+                className="app__control-btn app__control-btn--icon-only"
                 onClick={() => void toggleDashboardMode()}
               >
-                <span className="app__control-icon" aria-hidden="true">
-                  <FontAwesomeIcon icon={isDashboardMode ? faXmark : faUpRightAndDownLeftFromCenter} />
-                </span>
-                <span className="app__control-label">
-                  {isDashboardMode ? (
-                    <>
-                      <span className="app__control-line">Exit</span>
-                      <span className="app__control-line">Fullscreen</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="app__control-line">Fullscreen</span>
-                    </>
-                  )}
-                </span>
+                <FontAwesomeIcon icon={isDashboardMode ? faXmark : faUpRightAndDownLeftFromCenter} />
               </button>
           </div>
       </header>
 
       {isConfigOpen ? (
-        <div className="app__config-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) cancelConfigChanges(); }}>
-          <section className="app__config-page">
-            <div className="app__config-header">
-              <div className="app__config-header-left">
-                <div className="app__config-title">
-                  <FontAwesomeIcon icon={faGear} />
-                  Dashboard Configuration
+        <div className="app__settings-overlay" onClick={(e) => { if (e.target === e.currentTarget) cancelConfigChanges(); }}>
+          <section className="app__settings-page">
+            <SettingsSidebarNav activeSection={settingsSection} onSelect={setSettingsSection} />
+
+            <div className="app__settings-main">
+              <div className="app__settings-topbar">
+                <div className="app__settings-topbar-titles">
+                  <span className="app__settings-breadcrumb">
+                    Settings / {SETTINGS_SECTIONS.find(section => section.id === settingsSection)?.label}
+                  </span>
+                  <h1 className="app__settings-title">{SETTINGS_SECTIONS.find(section => section.id === settingsSection)?.label}</h1>
                 </div>
-                <div className="app__config-tabs" role="tablist" aria-label="Configuration sections">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={configTab === 'server'}
-                    className={`app__config-tab app__config-tab--server${configTab === 'server' ? ' app__config-tab--active' : ''}`}
-                    onClick={() => setConfigTab('server')}
-                  >
-                    Server Settings
+                <div className="app__settings-topbar-actions">
+                  {hasConfigChanges ? <span className="app__settings-dirty-pill">Unsaved changes</span> : null}
+                  <button type="button" className="app__settings-btn" onClick={resetConfigDefaults}>
+                    Reset defaults
+                  </button>
+                  <button type="button" className="app__settings-btn" onClick={cancelConfigChanges}>
+                    Discard
                   </button>
                   <button
                     type="button"
-                    role="tab"
-                    aria-selected={configTab === 'client'}
-                    className={`app__config-tab app__config-tab--client${configTab === 'client' ? ' app__config-tab--active' : ''}`}
-                    onClick={() => setConfigTab('client')}
+                    className="app__settings-btn app__settings-btn--primary"
+                    onClick={saveConfigChanges}
+                    disabled={!hasConfigChanges}
                   >
-                    Client Settings
+                    <FontAwesomeIcon icon={faFloppyDisk} />
+                    Save changes
                   </button>
                 </div>
               </div>
-              <button type="button" className="app__config-close-btn" onClick={cancelConfigChanges} aria-label="Close settings">
-                <FontAwesomeIcon icon={faXmark} />
-              </button>
-            </div>
 
-            <div className="app__config-body">
-              {configMessage ? <div className="app__config-message">{configMessage}</div> : null}
+              <div className="app__settings-body">
+                {configMessage ? <div className="app__config-message">{configMessage}</div> : null}
 
-              {configTab === 'server' ? (
-              <>
-            <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">Feed and Timing</h3>
-              <div className="app__config-grid">
-                <label className="app__config-row">
-                  <span>Poll interval (ms)</span>
-                  <input
-                    type="number"
-                    min={15000}
-                    max={60000}
-                    value={editingConfig.pollMs}
-                    onChange={(event) => updateConfigNumber('pollMs', event.target.value)}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Flash duration (ms)</span>
-                  <input
-                    type="number"
-                    min={10000}
-                    max={600000}
-                    value={editingConfig.flashMs}
-                    onChange={(event) => updateConfigNumber('flashMs', event.target.value)}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Message stale threshold (hours)</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={72}
-                    value={editingConfig.askStaleHours}
-                    onChange={(event) => updateConfigNumber('askStaleHours', event.target.value)}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Delivery-service alert repeats</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={9}
-                    value={editingConfig.marketplaceDings}
-                    onChange={(event) => updateConfigNumber('marketplaceDings', event.target.value)}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Regular-order alert repeats</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={9}
-                    value={editingConfig.todayDings}
-                    onChange={(event) => updateConfigNumber('todayDings', event.target.value)}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Alert repeat interval (ms)</span>
-                  <input
-                    type="number"
-                    min={250}
-                    max={2500}
-                    value={editingConfig.dingGapMs}
-                    onChange={(event) => updateConfigNumber('dingGapMs', event.target.value)}
-                  />
-                </label>
-                <label className="app__config-row">
-                  <span>Page auto-rotate interval (sec)</span>
-                  <input
-                    type="number"
-                    min={5}
-                    max={300}
-                    value={editingConfig.pageAutoRotateIntervalSec}
-                    onChange={(event) => updateConfigNumber('pageAutoRotateIntervalSec', event.target.value)}
-                  />
-                </label>
-                <label className="app__config-row app__config-toggle-row">
-                  <span>Enable page auto-rotate by default</span>
-                  <input
-                    type="checkbox"
-                    checked={editingConfig.pageAutoRotateEnabled}
-                    onChange={(event) => {
-                      setConfigDraft(previous => sanitizeDashboardConfig({
-                        ...(previous || config),
-                        pageAutoRotateEnabled: event.target.checked,
-                      }));
-                    }}
-                  />
-                </label>
-              </div>
-            </section>
-
-            <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">Pages</h3>
-              <div className="app__config-grid">
-                <div className="app__config-row app__config-row--full">
-                  <span>Enabled dashboard pages</span>
-                  <div className="app__config-module-list">
-                    {DASHBOARD_PAGE_DEFINITIONS.map((pageDefinition, pageIndex) => {
-                      const isEnabled = editingConfig.enabledPageIds.includes(pageDefinition.id);
-                      return (
-                        <div key={pageDefinition.id} className="app__config-module-card app__config-module-card--page">
-                          <label className="app__config-page-toggle">
-                            <input
-                              type="checkbox"
-                              checked={isEnabled}
-                              onChange={(event) => toggleEnabledPageInDraft(pageDefinition.id, event.target.checked)}
-                            />
-                            <span className="app__config-module-copy">
-                              <strong>{`Page ${pageIndex + 1}`}</strong>
-                              <span>{pageDescription(pageDefinition.id)}</span>
-                            </span>
-                          </label>
-                          <button
-                            type="button"
-                            className="app__config-page-settings-btn"
-                            onClick={() => {
-                              setTickerModuleSettingsId('');
-                              setPageSettingsPageId(pageDefinition.id);
-                            }}
-                            title={`${pageDescription(pageDefinition.id)} settings`}
-                            aria-label={`${pageDescription(pageDefinition.id)} settings`}
-                          >
-                            <FontAwesomeIcon icon={faGear} />
-                          </button>
-                          <span className="app__config-page-preview" aria-hidden="true">{renderPagePreviewSvg(pageDefinition.id)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">Ticker</h3>
-              <div className="app__config-subsection-grid">
-                <div className="app__config-subsection app__config-subsection--full">
-                  <h4 className="app__config-subsection-title">Scroll & Clock</h4>
+                {settingsSection === 'pages' ? (
+                <>
+                <section className="app__config-section">
+                  <h3 className="app__config-section-title">Dashboard pages</h3>
+                  <p className="app__config-section-subtitle">Choose which pages appear on the TV and whether they auto-rotate.</p>
                   <div className="app__config-grid">
                     <div className="app__config-row app__config-row--full">
-                      <span>Ticker scroll speed</span>
+                      <span>Enabled dashboard pages</span>
+                      <div className="app__config-module-list">
+                        {DASHBOARD_PAGE_DEFINITIONS.map((pageDefinition, pageIndex) => {
+                          const isEnabled = editingConfig.enabledPageIds.includes(pageDefinition.id);
+                          return (
+                            <div key={pageDefinition.id} className="app__config-module-card app__config-module-card--page">
+                              <label className="app__config-page-toggle">
+                                <input
+                                  type="checkbox"
+                                  checked={isEnabled}
+                                  onChange={(event) => toggleEnabledPageInDraft(pageDefinition.id, event.target.checked)}
+                                />
+                                <span className="app__config-module-copy">
+                                  <strong>{`Page ${pageIndex + 1}`}</strong>
+                                  <span>{pageDescription(pageDefinition.id)}</span>
+                                </span>
+                              </label>
+                              <button
+                                type="button"
+                                className="app__config-page-settings-btn"
+                                onClick={() => {
+                                  setTickerModuleSettingsId('');
+                                  setPageSettingsPageId(pageDefinition.id);
+                                }}
+                                title={`${pageDescription(pageDefinition.id)} settings`}
+                                aria-label={`${pageDescription(pageDefinition.id)} settings`}
+                              >
+                                <FontAwesomeIcon icon={faGear} />
+                              </button>
+                              <span className="app__config-page-preview" aria-hidden="true">{renderPagePreviewSvg(pageDefinition.id)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="app__config-section">
+                  <h3 className="app__config-section-title">Auto-rotation</h3>
+                  <p className="app__config-section-subtitle">Cycle through enabled pages automatically.</p>
+                  <div className="app__config-grid">
+                    <label className="app__config-row app__config-toggle-row">
+                      <span>Rotate pages automatically</span>
                       <input
-                        type="range"
-                        min={8}
-                        max={80}
-                        step={1}
-                        value={editingConfig.tickerScrollDurationSec}
-                        onChange={(event) => updateConfigNumber('tickerScrollDurationSec', event.target.value)}
+                        type="checkbox"
+                        checked={editingConfig.pageAutoRotateEnabled}
+                        onChange={(event) => {
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            pageAutoRotateEnabled: event.target.checked,
+                          }));
+                        }}
                       />
+                    </label>
+                    <label className="app__config-row">
+                      <span>Interval between pages (sec)</span>
                       <input
                         type="number"
-                        min={8}
-                        max={80}
-                        value={editingConfig.tickerScrollDurationSec}
-                        onChange={(event) => updateConfigNumber('tickerScrollDurationSec', event.target.value)}
+                        min={5}
+                        max={300}
+                        value={editingConfig.pageAutoRotateIntervalSec}
+                        onChange={(event) => updateConfigNumber('pageAutoRotateIntervalSec', event.target.value)}
                       />
-                      <div className="app__config-help">Seconds per full loop. Lower is faster, higher is slower.</div>
-                    </div>
-                    <label className="app__config-row">
-                      <span>Clock format</span>
-                      <select
-                        value={editingConfig.clockFormat}
-                        onChange={(event) => {
-                          setConfigDraft(previous => sanitizeDashboardConfig({
-                            ...(previous || config),
-                            clockFormat: normalizeClockFormat(event.target.value),
-                          }));
-                        }}
-                      >
-                        <option value="12h">12-hour</option>
-                        <option value="24h">24-hour</option>
-                      </select>
                     </label>
+                  </div>
+                </section>
+
+                <section className="app__config-section">
+                  <h3 className="app__config-section-title">View options</h3>
+                  <div className="app__config-grid">
                     <label className="app__config-row app__config-toggle-row">
-                      <span>Flash clock colons</span>
+                      <span>Include next day's orders</span>
                       <input
                         type="checkbox"
-                        checked={editingConfig.clockFlashColons}
-                        onChange={(event) => {
-                          setConfigDraft(previous => sanitizeDashboardConfig({
-                            ...(previous || config),
-                            clockFlashColons: event.target.checked,
-                          }));
-                        }}
+                        checked={includeNextDay}
+                        onChange={(event) => setIncludeNextDay(event.target.checked)}
                       />
                     </label>
                     <label className="app__config-row app__config-toggle-row">
-                      <span>Nanosecond time display</span>
+                      <span>Show completed orders</span>
                       <input
                         type="checkbox"
-                        checked={editingConfig.clockShowNanoseconds}
+                        checked={showCompleted}
                         onChange={(event) => {
-                          setConfigDraft(previous => sanitizeDashboardConfig({
-                            ...(previous || config),
-                            clockShowNanoseconds: event.target.checked,
-                          }));
+                          requestActiveOrdersRefreshSpinner();
+                          setShowCompleted(event.target.checked);
                         }}
                       />
                     </label>
                   </div>
-                </div>
+                </section>
+                </>
+                ) : null}
 
-                <div className="app__config-subsection app__config-subsection--full">
-                  <h4 className="app__config-subsection-title">Modules</h4>
-                  <div className="app__config-module-list">
-                    {TICKER_MODULE_DEFINITIONS.map(moduleDefinition => {
-                      const isEnabled = editingConfig.tickerModules.includes(moduleDefinition.id);
-                      return (
-                        <div key={moduleDefinition.id} className="app__config-module-card app__config-module-card--settings">
-                          <label className="app__config-page-toggle">
-                            <input
-                              type="checkbox"
-                              checked={isEnabled}
-                              onChange={(event) => toggleTickerModuleInDraft(moduleDefinition.id, event.target.checked)}
-                            />
-                            <span className="app__config-module-copy">
-                              <strong>{moduleDefinition.label}</strong>
-                              <span>{moduleDefinition.description}</span>
-                            </span>
-                          </label>
-                          <button
-                            type="button"
-                            className="app__config-page-settings-btn"
-                            onClick={() => {
-                              setPageSettingsPageId('');
-                              setTickerModuleSettingsId(moduleDefinition.id);
+                {settingsSection === 'ticker' ? (
+                <>
+                <TickerPreviewPanel
+                  hourLabel={settingsTickerPreviewHourLabel}
+                  minuteLabel={settingsTickerPreviewMinuteLabel}
+                  secondLabel={settingsTickerPreviewSecondLabel}
+                  meridiemLabel={settingsTickerPreviewMeridiemLabel}
+                  dateLabel={settingsTickerPreviewDateLabel}
+                  separatorsVisible={settingsTickerPreviewSeparatorsVisible}
+                  scrollText={settingsTickerPreviewText}
+                  clockBgColor={editingConfig.tickerClockBgColor}
+                  clockTextColor={editingConfig.tickerClockTextColor}
+                  clockBorderColor={editingConfig.tickerClockBorderColor}
+                />
+
+                <section className="app__config-section">
+                  <h3 className="app__config-section-title">Ticker</h3>
+                  <div className="app__config-subsection-grid">
+                    <div className="app__config-subsection app__config-subsection--full">
+                      <h4 className="app__config-subsection-title">Scroll & Clock</h4>
+                      <div className="app__config-grid">
+                        <div className="app__config-row app__config-row--full">
+                          <span>Ticker scroll speed</span>
+                          <input
+                            type="range"
+                            min={8}
+                            max={80}
+                            step={1}
+                            value={editingConfig.tickerScrollDurationSec}
+                            onChange={(event) => updateConfigNumber('tickerScrollDurationSec', event.target.value)}
+                          />
+                          <input
+                            type="number"
+                            min={8}
+                            max={80}
+                            value={editingConfig.tickerScrollDurationSec}
+                            onChange={(event) => updateConfigNumber('tickerScrollDurationSec', event.target.value)}
+                          />
+                          <div className="app__config-help">Seconds per full loop. Lower is faster, higher is slower.</div>
+                        </div>
+                        <label className="app__config-row">
+                          <span>Clock format</span>
+                          <select
+                            value={editingConfig.clockFormat}
+                            onChange={(event) => {
+                              setConfigDraft(previous => sanitizeDashboardConfig({
+                                ...(previous || config),
+                                clockFormat: normalizeClockFormat(event.target.value),
+                              }));
                             }}
-                            title={`${moduleDefinition.label} settings`}
-                            aria-label={`${moduleDefinition.label} settings`}
                           >
-                            <FontAwesomeIcon icon={faGear} />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">Shop</h3>
-              <div className="app__config-subsection-grid">
-                <div className="app__config-subsection app__config-subsection--full">
-                  <h4 className="app__config-subsection-title">Identity & Branding</h4>
-                  <label className="app__config-row">
-                    <span>Store name</span>
-                    <input
-                      type="text"
-                      maxLength={80}
-                      value={editingConfig.shopName}
-                      placeholder="Store name"
-                      onChange={(event) => {
-                        setConfigDraft(previous => sanitizeDashboardConfig({
-                          ...(previous || config),
-                          shopName: event.target.value,
-                        }));
-                      }}
-                    />
-                  </label>
-                  <div className="app__config-row">
-                    <span>Shop logo image</span>
-                    <div className="app__config-inline-actions">
-                      <input
-                        ref={logoUploadRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={(event) => {
-                          void handleLogoUpload(event);
-                        }}
-                      />
-                      <button type="button" className="app__control-btn" onClick={clearCustomLogo}>
-                        Reset logo
-                      </button>
-                    </div>
-                    <div className="app__config-branding-preview">
-                      <div className="app__config-branding-preview-label">
-                        {editingConfig.customLogoDataUrl ? 'Custom logo is active' : 'Using default logo'}
-                      </div>
-                      <div className="app__config-branding-preview-frame">
-                        <img
-                          src={editingConfig.customLogoDataUrl || '/olivers.png'}
-                          alt="Configured shop logo preview"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="app__config-subsection">
-                  <h4 className="app__config-subsection-title">Address</h4>
-                  <label className="app__config-row">
-                    <span>Store address</span>
-                    <div className="app__config-address-field">
-                      <input
-                        type="text"
-                        maxLength={180}
-                        value={editingConfig.shopAddress}
-                        placeholder="Store address"
-                        autoComplete="off"
-                        onChange={(event) => {
-                          setConfigDraft(previous => sanitizeDashboardConfig({
-                            ...(previous || config),
-                            shopAddress: event.target.value,
-                            shopAddressLatitude: null,
-                            shopAddressLongitude: null,
-                          }));
-                        }}
-                      />
-                      {shopAddressSuggestions.length ? (
-                        <div className="app__config-address-suggestions">
-                          {shopAddressSuggestions.map((suggestion, index) => (
-                            <button
-                              key={`${suggestion.id || suggestion.address}-${index}`}
-                              type="button"
-                              className="app__config-address-suggestion"
-                              onClick={() => selectShopAddressSuggestion(suggestion)}
-                            >
-                              {suggestion.label}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                    {isShopAddressSuggesting ? <div className="app__config-help">Searching addresses...</div> : null}
-                    {shopAddressSuggestionError ? <div className="app__config-help">{shopAddressSuggestionError}</div> : null}
-                    {shopMapUrl ? (
-                      <div className="app__config-map-preview">
-                        <img src={shopMapUrl} alt="Validated shop address map" />
-                      </div>
-                    ) : (
-                      <div className="app__config-map-empty">
-                        <FontAwesomeIcon icon={faMagnifyingGlass} aria-hidden="true" />
-                        <span>Choose a suggested address to preview the shop map.</span>
-                      </div>
-                    )}
-                  </label>
-                </div>
-              </div>
-            </section>
-
-            <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">Order Gating</h3>
-              <div className="app__config-subsection-grid">
-                <div className="app__config-subsection">
-                  <h4 className="app__config-subsection-title">Price Gate</h4>
-                  <div className="app__config-grid">
-                    <label className="app__config-row">
-                      <span>Currency symbol</span>
-                      <input
-                        type="text"
-                        maxLength={3}
-                        value={editingConfig.currencySymbol}
-                        placeholder="$"
-                        onChange={(event) => {
-                          const nextValue = event.target.value.slice(0, 3) || '$';
-                          setConfigDraft(previous => sanitizeDashboardConfig({
-                            ...(previous || config),
-                            currencySymbol: nextValue,
-                          }));
-                        }}
-                      />
-                    </label>
-                    <label className="app__config-row">
-                      <span>Minimum order threshold ({editingConfig.currencySymbol})</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={9999}
-                        value={editingConfig.minOrderThreshold}
-                        onChange={(event) => updateConfigNumber('minOrderThreshold', event.target.value)}
-                      />
-                    </label>
-                    <label className="app__config-row">
-                      <span>Threshold padding ({editingConfig.currencySymbol})</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={25}
-                        step={0.25}
-                        value={editingConfig.minOrderPadding}
-                        onChange={(event) => updateConfigNumber('minOrderPadding', event.target.value)}
-                      />
-                    </label>
-                  </div>
-                  <div className="app__config-help">Incoming orders below the minimum after padding are marked as reject candidates; orders inside the padding buffer are marked for review. Set the minimum to 0 to disable price gating.</div>
-                </div>
-
-                <div className="app__config-subsection">
-                  <h4 className="app__config-subsection-title">ZIP Gate</h4>
-                  <div className="app__config-grid">
-                    <label className="app__config-row">
-                      <span>ZIP gate mode</span>
-                      <select
-                        value={editingConfig.zipGateMode}
-                        onChange={(event) => {
-                          setConfigDraft(previous => sanitizeDashboardConfig({
-                            ...(previous || config),
-                            zipGateMode: normalizeZipGateMode(event.target.value),
-                          }));
-                        }}
-                      >
-                        <option value="watchlist">Flag listed ZIPs</option>
-                        <option value="allowlist">Require listed ZIPs</option>
-                      </select>
-                    </label>
-                    <label className="app__config-row app__config-row--full">
-                      <span>ZIP gate list</span>
-                      <textarea
-                        rows={3}
-                        value={editingConfig.gateZipCodes.join('\n')}
-                        placeholder="15212&#10;15237"
-                        onChange={(event) => updateGateZipCodes(event.target.value)}
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                <div className="app__config-subsection app__config-subsection--full">
-                  <h4 className="app__config-subsection-title">Sender Gate</h4>
-                  <div className="app__config-row">
-                    <span>Sender reject/watch list</span>
-                    <div className="app__config-rule-list">
-                      {editingConfig.blockedSenderRules.length ? (
-                        editingConfig.blockedSenderRules.map(rule => (
-                          <div className="app__config-rule-row" key={rule.id}>
-                            <label className="app__config-rule-enabled" title="Enable sender rule">
+                            <option value="12h">12-hour</option>
+                            <option value="24h">24-hour</option>
+                          </select>
+                        </label>
+                        <label className="app__config-row">
+                          <span>Date format</span>
+                          <select
+                            value={editingConfig.tickerDateFormat}
+                            onChange={(event) => {
+                              const nextValue = normalizeTickerDateFormat(event.target.value);
+                              setConfigDraft(previous => sanitizeDashboardConfig({
+                                ...(previous || config),
+                                tickerDateFormat: nextValue,
+                              }));
+                            }}
+                          >
+                            <option value="md">Month/Day (07/24)</option>
+                            <option value="md_yy">Month/Day/Year (07/24/26)</option>
+                            <option value="md_yyyy">Month/Day/Full Year (07/24/2026)</option>
+                          </select>
+                        </label>
+                        <div className="app__config-row app__config-row--full">
+                          <span>Clock box colors</span>
+                          <div className="app__config-inline-actions">
+                            <label className="app__config-color-field">
+                              <span>Background</span>
                               <input
-                                type="checkbox"
-                                checked={rule.enabled}
-                                onChange={(event) => updateSenderGateRule(rule.id, { enabled: event.target.checked })}
+                                type="color"
+                                value={editingConfig.tickerClockBgColor}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value;
+                                  setConfigDraft(previous => sanitizeDashboardConfig({
+                                    ...(previous || config),
+                                    tickerClockBgColor: nextValue,
+                                  }));
+                                }}
                               />
                             </label>
-                            <input
-                              type="text"
-                              value={rule.pattern}
-                              placeholder="Sender name or service"
-                              onChange={(event) => updateSenderGateRule(rule.id, { pattern: event.target.value })}
-                            />
-                            <select
-                              value={rule.matchMode}
-                              onChange={(event) => updateSenderGateRule(rule.id, { matchMode: normalizeSenderGateMatchMode(event.target.value) })}
-                            >
-                              <option value="contains">Contains</option>
-                              <option value="exact">Exact</option>
-                            </select>
-                            <input
-                              type="text"
-                              value={rule.label}
-                              placeholder="Badge label"
-                              onChange={(event) => updateSenderGateRule(rule.id, { label: event.target.value })}
-                            />
+                            <label className="app__config-color-field">
+                              <span>Text</span>
+                              <input
+                                type="color"
+                                value={editingConfig.tickerClockTextColor}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value;
+                                  setConfigDraft(previous => sanitizeDashboardConfig({
+                                    ...(previous || config),
+                                    tickerClockTextColor: nextValue,
+                                  }));
+                                }}
+                              />
+                            </label>
+                            <label className="app__config-color-field">
+                              <span>Border</span>
+                              <input
+                                type="color"
+                                value={editingConfig.tickerClockBorderColor}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value;
+                                  setConfigDraft(previous => sanitizeDashboardConfig({
+                                    ...(previous || config),
+                                    tickerClockBorderColor: nextValue,
+                                  }));
+                                }}
+                              />
+                            </label>
                             <button
                               type="button"
-                              className="app__config-icon-btn"
-                              onClick={() => removeSenderGateRule(rule.id)}
-                              title="Remove sender rule"
-                              aria-label="Remove sender rule"
+                              className="app__control-btn"
+                              onClick={() => {
+                                setConfigDraft(previous => sanitizeDashboardConfig({
+                                  ...(previous || config),
+                                  tickerClockBgColor: DEFAULT_DASHBOARD_CONFIG.tickerClockBgColor,
+                                  tickerClockTextColor: DEFAULT_DASHBOARD_CONFIG.tickerClockTextColor,
+                                  tickerClockBorderColor: DEFAULT_DASHBOARD_CONFIG.tickerClockBorderColor,
+                                }));
+                              }}
                             >
-                              <FontAwesomeIcon icon={faTrash} />
+                              Reset colors
                             </button>
                           </div>
-                        ))
-                      ) : (
-                        <div className="app__config-help">No sender rules configured.</div>
-                      )}
+                          <div className="app__config-help">Default is a dark panel with amber digits and a matching amber border &mdash; high-contrast and easy to read from across the room.</div>
+                        </div>
+                        <label className="app__config-row app__config-toggle-row">
+                          <span>Flash clock colons</span>
+                          <input
+                            type="checkbox"
+                            checked={editingConfig.clockFlashColons}
+                            onChange={(event) => {
+                              setConfigDraft(previous => sanitizeDashboardConfig({
+                                ...(previous || config),
+                                clockFlashColons: event.target.checked,
+                              }));
+                            }}
+                          />
+                        </label>
+                        <label className="app__config-row app__config-toggle-row">
+                          <span>Nanosecond time display</span>
+                          <input
+                            type="checkbox"
+                            checked={editingConfig.clockShowNanoseconds}
+                            onChange={(event) => {
+                              setConfigDraft(previous => sanitizeDashboardConfig({
+                                ...(previous || config),
+                                clockShowNanoseconds: event.target.checked,
+                              }));
+                            }}
+                          />
+                        </label>
+                      </div>
                     </div>
-                    <div className="app__config-inline-actions">
-                      <button type="button" className="app__control-btn" onClick={addSenderGateRule}>
-                        <FontAwesomeIcon icon={faPlus} /> Add sender rule
-                      </button>
-                    </div>
-                    <div className="app__config-help">Sender rules inspect sending florist name, shop code, member code, Mercury number, and wire service. Matches are visual reject candidates only.</div>
-                  </div>
-                </div>
-              </div>
-            </section>
 
-            <section className="app__config-section app__config-section--server">
-              <h3 className="app__config-section-title">API / Mercury (Advanced)</h3>
-              <div className="app__config-grid">
-                <label className="app__config-row">
-                  <span>Dashboard API route</span>
-                  <input type="text" value="same-origin (/api)" readOnly />
-                </label>
-                <label className="app__config-row app__config-row--full">
-                  <span>Mercury base URL (optional)</span>
-                  <input
-                    type="text"
-                    value={editingConfig.mercuryBaseUrl}
-                    placeholder="http://127.0.0.1:17344"
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-                      setConfigDraft(previous => sanitizeDashboardConfig({
-                        ...(previous || config),
-                        mercuryBaseUrl: nextValue,
-                      }));
-                    }}
+                    <div className="app__config-subsection app__config-subsection--full">
+                      <h4 className="app__config-subsection-title">Modules</h4>
+                      <div className="app__config-module-list">
+                        {TICKER_MODULE_DEFINITIONS.map(moduleDefinition => {
+                          const isEnabled = editingConfig.tickerModules.includes(moduleDefinition.id);
+                          return (
+                            <div key={moduleDefinition.id} className="app__config-module-card app__config-module-card--settings">
+                              <label className="app__config-page-toggle">
+                                <input
+                                  type="checkbox"
+                                  checked={isEnabled}
+                                  onChange={(event) => toggleTickerModuleInDraft(moduleDefinition.id, event.target.checked)}
+                                />
+                                <span className="app__config-module-copy">
+                                  <strong>{moduleDefinition.label}</strong>
+                                  <span>{moduleDefinition.description}</span>
+                                </span>
+                              </label>
+                              <button
+                                type="button"
+                                className="app__config-page-settings-btn"
+                                onClick={() => {
+                                  setPageSettingsPageId('');
+                                  setTickerModuleSettingsId(moduleDefinition.id);
+                                }}
+                                title={`${moduleDefinition.label} settings`}
+                                aria-label={`${moduleDefinition.label} settings`}
+                              >
+                                <FontAwesomeIcon icon={faGear} />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+                </>
+                ) : null}
+
+                {settingsSection === 'shop' ? (
+                <section className="app__config-section">
+                  <h3 className="app__config-section-title">Shop</h3>
+                  <div className="app__config-subsection-grid">
+                    <div className="app__config-subsection app__config-subsection--full">
+                      <h4 className="app__config-subsection-title">Identity & Branding</h4>
+                      <label className="app__config-row">
+                        <span>Store name</span>
+                        <input
+                          type="text"
+                          maxLength={80}
+                          value={editingConfig.shopName}
+                          placeholder="Store name"
+                          onChange={(event) => {
+                            setConfigDraft(previous => sanitizeDashboardConfig({
+                              ...(previous || config),
+                              shopName: event.target.value,
+                            }));
+                          }}
+                        />
+                      </label>
+                      <div className="app__config-row">
+                        <span>Shop logo image</span>
+                        <div className="app__config-inline-actions">
+                          <input
+                            ref={logoUploadRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={(event) => {
+                              void handleLogoUpload(event);
+                            }}
+                          />
+                          <button type="button" className="app__control-btn" onClick={clearCustomLogo}>
+                            Reset logo
+                          </button>
+                        </div>
+                        <div className="app__config-branding-preview">
+                          <div className="app__config-branding-preview-label">
+                            {editingConfig.customLogoDataUrl ? 'Custom logo is active' : 'Using default logo'}
+                          </div>
+                          <div className="app__config-branding-preview-frame">
+                            <img
+                              src={editingConfig.customLogoDataUrl || '/olivers.png'}
+                              alt="Configured shop logo preview"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="app__config-subsection">
+                      <h4 className="app__config-subsection-title">Address</h4>
+                      <label className="app__config-row">
+                        <span>Store address</span>
+                        <div className="app__config-address-field">
+                          <input
+                            type="text"
+                            maxLength={180}
+                            value={editingConfig.shopAddress}
+                            placeholder="Store address"
+                            autoComplete="off"
+                            onChange={(event) => {
+                              setConfigDraft(previous => sanitizeDashboardConfig({
+                                ...(previous || config),
+                                shopAddress: event.target.value,
+                                shopAddressLatitude: null,
+                                shopAddressLongitude: null,
+                              }));
+                            }}
+                          />
+                          {shopAddressSuggestions.length ? (
+                            <div className="app__config-address-suggestions">
+                              {shopAddressSuggestions.map((suggestion, index) => (
+                                <button
+                                  key={`${suggestion.id || suggestion.address}-${index}`}
+                                  type="button"
+                                  className="app__config-address-suggestion"
+                                  onClick={() => selectShopAddressSuggestion(suggestion)}
+                                >
+                                  {suggestion.label}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                        {isShopAddressSuggesting ? <div className="app__config-help">Searching addresses...</div> : null}
+                        {shopAddressSuggestionError ? <div className="app__config-help">{shopAddressSuggestionError}</div> : null}
+                        {shopMapUrl ? (
+                          <div className="app__config-map-preview">
+                            <img src={shopMapUrl} alt="Validated shop address map" />
+                          </div>
+                        ) : (
+                          <div className="app__config-map-empty">
+                            <FontAwesomeIcon icon={faMagnifyingGlass} aria-hidden="true" />
+                            <span>Choose a suggested address to preview the shop map.</span>
+                          </div>
+                        )}
+                      </label>
+                    </div>
+                  </div>
+                </section>
+                ) : null}
+
+                {settingsSection === 'gating' ? (
+                <>
+                <GatingPreviewPanel preview={settingsGatingPreview} />
+
+                <section className="app__config-section">
+                  <h3 className="app__config-section-title">Order Gating</h3>
+                  <div className="app__config-subsection-grid">
+                    <div className="app__config-subsection">
+                      <h4 className="app__config-subsection-title">Price Gate</h4>
+                      <div className="app__config-grid">
+                        <label className="app__config-row">
+                          <span>Currency symbol</span>
+                          <input
+                            type="text"
+                            maxLength={3}
+                            value={editingConfig.currencySymbol}
+                            placeholder="$"
+                            onChange={(event) => {
+                              const nextValue = event.target.value.slice(0, 3) || '$';
+                              setConfigDraft(previous => sanitizeDashboardConfig({
+                                ...(previous || config),
+                                currencySymbol: nextValue,
+                              }));
+                            }}
+                          />
+                        </label>
+                        <label className="app__config-row">
+                          <span>Minimum order threshold ({editingConfig.currencySymbol})</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={9999}
+                            value={editingConfig.minOrderThreshold}
+                            onChange={(event) => updateConfigNumber('minOrderThreshold', event.target.value)}
+                          />
+                        </label>
+                        <label className="app__config-row">
+                          <span>Threshold padding ({editingConfig.currencySymbol})</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={25}
+                            step={0.25}
+                            value={editingConfig.minOrderPadding}
+                            onChange={(event) => updateConfigNumber('minOrderPadding', event.target.value)}
+                          />
+                        </label>
+                      </div>
+                      <div className="app__config-help">Incoming orders below the minimum after padding are marked as reject candidates; orders inside the padding buffer are marked for review. Set the minimum to 0 to disable price gating.</div>
+                    </div>
+
+                    <div className="app__config-subsection">
+                      <h4 className="app__config-subsection-title">ZIP Gate</h4>
+                      <div className="app__config-grid">
+                        <label className="app__config-row">
+                          <span>ZIP gate mode</span>
+                          <select
+                            value={editingConfig.zipGateMode}
+                            onChange={(event) => {
+                              setConfigDraft(previous => sanitizeDashboardConfig({
+                                ...(previous || config),
+                                zipGateMode: normalizeZipGateMode(event.target.value),
+                              }));
+                            }}
+                          >
+                            <option value="watchlist">Flag listed ZIPs</option>
+                            <option value="allowlist">Require listed ZIPs</option>
+                          </select>
+                        </label>
+                        <label className="app__config-row app__config-row--full">
+                          <span>ZIP gate list</span>
+                          <textarea
+                            rows={3}
+                            value={editingConfig.gateZipCodes.join('\n')}
+                            placeholder="15212&#10;15237"
+                            onChange={(event) => updateGateZipCodes(event.target.value)}
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="app__config-subsection app__config-subsection--full">
+                      <h4 className="app__config-subsection-title">Sender Gate</h4>
+                      <div className="app__config-row">
+                        <span>Sender reject/watch list</span>
+                        <div className="app__config-rule-list">
+                          {editingConfig.blockedSenderRules.length ? (
+                            editingConfig.blockedSenderRules.map(rule => (
+                              <div className="app__config-rule-row" key={rule.id}>
+                                <label className="app__config-rule-enabled" title="Enable sender rule">
+                                  <input
+                                    type="checkbox"
+                                    checked={rule.enabled}
+                                    onChange={(event) => updateSenderGateRule(rule.id, { enabled: event.target.checked })}
+                                  />
+                                </label>
+                                <input
+                                  type="text"
+                                  value={rule.pattern}
+                                  placeholder="Sender name or service"
+                                  onChange={(event) => updateSenderGateRule(rule.id, { pattern: event.target.value })}
+                                />
+                                <select
+                                  value={rule.matchMode}
+                                  onChange={(event) => updateSenderGateRule(rule.id, { matchMode: normalizeSenderGateMatchMode(event.target.value) })}
+                                >
+                                  <option value="contains">Contains</option>
+                                  <option value="exact">Exact</option>
+                                </select>
+                                <input
+                                  type="text"
+                                  value={rule.label}
+                                  placeholder="Badge label"
+                                  onChange={(event) => updateSenderGateRule(rule.id, { label: event.target.value })}
+                                />
+                                <button
+                                  type="button"
+                                  className="app__config-icon-btn"
+                                  onClick={() => removeSenderGateRule(rule.id)}
+                                  title="Remove sender rule"
+                                  aria-label="Remove sender rule"
+                                >
+                                  <FontAwesomeIcon icon={faTrash} />
+                                </button>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="app__config-help">No sender rules configured.</div>
+                          )}
+                        </div>
+                        <div className="app__config-inline-actions">
+                          <button type="button" className="app__control-btn" onClick={addSenderGateRule}>
+                            <FontAwesomeIcon icon={faPlus} /> Add sender rule
+                          </button>
+                        </div>
+                        <div className="app__config-help">Sender rules inspect sending florist name, shop code, member code, Mercury number, and wire service. Matches are visual reject candidates only.</div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+                </>
+                ) : null}
+
+                {settingsSection === 'audio' ? (
+                <>
+                <input
+                  ref={libraryUploadRef}
+                  type="file"
+                  accept=".wav,.mp3,.ogg,.m4a,audio/*"
+                  style={{ display: 'none' }}
+                  onChange={(event) => {
+                    void uploadSoundToLibrary(event);
+                  }}
+                />
+                <section className="app__config-section">
+                  <div className="app__config-section-header-row">
+                    <div>
+                      <h3 className="app__config-section-title">Sound library</h3>
+                      <p className="app__config-section-subtitle">Preview, upload and reorder the sounds available to each alert below.</p>
+                    </div>
+                    <button type="button" className="app__control-btn" onClick={() => libraryUploadRef.current?.click()}>
+                      <FontAwesomeIcon icon={faPlus} /> Upload sound
+                    </button>
+                  </div>
+                  <SoundLibraryTable
+                    entries={editingConfig.soundLibrary}
+                    playingSoundId={previewPlayingSoundId}
+                    onRename={renameSoundLibraryEntry}
+                    onMove={moveSoundLibraryEntry}
+                    onRemove={removeSoundLibraryEntry}
+                    onTogglePreview={toggleSoundPreview}
                   />
-                </label>
-              </div>
-            </section>
+                  <div className="app__config-help">Accepted formats: .wav, .mp3, .ogg, .m4a. Max 4 MB per upload.</div>
+                </section>
 
-              </>
-              ) : null}
-
-              {configTab === 'client' ? (
-              <>
-          <section className="app__config-section">
-            <h3 className="app__config-section-title">Audio Alert Settings</h3>
-            <div className="app__config-grid">
-              <div className="app__config-audio-group app__config-row--full">
-                <h4 className="app__config-audio-group-title">Regular Orders</h4>
-                <div className="app__config-audio-group-grid">
-                  <label className="app__config-row">
-                    <span>Sound preset</span>
-                    <select
-                      value={editingConfig.soundPreset}
-                      onChange={(event) => {
-                        const nextPreset = normalizeSoundPreset(event.target.value);
-                        setConfigDraft(previous => sanitizeDashboardConfig({
-                          ...(previous || config),
-                          soundPreset: nextPreset,
-                        }));
-                      }}
-                    >
-                      <option value="alarm_pulse">Alarm Pulse (default)</option>
-                      <option value="classic_ding">Classic Ding</option>
-                      <option value="bright_beep">Bright Beep</option>
-                      <option value="custom_upload">Custom Uploaded Sound</option>
-                    </select>
-                  </label>
-                  <div className="app__config-row">
-                    <span>Audio file</span>
-                    <div className="app__config-inline-actions">
-                      <input
-                        ref={soundUploadRef}
-                        type="file"
-                        accept=".wav,.mp3,.ogg,.m4a,audio/*"
+                <section className="app__config-section">
+                  <h3 className="app__config-section-title">Delivery-service alert</h3>
+                  <p className="app__config-section-subtitle">Plays when a Grubhub / DoorDash / Uber Eats order arrives.</p>
+                  <div className="app__config-grid">
+                    <label className="app__config-row">
+                      <span>Sound</span>
+                      <select
+                        value={editingConfig.marketplaceSoundId}
                         onChange={(event) => {
-                          void handleCustomSoundUpload(event);
+                          const nextValue = event.target.value;
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            marketplaceSoundId: nextValue,
+                          }));
                         }}
-                      />
-                      <button type="button" className="app__control-btn" onClick={clearCustomSound}>
-                        Clear sound
-                      </button>
-                      <button
-                        type="button"
-                        className="app__control-btn"
-                        onClick={() => queueAlertDings(1, { configOverride: editingConfig })}
                       >
-                        <FontAwesomeIcon icon={faPlay} />
-                        Test
-                      </button>
-                    </div>
-                    <div className="app__config-help">Accepted formats: .wav, .mp3, .ogg, .m4a. Max 4 MB. Short clips are recommended.</div>
-                  </div>
-                </div>
-              </div>
-              <div className="app__config-audio-group app__config-row--full">
-                <h4 className="app__config-audio-group-title">Delivery Service</h4>
-                <div className="app__config-audio-group-grid">
-                  <label className="app__config-row">
-                    <span>Sound preset</span>
-                    <select
-                      value={editingConfig.marketplaceSoundPreset}
-                      onChange={(event) => {
-                        const nextPreset = normalizeSoundPreset(event.target.value);
-                        setConfigDraft(previous => sanitizeDashboardConfig({
-                          ...(previous || config),
-                          marketplaceSoundPreset: nextPreset,
-                        }));
-                      }}
-                    >
-                      <option value="alarm_pulse">Alarm Pulse (default)</option>
-                      <option value="classic_ding">Classic Ding</option>
-                      <option value="bright_beep">Bright Beep</option>
-                      <option value="custom_upload">Custom Uploaded Sound</option>
-                    </select>
-                  </label>
-                  <div className="app__config-row">
-                    <span>Audio file</span>
-                    <div className="app__config-inline-actions">
+                        {editingConfig.soundLibrary.map(entry => (
+                          <option key={entry.id} value={entry.id}>{entry.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="app__config-row">
+                      <span>Repeat count</span>
                       <input
-                        ref={marketplaceSoundUploadRef}
-                        type="file"
-                        accept=".wav,.mp3,.ogg,.m4a,audio/*"
-                        onChange={(event) => {
-                          void handleMarketplaceCustomSoundUpload(event);
-                        }}
+                        type="number"
+                        min={1}
+                        max={9}
+                        value={editingConfig.marketplaceDings}
+                        onChange={(event) => updateConfigNumber('marketplaceDings', event.target.value)}
                       />
-                      <button type="button" className="app__control-btn" onClick={clearMarketplaceCustomSound}>
-                        Clear sound
-                      </button>
+                    </label>
+                    <div className="app__config-row">
+                      <span>Test</span>
                       <button
                         type="button"
                         className="app__control-btn"
@@ -7887,163 +8244,343 @@ export default function App() {
                           configOverride: buildSoundConfigForAlertKind(editingConfig, 'marketplace'),
                         })}
                       >
-                        <FontAwesomeIcon icon={faPlay} />
-                        Test
+                        <FontAwesomeIcon icon={faPlay} /> Test
                       </button>
                     </div>
-                    <div className="app__config-help">Accepted formats: .wav, .mp3, .ogg, .m4a. Max 4 MB. Short clips are recommended.</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-              </>
-              ) : null}
-            </div>
-
-            {pageSettingsPageId ? (
-              <div
-                className="app__page-settings-overlay"
-                onClick={(event) => {
-                  if (event.target === event.currentTarget) setPageSettingsPageId('');
-                }}
-              >
-                <section className="app__page-settings-dialog" aria-label={`${pageDescription(pageSettingsPageId)} settings`}>
-                  <div className="app__page-settings-header">
-                    <div className="app__page-settings-title">
-                      <FontAwesomeIcon icon={faGear} />
-                      {pageDescription(pageSettingsPageId)} Settings
-                    </div>
-                    <button
-                      type="button"
-                      className="app__config-close-btn"
-                      onClick={() => setPageSettingsPageId('')}
-                      aria-label="Close page settings"
-                    >
-                      <FontAwesomeIcon icon={faXmark} />
-                    </button>
-                  </div>
-                  <div className="app__page-settings-body">
-                    {pageSettingsPageId === 'delivery_map' ? (
-                      <section className="app__config-section">
-                        <h3 className="app__config-section-title">Map View</h3>
-                        <div className="app__config-grid">
-                          <label className="app__config-row">
-                            <span>Base zoom when one stop is mapped</span>
-                            <input
-                              type="number"
-                              min={8}
-                              max={18}
-                              value={editingConfig.deliveryMapInitialZoom}
-                              onChange={(event) => updateConfigNumber('deliveryMapInitialZoom', event.target.value)}
-                            />
-                          </label>
-                          <label className="app__config-row">
-                            <span>Minimum auto zoom</span>
-                            <input
-                              type="number"
-                              min={8}
-                              max={18}
-                              value={editingConfig.deliveryMapMinZoom}
-                              onChange={(event) => updateConfigNumber('deliveryMapMinZoom', event.target.value)}
-                            />
-                          </label>
-                          <label className="app__config-row">
-                            <span>Maximum auto zoom</span>
-                            <input
-                              type="number"
-                              min={8}
-                              max={18}
-                              value={editingConfig.deliveryMapMaxZoom}
-                              onChange={(event) => updateConfigNumber('deliveryMapMaxZoom', event.target.value)}
-                            />
-                          </label>
-                          <label className="app__config-row">
-                            <span>Auto zoom adjustment</span>
-                            <input
-                              type="number"
-                              min={-4}
-                              max={4}
-                              value={editingConfig.deliveryMapZoomAdjustment}
-                              onChange={(event) => updateConfigNumber('deliveryMapZoomAdjustment', event.target.value)}
-                            />
-                          </label>
-                          <label className="app__config-row">
-                            <span>Map edge padding (px)</span>
-                            <input
-                              type="number"
-                              min={40}
-                              max={260}
-                              value={editingConfig.deliveryMapPadding}
-                              onChange={(event) => updateConfigNumber('deliveryMapPadding', event.target.value)}
-                            />
-                          </label>
-                        </div>
-                        <div className="app__config-help">
-                          The map fits remaining delivery pins plus the configured shop address, so it can zoom in as stops are completed while still keeping the Pittsburgh shop area in view.
-                        </div>
-                      </section>
-                    ) : pageSettingsPageId === 'weather' ? (
-                      <section className="app__config-section">
-                        <h3 className="app__config-section-title">Weather Location</h3>
-                        <div className="app__config-grid">
-                          <label className="app__config-row">
-                            <span>Weather ZIP code</span>
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              maxLength={5}
-                              value={configWeatherZipDraft}
-                              onChange={(event) => {
-                                setConfigWeatherZipDraft(event.target.value.replace(/\D/g, '').slice(0, 5));
-                              }}
-                            />
-                          </label>
-                        </div>
-                      </section>
-                    ) : (
-                      <div className="app__page-settings-empty">
-                        No page-specific settings for this page yet.
-                      </div>
-                    )}
-                  </div>
-                  <div className="app__page-settings-actions">
-                    <button type="button" className="app__control-btn" onClick={() => setPageSettingsPageId('')}>
-                      Done
-                    </button>
                   </div>
                 </section>
-              </div>
-            ) : null}
 
-            {tickerModuleSettingsId ? (() => {
-              const tickerModuleDefinition = TICKER_MODULE_DEFINITIONS.find(definition => definition.id === tickerModuleSettingsId);
-              const tickerModuleLabel = tickerModuleDefinition?.label || 'Ticker Module';
-              return (
+                <section className="app__config-section">
+                  <h3 className="app__config-section-title">Today's-delivery alert</h3>
+                  <p className="app__config-section-subtitle">Plays for standard same-day orders.</p>
+                  <div className="app__config-grid">
+                    <label className="app__config-row">
+                      <span>Sound</span>
+                      <select
+                        value={editingConfig.todaySoundId}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            todaySoundId: nextValue,
+                          }));
+                        }}
+                      >
+                        {editingConfig.soundLibrary.map(entry => (
+                          <option key={entry.id} value={entry.id}>{entry.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="app__config-row">
+                      <span>Repeat count</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={9}
+                        value={editingConfig.todayDings}
+                        onChange={(event) => updateConfigNumber('todayDings', event.target.value)}
+                      />
+                    </label>
+                    <label className="app__config-row">
+                      <span>Repeat interval (ms)</span>
+                      <input
+                        type="number"
+                        min={250}
+                        max={2500}
+                        value={editingConfig.dingGapMs}
+                        onChange={(event) => updateConfigNumber('dingGapMs', event.target.value)}
+                      />
+                    </label>
+                    <div className="app__config-row">
+                      <span>Test</span>
+                      <button
+                        type="button"
+                        className="app__control-btn"
+                        onClick={() => queueAlertDings(1, { configOverride: editingConfig })}
+                      >
+                        <FontAwesomeIcon icon={faPlay} /> Test
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="app__config-section">
+                  <h3 className="app__config-section-title">Hourly tone</h3>
+                  <p className="app__config-section-subtitle">Plays a chime on the hour, every hour.</p>
+                  <div className="app__config-grid">
+                    <label className="app__config-row app__config-toggle-row">
+                      <span>Enable hourly tone</span>
+                      <input
+                        type="checkbox"
+                        checked={editingConfig.hourlyToneEnabled}
+                        onChange={(event) => {
+                          const nextValue = event.target.checked;
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            hourlyToneEnabled: nextValue,
+                          }));
+                        }}
+                      />
+                    </label>
+                    <label className="app__config-row">
+                      <span>Tone type</span>
+                      <select
+                        value={editingConfig.hourlyToneKind}
+                        onChange={(event) => {
+                          const nextValue = normalizeHourlyToneKind(event.target.value);
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            hourlyToneKind: nextValue,
+                          }));
+                        }}
+                      >
+                        <option value="beep">Beep</option>
+                        <option value="custom">Custom sound</option>
+                      </select>
+                    </label>
+                    {editingConfig.hourlyToneKind === 'beep' ? (
+                      <label className="app__config-row">
+                        <span>Beep duration (ms)</span>
+                        <input
+                          type="number"
+                          min={100}
+                          max={3000}
+                          step={50}
+                          value={(configDraft || config).hourlyToneBeepDurationMs}
+                          onChange={(event) => updateConfigNumberRaw('hourlyToneBeepDurationMs', event.target.value)}
+                          onBlur={commitConfigNumberDraft}
+                        />
+                      </label>
+                    ) : null}
+                    {editingConfig.hourlyToneKind === 'beep' ? (
+                      <label className="app__config-row">
+                        <span>Pitch (Hz)</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <input
+                            type="range"
+                            min={200}
+                            max={2000}
+                            step={10}
+                            value={editingConfig.hourlyToneFrequencyHz}
+                            onChange={(event) => updateConfigNumber('hourlyToneFrequencyHz', event.target.value)}
+                          />
+                          <input
+                            type="number"
+                            min={200}
+                            max={2000}
+                            value={(configDraft || config).hourlyToneFrequencyHz}
+                            onChange={(event) => updateConfigNumberRaw('hourlyToneFrequencyHz', event.target.value)}
+                            onBlur={commitConfigNumberDraft}
+                          />
+                        </div>
+                      </label>
+                    ) : (
+                      <label className="app__config-row">
+                        <span>Custom sound</span>
+                        <select
+                          value={editingConfig.hourlyToneCustomSoundId}
+                          onChange={(event) => {
+                            const nextValue = event.target.value;
+                            setConfigDraft(previous => sanitizeDashboardConfig({
+                              ...(previous || config),
+                              hourlyToneCustomSoundId: nextValue,
+                            }));
+                          }}
+                        >
+                          {editingConfig.soundLibrary.filter(entry => entry.kind === 'custom').length === 0 ? (
+                            <option value="">Upload a custom sound above first</option>
+                          ) : (
+                            editingConfig.soundLibrary.filter(entry => entry.kind === 'custom').map(entry => (
+                              <option key={entry.id} value={entry.id}>{entry.name}</option>
+                            ))
+                          )}
+                        </select>
+                      </label>
+                    )}
+                    <div className="app__config-row">
+                      <span>Test</span>
+                      <button
+                        type="button"
+                        className="app__control-btn"
+                        onClick={() => void playHourlyTone(editingConfig)}
+                      >
+                        <FontAwesomeIcon icon={faPlay} /> Test
+                      </button>
+                    </div>
+                  </div>
+                </section>
+                </>
+                ) : null}
+
+                {settingsSection === 'feed' ? (
+                <section className="app__config-section">
+                  <h3 className="app__config-section-title">Feed and Timing</h3>
+                  <p className="app__config-section-subtitle">How often the dashboard polls Mercury and how long new-order flashing lasts.</p>
+                  <div className="app__config-grid">
+                    <label className="app__config-row">
+                      <span>Poll interval (ms)</span>
+                      <input
+                        type="number"
+                        min={15000}
+                        max={60000}
+                        value={editingConfig.pollMs}
+                        onChange={(event) => updateConfigNumber('pollMs', event.target.value)}
+                      />
+                    </label>
+                    <label className="app__config-row">
+                      <span>Flash duration (ms)</span>
+                      <input
+                        type="number"
+                        min={10000}
+                        max={600000}
+                        value={editingConfig.flashMs}
+                        onChange={(event) => updateConfigNumber('flashMs', event.target.value)}
+                      />
+                    </label>
+                    <label className="app__config-row">
+                      <span>Message stale threshold (hours)</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={72}
+                        value={editingConfig.askStaleHours}
+                        onChange={(event) => updateConfigNumber('askStaleHours', event.target.value)}
+                      />
+                    </label>
+                  </div>
+                </section>
+                ) : null}
+
+                {settingsSection === 'api' ? (
+                <section className="app__config-section">
+                  <div className="app__config-section-header-row">
+                    <h3 className="app__config-section-title">API / Mercury</h3>
+                    <span className="app__config-advanced-badge">Advanced</span>
+                  </div>
+                  <p className="app__config-section-subtitle">Only change these if you know what you're doing &mdash; incorrect values will break the live feed.</p>
+                  <div className="app__config-grid">
+                    <label className="app__config-row">
+                      <span>Dashboard API route</span>
+                      <input type="text" value="same-origin (/api)" readOnly />
+                    </label>
+                    <label className="app__config-row app__config-row--full">
+                      <span>Mercury base URL (optional)</span>
+                      <input
+                        type="text"
+                        value={editingConfig.mercuryBaseUrl}
+                        placeholder="http://127.0.0.1:17344"
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            mercuryBaseUrl: nextValue,
+                          }));
+                        }}
+                      />
+                    </label>
+                    <label className="app__config-row app__config-row--full">
+                      <span>SOAP namespace override (optional)</span>
+                      <input
+                        type="text"
+                        value={editingConfig.soapNamespace}
+                        placeholder="http://localhost/webservices/"
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          setConfigDraft(previous => sanitizeDashboardConfig({
+                            ...(previous || config),
+                            soapNamespace: nextValue,
+                          }));
+                        }}
+                      />
+                    </label>
+                  </div>
+                </section>
+                ) : null}
+              </div>
+
+              {pageSettingsPageId ? (
                 <div
                   className="app__page-settings-overlay"
                   onClick={(event) => {
-                    if (event.target === event.currentTarget) setTickerModuleSettingsId('');
+                    if (event.target === event.currentTarget) setPageSettingsPageId('');
                   }}
                 >
-                  <section className="app__page-settings-dialog" aria-label={`${tickerModuleLabel} ticker settings`}>
+                  <section className="app__page-settings-dialog" aria-label={`${pageDescription(pageSettingsPageId)} settings`}>
                     <div className="app__page-settings-header">
                       <div className="app__page-settings-title">
                         <FontAwesomeIcon icon={faGear} />
-                        {tickerModuleLabel} Ticker Settings
+                        {pageDescription(pageSettingsPageId)} Settings
                       </div>
                       <button
                         type="button"
                         className="app__config-close-btn"
-                        onClick={() => setTickerModuleSettingsId('')}
-                        aria-label="Close ticker module settings"
+                        onClick={() => setPageSettingsPageId('')}
+                        aria-label="Close page settings"
                       >
                         <FontAwesomeIcon icon={faXmark} />
                       </button>
                     </div>
                     <div className="app__page-settings-body">
-                      {tickerModuleSettingsId === 'weather' ? (
+                      {pageSettingsPageId === 'delivery_map' ? (
+                        <section className="app__config-section">
+                          <h3 className="app__config-section-title">Map View</h3>
+                          <div className="app__config-grid">
+                            <label className="app__config-row">
+                              <span>Base zoom when one stop is mapped</span>
+                              <input
+                                type="number"
+                                min={8}
+                                max={18}
+                                value={editingConfig.deliveryMapInitialZoom}
+                                onChange={(event) => updateConfigNumber('deliveryMapInitialZoom', event.target.value)}
+                              />
+                            </label>
+                            <label className="app__config-row">
+                              <span>Minimum auto zoom</span>
+                              <input
+                                type="number"
+                                min={8}
+                                max={18}
+                                value={editingConfig.deliveryMapMinZoom}
+                                onChange={(event) => updateConfigNumber('deliveryMapMinZoom', event.target.value)}
+                              />
+                            </label>
+                            <label className="app__config-row">
+                              <span>Maximum auto zoom</span>
+                              <input
+                                type="number"
+                                min={8}
+                                max={18}
+                                value={editingConfig.deliveryMapMaxZoom}
+                                onChange={(event) => updateConfigNumber('deliveryMapMaxZoom', event.target.value)}
+                              />
+                            </label>
+                            <label className="app__config-row">
+                              <span>Auto zoom adjustment</span>
+                              <input
+                                type="number"
+                                min={-4}
+                                max={4}
+                                value={editingConfig.deliveryMapZoomAdjustment}
+                                onChange={(event) => updateConfigNumber('deliveryMapZoomAdjustment', event.target.value)}
+                              />
+                            </label>
+                            <label className="app__config-row">
+                              <span>Map edge padding (px)</span>
+                              <input
+                                type="number"
+                                min={40}
+                                max={260}
+                                value={editingConfig.deliveryMapPadding}
+                                onChange={(event) => updateConfigNumber('deliveryMapPadding', event.target.value)}
+                              />
+                            </label>
+                          </div>
+                          <div className="app__config-help">
+                            The map fits remaining delivery pins plus the configured shop address, so it can zoom in as stops are completed while still keeping the Pittsburgh shop area in view.
+                          </div>
+                        </section>
+                      ) : pageSettingsPageId === 'weather' ? (
                         <section className="app__config-section">
                           <h3 className="app__config-section-title">Weather Location</h3>
                           <div className="app__config-grid">
@@ -8061,122 +8598,164 @@ export default function App() {
                             </label>
                           </div>
                         </section>
-                      ) : tickerModuleSettingsId === 'store_hours' ? (
-                        <section className="app__config-section">
-                          <h3 className="app__config-section-title">Store Hours</h3>
-                          <div className="app__config-grid">
-                            <label className="app__config-row app__config-toggle-row">
-                              <span>Monday-Friday open</span>
-                              <input
-                                type="checkbox"
-                                checked={editingConfig.storeHours.monFriEnabled}
-                                onChange={(event) => updateStoreHours({ monFriEnabled: event.target.checked })}
-                              />
-                            </label>
-                            <label className="app__config-row">
-                              <span>Monday-Friday opens</span>
-                              <input
-                                type="time"
-                                value={editingConfig.storeHours.monFriOpen}
-                                onChange={(event) => updateStoreHours({ monFriOpen: event.target.value })}
-                                disabled={!editingConfig.storeHours.monFriEnabled}
-                              />
-                            </label>
-                            <label className="app__config-row">
-                              <span>Monday-Friday closes</span>
-                              <input
-                                type="time"
-                                value={editingConfig.storeHours.monFriClose}
-                                onChange={(event) => updateStoreHours({ monFriClose: event.target.value })}
-                                disabled={!editingConfig.storeHours.monFriEnabled}
-                              />
-                            </label>
-                            <label className="app__config-row app__config-toggle-row">
-                              <span>Saturday open</span>
-                              <input
-                                type="checkbox"
-                                checked={editingConfig.storeHours.saturdayEnabled}
-                                onChange={(event) => updateStoreHours({ saturdayEnabled: event.target.checked })}
-                              />
-                            </label>
-                            <label className="app__config-row">
-                              <span>Saturday opens</span>
-                              <input
-                                type="time"
-                                value={editingConfig.storeHours.saturdayOpen}
-                                onChange={(event) => updateStoreHours({ saturdayOpen: event.target.value })}
-                                disabled={!editingConfig.storeHours.saturdayEnabled}
-                              />
-                            </label>
-                            <label className="app__config-row">
-                              <span>Saturday closes</span>
-                              <input
-                                type="time"
-                                value={editingConfig.storeHours.saturdayClose}
-                                onChange={(event) => updateStoreHours({ saturdayClose: event.target.value })}
-                                disabled={!editingConfig.storeHours.saturdayEnabled}
-                              />
-                            </label>
-                            <label className="app__config-row app__config-toggle-row">
-                              <span>Sunday open</span>
-                              <input
-                                type="checkbox"
-                                checked={editingConfig.storeHours.sundayEnabled}
-                                onChange={(event) => updateStoreHours({ sundayEnabled: event.target.checked })}
-                              />
-                            </label>
-                            <label className="app__config-row">
-                              <span>Sunday opens</span>
-                              <input
-                                type="time"
-                                value={editingConfig.storeHours.sundayOpen}
-                                onChange={(event) => updateStoreHours({ sundayOpen: event.target.value })}
-                                disabled={!editingConfig.storeHours.sundayEnabled}
-                              />
-                            </label>
-                            <label className="app__config-row">
-                              <span>Sunday closes</span>
-                              <input
-                                type="time"
-                                value={editingConfig.storeHours.sundayClose}
-                                onChange={(event) => updateStoreHours({ sundayClose: event.target.value })}
-                                disabled={!editingConfig.storeHours.sundayEnabled}
-                              />
-                            </label>
-                          </div>
-                        </section>
                       ) : (
                         <div className="app__page-settings-empty">
-                          No module-specific settings for this ticker module yet.
+                          No page-specific settings for this page yet.
                         </div>
                       )}
                     </div>
                     <div className="app__page-settings-actions">
-                      <button type="button" className="app__control-btn" onClick={() => setTickerModuleSettingsId('')}>
+                      <button type="button" className="app__control-btn" onClick={() => setPageSettingsPageId('')}>
                         Done
                       </button>
                     </div>
                   </section>
                 </div>
-              );
-            })() : null}
+              ) : null}
 
-            <div className="app__config-actions">
-              <button type="button" className="app__control-btn" onClick={cancelConfigChanges}>
-                Cancel
-              </button>
-              <button type="button" className="app__control-btn" onClick={resetConfigDefaults}>
-                Reset defaults
-              </button>
-              <button
-                type="button"
-                className="app__control-btn app__control-btn--primary"
-                onClick={saveConfigChanges}
-                disabled={!hasConfigChanges}
-              >
-                <FontAwesomeIcon icon={faFloppyDisk} />
-                Save Config
-              </button>
+              {tickerModuleSettingsId ? (() => {
+                const tickerModuleDefinition = TICKER_MODULE_DEFINITIONS.find(definition => definition.id === tickerModuleSettingsId);
+                const tickerModuleLabel = tickerModuleDefinition?.label || 'Ticker Module';
+                return (
+                  <div
+                    className="app__page-settings-overlay"
+                    onClick={(event) => {
+                      if (event.target === event.currentTarget) setTickerModuleSettingsId('');
+                    }}
+                  >
+                    <section className="app__page-settings-dialog" aria-label={`${tickerModuleLabel} ticker settings`}>
+                      <div className="app__page-settings-header">
+                        <div className="app__page-settings-title">
+                          <FontAwesomeIcon icon={faGear} />
+                          {tickerModuleLabel} Ticker Settings
+                        </div>
+                        <button
+                          type="button"
+                          className="app__config-close-btn"
+                          onClick={() => setTickerModuleSettingsId('')}
+                          aria-label="Close ticker module settings"
+                        >
+                          <FontAwesomeIcon icon={faXmark} />
+                        </button>
+                      </div>
+                      <div className="app__page-settings-body">
+                        {tickerModuleSettingsId === 'weather' ? (
+                          <section className="app__config-section">
+                            <h3 className="app__config-section-title">Weather Location</h3>
+                            <div className="app__config-grid">
+                              <label className="app__config-row">
+                                <span>Weather ZIP code</span>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  maxLength={5}
+                                  value={configWeatherZipDraft}
+                                  onChange={(event) => {
+                                    setConfigWeatherZipDraft(event.target.value.replace(/\D/g, '').slice(0, 5));
+                                  }}
+                                />
+                              </label>
+                            </div>
+                          </section>
+                        ) : tickerModuleSettingsId === 'store_hours' ? (
+                          <section className="app__config-section">
+                            <h3 className="app__config-section-title">Store Hours</h3>
+                            <div className="app__config-grid">
+                              <label className="app__config-row app__config-toggle-row">
+                                <span>Monday-Friday open</span>
+                                <input
+                                  type="checkbox"
+                                  checked={editingConfig.storeHours.monFriEnabled}
+                                  onChange={(event) => updateStoreHours({ monFriEnabled: event.target.checked })}
+                                />
+                              </label>
+                              <label className="app__config-row">
+                                <span>Monday-Friday opens</span>
+                                <input
+                                  type="time"
+                                  value={editingConfig.storeHours.monFriOpen}
+                                  onChange={(event) => updateStoreHours({ monFriOpen: event.target.value })}
+                                  disabled={!editingConfig.storeHours.monFriEnabled}
+                                />
+                              </label>
+                              <label className="app__config-row">
+                                <span>Monday-Friday closes</span>
+                                <input
+                                  type="time"
+                                  value={editingConfig.storeHours.monFriClose}
+                                  onChange={(event) => updateStoreHours({ monFriClose: event.target.value })}
+                                  disabled={!editingConfig.storeHours.monFriEnabled}
+                                />
+                              </label>
+                              <label className="app__config-row app__config-toggle-row">
+                                <span>Saturday open</span>
+                                <input
+                                  type="checkbox"
+                                  checked={editingConfig.storeHours.saturdayEnabled}
+                                  onChange={(event) => updateStoreHours({ saturdayEnabled: event.target.checked })}
+                                />
+                              </label>
+                              <label className="app__config-row">
+                                <span>Saturday opens</span>
+                                <input
+                                  type="time"
+                                  value={editingConfig.storeHours.saturdayOpen}
+                                  onChange={(event) => updateStoreHours({ saturdayOpen: event.target.value })}
+                                  disabled={!editingConfig.storeHours.saturdayEnabled}
+                                />
+                              </label>
+                              <label className="app__config-row">
+                                <span>Saturday closes</span>
+                                <input
+                                  type="time"
+                                  value={editingConfig.storeHours.saturdayClose}
+                                  onChange={(event) => updateStoreHours({ saturdayClose: event.target.value })}
+                                  disabled={!editingConfig.storeHours.saturdayEnabled}
+                                />
+                              </label>
+                              <label className="app__config-row app__config-toggle-row">
+                                <span>Sunday open</span>
+                                <input
+                                  type="checkbox"
+                                  checked={editingConfig.storeHours.sundayEnabled}
+                                  onChange={(event) => updateStoreHours({ sundayEnabled: event.target.checked })}
+                                />
+                              </label>
+                              <label className="app__config-row">
+                                <span>Sunday opens</span>
+                                <input
+                                  type="time"
+                                  value={editingConfig.storeHours.sundayOpen}
+                                  onChange={(event) => updateStoreHours({ sundayOpen: event.target.value })}
+                                  disabled={!editingConfig.storeHours.sundayEnabled}
+                                />
+                              </label>
+                              <label className="app__config-row">
+                                <span>Sunday closes</span>
+                                <input
+                                  type="time"
+                                  value={editingConfig.storeHours.sundayClose}
+                                  onChange={(event) => updateStoreHours({ sundayClose: event.target.value })}
+                                  disabled={!editingConfig.storeHours.sundayEnabled}
+                                />
+                              </label>
+                            </div>
+                          </section>
+                        ) : (
+                          <div className="app__page-settings-empty">
+                            No module-specific settings for this ticker module yet.
+                          </div>
+                        )}
+                      </div>
+                      <div className="app__page-settings-actions">
+                        <button type="button" className="app__control-btn" onClick={() => setTickerModuleSettingsId('')}>
+                          Done
+                        </button>
+                      </div>
+                    </section>
+                  </div>
+                );
+              })() : null}
             </div>
           </section>
         </div>
@@ -8184,59 +8763,12 @@ export default function App() {
 
       {feedErrorLabel ? <div className="app__error">{feedErrorLabel}</div> : null}
 
-      {!isDashboardMode ? (
-        <div className="app__rotation">
-          <div className="app__rotation-main">
-            <div className="app__rotation-chip" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button
-                type="button"
-                className="app__rotation-arrow"
-                title="Previous page"
-                style={{ border: 'none', background: 'none', padding: 0, marginRight: 4, cursor: hasMultiplePages ? 'pointer' : 'default', fontSize: 16, lineHeight: 1 }}
-                aria-label="Previous page"
-                onClick={goToPreviousPage}
-                disabled={!hasMultiplePages}
-              >
-                <FontAwesomeIcon icon={faChevronLeft} />
-              </button>
-              <span>{`Page ${currentPageIndex + 1}/${enabledPages.length}: ${activePage?.label || 'Page'}`}</span>
-              <button
-                type="button"
-                className="app__rotation-arrow"
-                title="Next page"
-                style={{ border: 'none', background: 'none', padding: 0, marginLeft: 4, cursor: hasMultiplePages ? 'pointer' : 'default', fontSize: 16, lineHeight: 1 }}
-                aria-label="Next page"
-                onClick={goToNextPage}
-                disabled={!hasMultiplePages}
-              >
-                <FontAwesomeIcon icon={faChevronRight} />
-              </button>
-            </div>
-            <button
-              type="button"
-              className={`app__control-btn app__control-btn--toggle${config.pageAutoRotateEnabled ? ' app__control-btn--toggle-active' : ''}`}
-              onClick={togglePageAutoRotate}
-              title="Toggle auto page rotation"
-              aria-pressed={config.pageAutoRotateEnabled}
-              disabled={!hasMultiplePages}
-            >
-              <FontAwesomeIcon icon={config.pageAutoRotateEnabled ? faPause : faPlay} />
-              {config.pageAutoRotateEnabled ? 'Pause' : 'Play'}
-            </button>
-            <button
-              type="button"
-              className="app__control-btn"
-              onClick={openConfigPage}
-              title="Open dashboard configuration"
-            >
-              <FontAwesomeIcon icon={faGear} /> Config
-            </button>
-          </div>
-        </div>
-      ) : null}
-
       {config.pageAutoRotateEnabled && hasMultiplePages ? (
-        <div className={`page-rotation-progress${isUserActive ? ' page-rotation-progress--paused' : ''}`} aria-hidden="true">
+        <div
+          className={`page-rotation-progress${isUserActive ? ' page-rotation-progress--paused' : ''}`}
+          style={tickerClockWidth ? { left: `${tickerClockWidth}px` } : undefined}
+          aria-hidden="true"
+        >
           <div className="page-rotation-progress__track">
             <div className="page-rotation-progress__bar" style={{ width: `${Math.round(rotationProgress * 100)}%` }} />
           </div>
@@ -8260,7 +8792,7 @@ export default function App() {
               <div className="lane__cards" ref={pendingListRef}>
                 {pendingTickets.length === 0 ? (
                   <div className="lane__empty">
-                    <FontAwesomeIcon className="lane__empty-icon" icon={faInbox} />
+                    <FontAwesomeIcon className="lane__empty-icon" icon={faCircleCheck} />
                     <span className="lane__empty-text">No pending intake tickets right now.</span>
                   </div>
                 ) : (
@@ -9170,6 +9702,7 @@ export default function App() {
                                 <text x={p.x} y={Math.max(p.y - 7, cd.MT + 11)}
                                   fontSize="11" textAnchor="middle" fill="#982800"
                                   fontWeight="700" stroke="white" strokeWidth="3" paintOrder="stroke"
+                                  fontFamily="Consolas, 'Courier New', monospace"
                                 >
                                   {p.h.temp}°
                                 </text>
@@ -9192,8 +9725,9 @@ export default function App() {
                               />
                               <text x={cx} y={cd.H - 4}
                                 fontSize="11" textAnchor="middle" fill="#4a6080" fontWeight="600"
+                                fontFamily="Consolas, 'Courier New', monospace"
                               >
-                                {`${displayH}${period}`}
+                                {`${displayH}${period.toUpperCase()}`}
                               </text>
                             </g>
                           );
@@ -9204,6 +9738,7 @@ export default function App() {
                             <text key={`tl-${f}`}
                               x={cd.ML - 5} y={cd.MT + (1 - f) * cd.PH + 4}
                               fontSize="11" textAnchor="end" fill="#807060" fontWeight="600"
+                              fontFamily="Consolas, 'Courier New', monospace"
                             >
                               {t}°
                             </text>
@@ -9224,7 +9759,7 @@ export default function App() {
       </main>
 
       <div className="app__ticker" aria-label="Dashboard ticker">
-        <div className="app__ticker-clock" aria-label="Current time and date">
+        <div ref={tickerClockRef} className="app__ticker-clock" style={tickerClockStyle} aria-label="Current time and date">
           <span className="app__ticker-time" aria-label={`${tickerHourLabel}:${tickerMinuteLabel}:${tickerSecondLabel}`}>
             <span className="app__ticker-time-part">{tickerHourLabel}</span>
             <span className={`app__ticker-separator${tickerSeparatorsVisible ? '' : ' app__ticker-separator--hidden'}`}>:</span>
