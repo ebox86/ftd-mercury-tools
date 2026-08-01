@@ -18,15 +18,16 @@ const dashboardServerConfigPath = join(dashboardConfigDir, 'dashboard-server-con
 const deviceRegistryPath = join(dashboardConfigDir, 'device-tokens.json');
 const serviceName = 'talaria-bridge';
 
-// The admin UI (login + paired-device management) is its own small static
-// site, deliberately kept separate from the kiosk-app TV dashboard - own
-// directory, own look and feel, no build step. Served straight off disk.
-const adminDir = join(__dirname, 'admin');
-const adminStaticFiles = new Map([
-  ['/admin/', { file: 'index.html', type: 'text/html; charset=utf-8', binary: false }],
-  ['/admin/admin.css', { file: 'admin.css', type: 'text/css; charset=utf-8', binary: false }],
-  ['/admin/admin.js', { file: 'admin.js', type: 'application/javascript; charset=utf-8', binary: false }],
-  ['/admin/talaria-icon.jpg', { file: 'talaria-icon.jpg', type: 'image/jpeg', binary: true }],
+// The Workbench app (staff login + role-based tools: paired-device
+// management, users, pick list, orders) is its own small static site, a
+// top-level peer of kiosk-app - own directory, own look and feel, no build
+// step. Served straight off disk.
+const workbenchDir = join(__dirname, '..', 'workbench');
+const workbenchStaticFiles = new Map([
+  ['/workbench/', { file: 'index.html', type: 'text/html; charset=utf-8', binary: false }],
+  ['/workbench/workbench.css', { file: 'workbench.css', type: 'text/css; charset=utf-8', binary: false }],
+  ['/workbench/workbench.js', { file: 'workbench.js', type: 'application/javascript; charset=utf-8', binary: false }],
+  ['/workbench/talaria-icon.jpg', { file: 'talaria-icon.jpg', type: 'image/jpeg', binary: true }],
 ]);
 
 // For the admin UI's "type this URL on the TV" instructions - a browser
@@ -222,17 +223,19 @@ setInterval(() => {
   }
 }, 60000);
 
-// ── Admin auth ───────────────────────────────────────────────────────────
-// A lightweight username/password login for the /admin page, independent of
-// the per-device pairing tokens above. Ships with a default admin/flowers
-// account that must be changed on first login. Sessions are in-memory
-// (cleared on service restart) — deliberately simple, matching the rest of
-// this bridge's "no real session store" posture.
-const adminAuthPath = join(dashboardConfigDir, 'admin-auth.json');
-const ADMIN_SESSION_COOKIE = 'mercury_admin_session';
-const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-let adminAuthCache = null;
-const adminSessions = new Map();
+// ── Workbench auth ───────────────────────────────────────────────────────
+// Multi-user login for the Workbench app (staff roles: admin, manager,
+// designer, viewer), independent of the per-device pairing tokens above.
+// Ships with a default admin/flowers account that must be changed on first
+// login. Sessions are in-memory (cleared on service restart) — deliberately
+// simple, matching the rest of this bridge's "no real session store" posture.
+const workbenchUsersPath = join(dashboardConfigDir, 'workbench-users.json');
+const legacyAdminAuthPath = join(dashboardConfigDir, 'admin-auth.json');
+const WORKBENCH_SESSION_COOKIE = 'mercury_workbench_session';
+const WORKBENCH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const WORKBENCH_ROLES = ['admin', 'manager', 'designer', 'viewer'];
+let workbenchUsersCache = null;
+const workbenchSessions = new Map();
 
 function hashPassword(password, salt) {
   const useSalt = salt || randomBytes(16).toString('hex');
@@ -247,30 +250,102 @@ function verifyPassword(password, salt, expectedHash) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function loadAdminAuth() {
-  if (adminAuthCache) return adminAuthCache;
-  if (existsSync(adminAuthPath)) {
+function generateWorkbenchUserId() {
+  return `usr_${randomBytes(6).toString('hex')}`;
+}
+
+function generateTempPassword() {
+  return randomBytes(9).toString('base64').replace(/[^A-Za-z0-9]/g, '').slice(0, 10);
+}
+
+function loadWorkbenchUsers() {
+  if (workbenchUsersCache) return workbenchUsersCache;
+  if (existsSync(workbenchUsersPath)) {
     try {
-      const raw = readFileSync(adminAuthPath, 'utf8');
+      const raw = readFileSync(workbenchUsersPath, 'utf8');
       const parsed = JSON.parse(String(raw || '').replace(/^﻿/, ''));
-      if (parsed && typeof parsed === 'object' && parsed.username && parsed.salt && parsed.hash) {
-        adminAuthCache = parsed;
-        return adminAuthCache;
+      if (parsed && Array.isArray(parsed.users)) {
+        workbenchUsersCache = parsed;
+        return workbenchUsersCache;
       }
     } catch {
-      // fall through to (re)create default below
+      // fall through to migration/default seed below
+    }
+  }
+  // Migrate the old single-account admin-auth.json into the new multi-user
+  // store if it's still around from before the Workbench rename.
+  if (existsSync(legacyAdminAuthPath)) {
+    try {
+      const raw = readFileSync(legacyAdminAuthPath, 'utf8');
+      const legacy = JSON.parse(String(raw || '').replace(/^﻿/, ''));
+      if (legacy && legacy.username && legacy.salt && legacy.hash) {
+        workbenchUsersCache = {
+          users: [{
+            id: generateWorkbenchUserId(),
+            username: legacy.username,
+            role: 'admin',
+            label: 'Store Admin',
+            salt: legacy.salt,
+            hash: legacy.hash,
+            mustChangePassword: Boolean(legacy.mustChangePassword),
+            enabled: true,
+            createdAt: new Date().toISOString(),
+            lastLoginAt: null,
+          }],
+        };
+        persistWorkbenchUsers();
+        return workbenchUsersCache;
+      }
+    } catch {
+      // fall through to default seed below
     }
   }
   const { salt, hash } = hashPassword('flowers');
-  adminAuthCache = { username: 'admin', salt, hash, mustChangePassword: true };
-  persistAdminAuth();
-  return adminAuthCache;
+  workbenchUsersCache = {
+    users: [{
+      id: generateWorkbenchUserId(),
+      username: 'admin',
+      role: 'admin',
+      label: 'Store Admin',
+      salt,
+      hash,
+      mustChangePassword: true,
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      lastLoginAt: null,
+    }],
+  };
+  persistWorkbenchUsers();
+  return workbenchUsersCache;
 }
 
-function persistAdminAuth() {
-  if (!adminAuthCache) return;
+function persistWorkbenchUsers() {
+  if (!workbenchUsersCache) return;
   mkdirSync(dashboardConfigDir, { recursive: true });
-  writeFileSync(adminAuthPath, `${JSON.stringify(adminAuthCache, null, 2)}\n`, 'utf8');
+  writeFileSync(workbenchUsersPath, `${JSON.stringify(workbenchUsersCache, null, 2)}\n`, 'utf8');
+}
+
+function findWorkbenchUserByUsername(username) {
+  const needle = String(username || '').trim().toLowerCase();
+  if (!needle) return null;
+  return loadWorkbenchUsers().users.find(u => u.username.toLowerCase() === needle) || null;
+}
+
+function findWorkbenchUserById(id) {
+  return loadWorkbenchUsers().users.find(u => u.id === id) || null;
+}
+
+function publicWorkbenchUser(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    label: user.label || '',
+    enabled: Boolean(user.enabled),
+    mustChangePassword: Boolean(user.mustChangePassword),
+    createdAt: user.createdAt || null,
+    lastLoginAt: user.lastLoginAt || null,
+  };
 }
 
 function parseCookies(req) {
@@ -286,32 +361,37 @@ function parseCookies(req) {
   return out;
 }
 
-function createAdminSession() {
+function createWorkbenchSession(user) {
   const token = randomBytes(24).toString('hex');
-  adminSessions.set(token, { expiresAt: Date.now() + ADMIN_SESSION_TTL_MS });
+  workbenchSessions.set(token, {
+    userId: user.id,
+    username: user.username,
+    role: user.role,
+    expiresAt: Date.now() + WORKBENCH_SESSION_TTL_MS,
+  });
   return token;
 }
 
-function destroyAdminSession(token) {
-  if (token) adminSessions.delete(token);
+function destroyWorkbenchSession(token) {
+  if (token) workbenchSessions.delete(token);
 }
 
-function hasValidAdminSession(req) {
-  const token = parseCookies(req)[ADMIN_SESSION_COOKIE];
-  if (!token) return false;
-  const session = adminSessions.get(token);
-  if (!session) return false;
+function hasValidWorkbenchSession(req) {
+  const token = parseCookies(req)[WORKBENCH_SESSION_COOKIE];
+  if (!token) return null;
+  const session = workbenchSessions.get(token);
+  if (!session) return null;
   if (Date.now() >= session.expiresAt) {
-    adminSessions.delete(token);
-    return false;
+    workbenchSessions.delete(token);
+    return null;
   }
-  return true;
+  return session;
 }
 
 setInterval(() => {
   const now = Date.now();
-  for (const [token, session] of adminSessions) {
-    if (now >= session.expiresAt) adminSessions.delete(token);
+  for (const [token, session] of workbenchSessions) {
+    if (now >= session.expiresAt) workbenchSessions.delete(token);
   }
 }, 5 * 60000);
 
@@ -3601,91 +3681,201 @@ async function routeJson(req, res, url, pathname, auth) {
     return sendJson(res, 405, { error: 'Method not allowed' });
   }
 
-  if (pathname === '/api/admin/session') {
-    const loggedIn = hasValidAdminSession(req);
-    const account = loadAdminAuth();
+  if (pathname === '/api/workbench/session') {
+    const session = hasValidWorkbenchSession(req);
+    const user = session ? findWorkbenchUserById(session.userId) : null;
+    if (!user || !user.enabled) return sendJson(res, 200, { loggedIn: false });
     return sendJson(res, 200, {
-      loggedIn,
-      username: loggedIn ? account.username : null,
-      mustChangePassword: loggedIn ? Boolean(account.mustChangePassword) : false,
+      loggedIn: true,
+      username: user.username,
+      role: user.role,
+      label: user.label || '',
+      mustChangePassword: Boolean(user.mustChangePassword),
     });
   }
 
-  if (pathname === '/api/admin/network-info') {
+  if (pathname === '/api/workbench/network-info') {
     return sendJson(res, 200, getLanNetworkInfo());
   }
 
-  if (pathname === '/api/admin/login') {
+  if (pathname === '/api/workbench/login') {
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' });
     const clientIp = extractClientIp(req) || 'unknown';
-    const limit = checkRateLimit('admin-login', clientIp, 10, 5 * 60000);
+    const limit = checkRateLimit('workbench-login', clientIp, 10, 5 * 60000);
     if (limit.limited) {
       return sendJson(res, 429, { error: 'Too many login attempts — try again shortly.' });
     }
     try {
       const body = await readBody(req);
       const parsed = JSON.parse(String(body || '{}'));
-      const account = loadAdminAuth();
-      const usernameOk = String(parsed?.username || '').trim() === account.username;
-      const passwordOk = usernameOk && verifyPassword(String(parsed?.password || ''), account.salt, account.hash);
+      const user = findWorkbenchUserByUsername(parsed?.username || '');
+      const passwordOk = Boolean(user) && user.enabled && verifyPassword(String(parsed?.password || ''), user.salt, user.hash);
       if (!passwordOk) {
         return sendJson(res, 401, { error: 'Invalid username or password' });
       }
-      const token = createAdminSession();
-      res.setHeader('Set-Cookie', `${ADMIN_SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(ADMIN_SESSION_TTL_MS / 1000)}`);
-      return sendJson(res, 200, { ok: true, mustChangePassword: Boolean(account.mustChangePassword) });
+      user.lastLoginAt = new Date().toISOString();
+      persistWorkbenchUsers();
+      const token = createWorkbenchSession(user);
+      res.setHeader('Set-Cookie', `${WORKBENCH_SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(WORKBENCH_SESSION_TTL_MS / 1000)}`);
+      return sendJson(res, 200, { ok: true, mustChangePassword: Boolean(user.mustChangePassword) });
     } catch (error) {
-      return sendJson(res, 400, { error: String(error?.message || error), endpoint: 'admin-login' });
+      return sendJson(res, 400, { error: String(error?.message || error), endpoint: 'workbench-login' });
     }
   }
 
-  if (pathname === '/api/admin/change-password') {
+  if (pathname === '/api/workbench/change-password') {
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' });
-    if (!hasValidAdminSession(req)) return sendJson(res, 401, { error: 'Not logged in' });
+    const session = hasValidWorkbenchSession(req);
+    const user = session ? findWorkbenchUserById(session.userId) : null;
+    if (!user) return sendJson(res, 401, { error: 'Not logged in' });
     try {
       const body = await readBody(req);
       const parsed = JSON.parse(String(body || '{}'));
-      const account = loadAdminAuth();
-      const currentOk = verifyPassword(String(parsed?.currentPassword || ''), account.salt, account.hash);
+      const currentOk = verifyPassword(String(parsed?.currentPassword || ''), user.salt, user.hash);
       if (!currentOk) return sendJson(res, 401, { error: 'Current password is incorrect' });
       const newPassword = String(parsed?.newPassword || '');
       if (newPassword.length < 6) return sendJson(res, 400, { error: 'New password must be at least 6 characters' });
       const { salt, hash } = hashPassword(newPassword);
-      account.salt = salt;
-      account.hash = hash;
-      account.mustChangePassword = false;
-      persistAdminAuth();
+      user.salt = salt;
+      user.hash = hash;
+      user.mustChangePassword = false;
+      persistWorkbenchUsers();
       return sendJson(res, 200, { ok: true });
     } catch (error) {
-      return sendJson(res, 400, { error: String(error?.message || error), endpoint: 'admin-change-password' });
+      return sendJson(res, 400, { error: String(error?.message || error), endpoint: 'workbench-change-password' });
     }
   }
 
-  if (pathname === '/api/admin/logout') {
+  if (pathname === '/api/workbench/logout') {
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' });
-    const token = parseCookies(req)[ADMIN_SESSION_COOKIE];
-    destroyAdminSession(token);
-    res.setHeader('Set-Cookie', `${ADMIN_SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
+    const token = parseCookies(req)[WORKBENCH_SESSION_COOKIE];
+    destroyWorkbenchSession(token);
+    res.setHeader('Set-Cookie', `${WORKBENCH_SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
     return sendJson(res, 200, { ok: true });
   }
 
-  if (pathname === '/admin') {
-    // The page uses relative asset URLs (./admin.css etc.), which only
+  // ── Users management (admin role only) ──────────────────────────────────
+  if (pathname === '/api/workbench/users') {
+    const session = hasValidWorkbenchSession(req);
+    if (!session || session.role !== 'admin') return sendJson(res, 403, { error: 'Admin access required' });
+
+    if (req.method === 'GET') {
+      return sendJson(res, 200, { users: loadWorkbenchUsers().users.map(publicWorkbenchUser) });
+    }
+
+    if (req.method === 'POST') {
+      try {
+        const body = await readBody(req);
+        const parsed = JSON.parse(String(body || '{}'));
+        const username = String(parsed?.username || '').trim();
+        const role = String(parsed?.role || '').trim();
+        if (!username) return sendJson(res, 400, { error: 'Username is required' });
+        if (!WORKBENCH_ROLES.includes(role)) return sendJson(res, 400, { error: 'Invalid role' });
+        if (findWorkbenchUserByUsername(username)) return sendJson(res, 409, { error: 'That username is already in use' });
+        const tempPassword = generateTempPassword();
+        const { salt, hash } = hashPassword(tempPassword);
+        const user = {
+          id: generateWorkbenchUserId(),
+          username,
+          role,
+          label: String(parsed?.label || '').trim(),
+          salt,
+          hash,
+          mustChangePassword: true,
+          enabled: true,
+          createdAt: new Date().toISOString(),
+          lastLoginAt: null,
+        };
+        loadWorkbenchUsers().users.push(user);
+        persistWorkbenchUsers();
+        return sendJson(res, 200, { user: publicWorkbenchUser(user), tempPassword });
+      } catch (error) {
+        return sendJson(res, 400, { error: String(error?.message || error), endpoint: 'workbench-create-user' });
+      }
+    }
+
+    return sendJson(res, 405, { error: 'Method not allowed' });
+  }
+
+  if (pathname.startsWith('/api/workbench/users/')) {
+    const session = hasValidWorkbenchSession(req);
+    if (!session || session.role !== 'admin') return sendJson(res, 403, { error: 'Admin access required' });
+    const userId = decodeURIComponent(pathname.slice('/api/workbench/users/'.length));
+    const user = findWorkbenchUserById(userId);
+    if (!user) return sendJson(res, 404, { error: 'User not found' });
+
+    if (req.method === 'PATCH') {
+      try {
+        const body = await readBody(req);
+        const parsed = JSON.parse(String(body || '{}'));
+        const users = loadWorkbenchUsers().users;
+        const otherEnabledAdmins = () => users.filter(u => u.role === 'admin' && u.id !== user.id && u.enabled);
+
+        if (parsed?.role !== undefined) {
+          const nextRole = String(parsed.role);
+          if (!WORKBENCH_ROLES.includes(nextRole)) return sendJson(res, 400, { error: 'Invalid role' });
+          if (user.role === 'admin' && nextRole !== 'admin' && !otherEnabledAdmins().length) {
+            return sendJson(res, 400, { error: 'Cannot remove the last admin' });
+          }
+          user.role = nextRole;
+        }
+        if (parsed?.label !== undefined) user.label = String(parsed.label).trim();
+        if (parsed?.enabled !== undefined) {
+          const nextEnabled = Boolean(parsed.enabled);
+          if (user.role === 'admin' && !nextEnabled && !otherEnabledAdmins().length) {
+            return sendJson(res, 400, { error: 'Cannot disable the last admin' });
+          }
+          user.enabled = nextEnabled;
+        }
+        let tempPassword;
+        if (parsed?.resetPassword) {
+          tempPassword = generateTempPassword();
+          const { salt, hash } = hashPassword(tempPassword);
+          user.salt = salt;
+          user.hash = hash;
+          user.mustChangePassword = true;
+        }
+        persistWorkbenchUsers();
+        const responseBody = { user: publicWorkbenchUser(user) };
+        if (tempPassword) responseBody.tempPassword = tempPassword;
+        return sendJson(res, 200, responseBody);
+      } catch (error) {
+        return sendJson(res, 400, { error: String(error?.message || error), endpoint: 'workbench-update-user' });
+      }
+    }
+
+    if (req.method === 'DELETE') {
+      if (session.userId === user.id) return sendJson(res, 400, { error: 'You cannot delete your own account' });
+      const users = loadWorkbenchUsers().users;
+      if (user.role === 'admin' && !users.filter(u => u.role === 'admin' && u.id !== user.id && u.enabled).length) {
+        return sendJson(res, 400, { error: 'Cannot delete the last admin' });
+      }
+      const idx = users.findIndex(u => u.id === user.id);
+      if (idx !== -1) users.splice(idx, 1);
+      persistWorkbenchUsers();
+      return sendJson(res, 200, { ok: true });
+    }
+
+    return sendJson(res, 405, { error: 'Method not allowed' });
+  }
+
+  if (pathname === '/workbench') {
+    // The page uses relative asset URLs (./workbench.css etc.), which only
     // resolve correctly with the trailing slash present - redirect first.
     res.writeHead(301, { Location: `${pathname}/${url.search || ''}` });
     res.end();
     return true;
   }
 
-  if (adminStaticFiles.has(pathname)) {
-    const entry = adminStaticFiles.get(pathname);
+  if (workbenchStaticFiles.has(pathname)) {
+    const entry = workbenchStaticFiles.get(pathname);
     try {
-      const content = readFileSync(join(adminDir, entry.file), entry.binary ? undefined : 'utf8');
+      const content = readFileSync(join(workbenchDir, entry.file), entry.binary ? undefined : 'utf8');
       res.writeHead(200, { 'Content-Type': entry.type });
       res.end(content);
       return true;
     } catch {
-      return sendJson(res, 500, { error: 'Admin UI assets not found on disk' });
+      return sendJson(res, 500, { error: 'Workbench UI assets not found on disk' });
     }
   }
 
@@ -4513,13 +4703,22 @@ const server = createServer(async (req, res) => {
 
   // /health is a diagnostic endpoint (mode, cache/network settings, feature
   // flags - nothing about actual orders/customers) meant to be reachable the
-  // same way any infra health check would expect, and the admin Overview
+  // same way any infra health check would expect, and Workbench's Overview
   // page depends on it too - it shouldn't require a device pairing token.
-  const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin/') || pathname.startsWith('/api/admin/') || pathname === '/health';
+  const isWorkbenchRoute = pathname === '/workbench' || pathname.startsWith('/workbench/') || pathname.startsWith('/api/workbench/') || pathname === '/health';
   const isDeviceManagementRoute = pathname === '/api/workflow/devices' || pathname.startsWith('/api/workflow/devices/');
 
   const auth = resolveRequestAuth(req, url);
-  if (!isAdminRoute && !auth.ok && !(isDeviceManagementRoute && hasValidAdminSession(req))) {
+  const workbenchSession = hasValidWorkbenchSession(req);
+  // Device management (Paired Devices) stays admin-only, matching the old
+  // admin-session behavior; every other /api/workflow/* route (ticket
+  // search, etc.) accepts any signed-in Workbench role, the same way it
+  // already accepts a paired device's own token - Manager/Designer/Viewer
+  // need this to load their Orders lists.
+  const workbenchAuthorized = isDeviceManagementRoute
+    ? Boolean(workbenchSession && workbenchSession.role === 'admin')
+    : Boolean(workbenchSession);
+  if (!isWorkbenchRoute && !auth.ok && !workbenchAuthorized) {
     sendJson(res, auth.status || 401, { error: auth.reason || 'Invalid API key' });
     return;
   }

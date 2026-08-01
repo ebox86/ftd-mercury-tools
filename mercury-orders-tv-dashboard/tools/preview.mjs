@@ -38,7 +38,7 @@ if (build.status !== 0) {
 console.log('\nStarting an isolated preview instance (does not touch any live/installed service):');
 console.log(`  Bridge:     http://127.0.0.1:${bridgePort}  (data dir: ${dataDir})`);
 console.log(`  Web:        http://127.0.0.1:${webPort}  (serving kiosk-app/dist)`);
-console.log(`  Admin UI:   http://127.0.0.1:${bridgePort}/admin`);
+console.log(`  Login:      http://127.0.0.1:${webPort}/  (staff sign-in, redirects into /workbench/)`);
 console.log(`\nTo test through IIS, in an elevated prompt run:`);
 console.log(`  .\\tools\\setup-iis-proxy.ps1 -UpstreamUrl http://127.0.0.1:${webPort}`);
 console.log('\nCtrl+C to stop both.\n');

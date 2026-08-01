@@ -21,62 +21,13 @@ body {
 
 .hidden { display: none !important; }
 
-/* ---- Auth screens (login / forced password change) ---- */
-
-.auth-screen {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(160deg, #1e2233 0%, #2a2f45 100%);
-  padding: 16px;
-}
-
-.auth-card {
-  width: min(420px, 100%);
-  background: #fff;
-  border-radius: 14px;
-  padding: 32px 34px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
-}
-
-.auth-brand {
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--accent);
-  margin-bottom: 10px;
-}
-
-.auth-card h1 {
-  margin: 0 0 6px;
-  font-size: 21px;
-  color: #1a1d29;
-}
-
-.auth-sub {
-  margin: 0 0 20px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #666d84;
-}
-
 .auth-hint {
   font-size: 11.5px;
   color: #8a91a6;
   margin-top: 4px;
 }
 
-.auth-error {
-  color: #c0392b;
-  font-size: 12.5px;
-  font-weight: 700;
-  min-height: 1.2em;
-  margin-top: 12px;
-}
-
-.auth-card label {
+.panel label {
   display: block;
   font-size: 12px;
   font-weight: 700;
@@ -84,13 +35,14 @@ body {
   margin: 14px 0 4px;
 }
 
-.auth-card input, .panel input {
+.panel input, .panel select {
   width: 100%;
   min-height: 42px;
   border: 1px solid #d9dbe7;
   border-radius: 8px;
   padding: 0 12px;
   font-size: 14px;
+  font-family: inherit;
 }
 
 /* ---- Buttons ---- */
@@ -460,9 +412,45 @@ body {
 
 .pill-on { background: #e6f6ec; color: #1e7f43; }
 .pill-off { background: #fdecea; color: #c0392b; }
+.pill-role { background: #e1e9f7; color: #1f3d64; text-transform: capitalize; }
 
 .row-actions {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.add-row--users {
+  flex-wrap: wrap;
+}
+
+.add-row--users select {
+  flex: 0 0 160px;
+}
+
+.add-row--users input {
+  flex: 1 1 200px;
+}
+
+.empty-state {
+  padding: 32px 16px;
+  text-align: center;
+  color: #8a91a6;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.orders-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.orders-toolbar input[type="date"] {
+  width: auto;
+}
+
+.orders-toolbar .btn-secondary {
+  padding: 8px 14px;
 }

@@ -139,15 +139,16 @@ const server = createServer((req, res) => {
     });
   }
 
-  // Bridge-hosted: the admin UI and the raw /api + /health surface. Proxied
-  // through unchanged so /admin works identically whether hit directly on
-  // this service's own port or via an upstream reverse proxy (e.g. IIS).
-  if (pathname === '/health' || pathname.startsWith('/api/') || pathname === '/admin' || pathname.startsWith('/admin/')) {
+  // Bridge-hosted: the Workbench app and the raw /api + /health surface.
+  // Proxied through unchanged so /workbench works identically whether hit
+  // directly on this service's own port or via an upstream reverse proxy
+  // (e.g. IIS).
+  if (pathname === '/health' || pathname.startsWith('/api/') || pathname === '/workbench' || pathname.startsWith('/workbench/')) {
     proxyApiRequest(req, res, workflowApiBaseUrl);
     return;
   }
 
-  // Landing page: logo + Dashboard/Admin buttons.
+  // Landing page: the single login gate for the whole product.
   if (pathname === '/') {
     const filePath = safeFilePath(publicDir, '/');
     if (filePath) {

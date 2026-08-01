@@ -6,94 +6,275 @@
 <title>Talaria</title>
 <style>
   * { box-sizing: border-box; }
-  body {
+  html, body {
     margin: 0;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Segoe UI', Arial, sans-serif;
-    background: #f3f4f8;
-    padding: 16px;
-  }
-  .card {
-    width: min(480px, 100%);
-    background: #fff;
-    border-radius: 16px;
-    padding: 44px 40px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
-    text-align: center;
-  }
-  .logo-box {
-    width: 96px;
-    height: 96px;
-    margin: 0 auto 20px;
-    border-radius: 22px;
-    overflow: hidden;
-    background: #fff;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .logo-box img {
-    width: 100%;
     height: 100%;
-    object-fit: cover;
   }
-  h1 {
-    margin: 0 0 8px;
-    font-size: 26px;
-    color: #1a1d29;
-    letter-spacing: 0.02em;
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background-image: linear-gradient(160deg, #1e2233 0%, #2a2f45 100%);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    overflow: hidden;
   }
-  p.sub {
-    margin: 0 0 32px;
-    font-size: 14px;
-    color: #666d84;
-  }
-  .buttons {
+
+  .login-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 32%;
+    min-width: 380px;
+    max-width: 480px;
+    background: rgba(14, 22, 38, 0.86);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: -20px 0 60px rgba(0, 0, 0, 0.35);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    justify-content: center;
+    padding: 40px 44px;
+    color: #eef1f7;
   }
-  a.btn {
-    display: block;
-    text-decoration: none;
-    font-size: 16px;
-    font-weight: 700;
-    padding: 18px;
+
+  .login-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 36px;
+  }
+
+  .login-brand-mark {
+    width: 40px;
+    height: 40px;
     border-radius: 10px;
-    transition: transform 0.05s ease;
+    overflow: hidden;
+    background: #fff;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
-  a.btn:active { transform: scale(0.99); }
-  a.btn-dashboard { background: #ff6b00; color: #fff; box-shadow: 0 2px 10px rgba(255, 107, 0, 0.33); }
-  a.btn-dashboard:hover { background: #e05f00; }
-  a.btn-admin { background: #eef0f7; color: #1a1d29; }
-  a.btn-admin:hover { background: #e3e5f2; }
+
+  .login-brand-mark img { width: 100%; height: 100%; object-fit: cover; }
+
+  .login-brand-text strong {
+    display: block;
+    font-size: 16px;
+    color: #fff;
+    letter-spacing: 0.02em;
+  }
+
+  .login-brand-text span {
+    display: block;
+    font-size: 11px;
+    color: #a9b3c7;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .login-step h1 {
+    margin: 0 0 6px;
+    font-size: 22px;
+    color: #fff;
+  }
+
+  .login-step p.sub {
+    margin: 0 0 24px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #a9b3c7;
+  }
+
+  .login-step label {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #a9b3c7;
+    margin: 16px 0 6px;
+  }
+
+  .login-step input {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    padding: 0 14px;
+    font-size: 14.5px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+  }
+
+  .login-step input::placeholder { color: #7d879c; }
+  .login-step input:focus { outline: none; border-color: #ff6b00; background: rgba(255, 255, 255, 0.12); }
+
+  .login-hint {
+    font-size: 11.5px;
+    color: #8891a3;
+    margin-top: 6px;
+  }
+
+  .login-error {
+    color: #ff9b8a;
+    font-size: 12.5px;
+    font-weight: 700;
+    min-height: 1.2em;
+    margin-top: 14px;
+  }
+
+  .login-submit {
+    appearance: none;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 22px;
+    padding: 13px 16px;
+    font-size: 14.5px;
+    font-weight: 700;
+    background: #ff6b00;
+    color: #fff;
+  }
+
+  .login-submit:hover { background: #e05f00; }
+  .login-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
-  <div class="card">
-    <div class="logo-box">
-      <img id="logo" alt="Talaria" onerror="this.parentElement.style.display='none'">
+  <div class="login-panel">
+    <div class="login-brand">
+      <div class="login-brand-mark"><img id="brand-logo" alt="Talaria"></div>
+      <div class="login-brand-text">
+        <strong>Talaria</strong>
+        <span>Workbench</span>
+      </div>
     </div>
-    <h1>Talaria</h1>
-    <p class="sub">Mercury order tracking and delivery dashboard.</p>
-    <div class="buttons">
-      <a class="btn btn-dashboard" id="dashboard-link">Dashboard</a>
-      <a class="btn btn-admin" id="admin-link">Admin</a>
+
+    <div class="login-step" id="step-signin">
+      <h1>Sign in</h1>
+      <p class="sub">Staff access for order management, pick lists, and admin tools.</p>
+      <label for="login-username">Username</label>
+      <input id="login-username" type="text" autocomplete="username">
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password">
+      <div class="login-error" id="login-error"></div>
+      <button class="login-submit" id="login-submit">Sign in</button>
+    </div>
+
+    <div class="login-step hidden" id="step-cpw">
+      <h1>Change your password</h1>
+      <p class="sub" id="cpw-sub">You're using a temporary password &mdash; set a new one before continuing.</p>
+      <label for="cpw-current">Current password</label>
+      <input id="cpw-current" type="password" autocomplete="current-password">
+      <label for="cpw-new">New password</label>
+      <input id="cpw-new" type="password" autocomplete="new-password">
+      <div class="login-hint">At least 6 characters.</div>
+      <div class="login-error" id="cpw-error"></div>
+      <button class="login-submit" id="cpw-submit">Save password</button>
     </div>
   </div>
+
   <script>
     // This page can be served bare (site root) or behind a reverse proxy at
     // a subpath (e.g. IIS at /Talaria/) - compute that prefix explicitly
     // rather than trusting relative-URL resolution, which silently breaks
     // if the current URL is missing its trailing slash at click time.
     var prefix = window.location.pathname.replace(/\/+$/, '');
-    document.getElementById('logo').src = prefix + '/talaria-icon.jpg';
-    document.getElementById('dashboard-link').href = prefix + '/dashboard/';
-    document.getElementById('admin-link').href = prefix + '/admin/';
+    document.getElementById('brand-logo').src = prefix + '/talaria-icon.jpg';
+
+    // The hero image is optional (user-supplied asset) - layer it under the
+    // gradient already set inline, falling back to just the gradient if it
+    // 404s or hasn't been placed yet.
+    var hero = new Image();
+    hero.onload = function () {
+      document.body.style.backgroundImage = "url('" + prefix + "/login-hero.jpg'), linear-gradient(160deg, #1e2233 0%, #2a2f45 100%)";
+    };
+    hero.src = prefix + '/login-hero.jpg';
+
+    function api(method, path, body) {
+      return fetch(prefix + path, {
+        method: method,
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      }).then(function (res) {
+        return res.text().then(function (text) {
+          var data = {};
+          try { data = text ? JSON.parse(text) : {}; } catch (e) {}
+          return { ok: res.ok, status: res.status, data: data };
+        });
+      });
+    }
+
+    function goToWorkbench() {
+      window.location.href = prefix + '/workbench/';
+    }
+
+    var stepSignin = document.getElementById('step-signin');
+    var stepCpw = document.getElementById('step-cpw');
+
+    function showStep(step) {
+      [stepSignin, stepCpw].forEach(function (el) { el.classList.add('hidden'); });
+      step.classList.remove('hidden');
+    }
+
+    document.getElementById('login-submit').addEventListener('click', function () {
+      var username = document.getElementById('login-username').value.trim();
+      var password = document.getElementById('login-password').value;
+      var errorEl = document.getElementById('login-error');
+      errorEl.textContent = '';
+      api('POST', '/api/workbench/login', { username: username, password: password }).then(function (r) {
+        if (!r.ok) {
+          errorEl.textContent = r.data.error || 'Login failed';
+          return;
+        }
+        if (r.data.mustChangePassword) {
+          showStep(stepCpw);
+        } else {
+          goToWorkbench();
+        }
+      });
+    });
+
+    ['login-username', 'login-password'].forEach(function (id) {
+      document.getElementById(id).addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') document.getElementById('login-submit').click();
+      });
+    });
+
+    document.getElementById('cpw-submit').addEventListener('click', function () {
+      var currentPassword = document.getElementById('cpw-current').value;
+      var newPassword = document.getElementById('cpw-new').value;
+      var errorEl = document.getElementById('cpw-error');
+      errorEl.textContent = '';
+      api('POST', '/api/workbench/change-password', { currentPassword: currentPassword, newPassword: newPassword }).then(function (r) {
+        if (!r.ok) {
+          errorEl.textContent = r.data.error || 'Could not change password';
+          return;
+        }
+        goToWorkbench();
+      });
+    });
+
+    ['cpw-current', 'cpw-new'].forEach(function (id) {
+      document.getElementById(id).addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') document.getElementById('cpw-submit').click();
+      });
+    });
+
+    // Already signed in (and no forced password change pending)? Skip
+    // straight to Workbench instead of showing the form again.
+    api('GET', '/api/workbench/session').then(function (r) {
+      var session = r.data || {};
+      if (session.loggedIn && !session.mustChangePassword) {
+        goToWorkbench();
+      }
+    });
   </script>
 </body>
 </html>

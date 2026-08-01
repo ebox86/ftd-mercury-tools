@@ -69,19 +69,20 @@ $stageRuntime = Join-Path $stageRoot "runtime"
 $stageServiceRuntime = Join-Path $stageRoot "service-runtime"
 $stageKioskDist = Join-Path $stageRoot "kiosk-app\dist"
 $stageBridge = Join-Path $stageRoot "workflow-bridge"
+$stageWorkbench = Join-Path $stageRoot "workbench"
 $stageReference = Join-Path $stageRoot "reference"
 $stageServiceHost = Join-Path $stageRoot "service-host"
 $stageService = Join-Path $stageRoot "service"
 $stageTools = Join-Path $stageRoot "tools"
 
-New-Item -ItemType Directory -Path $stageRuntime, $stageServiceRuntime, $stageKioskDist, $stageBridge, $stageReference, $stageServiceHost, $stageService, $stageTools | Out-Null
+New-Item -ItemType Directory -Path $stageRuntime, $stageServiceRuntime, $stageKioskDist, $stageBridge, $stageWorkbench, $stageReference, $stageServiceHost, $stageService, $stageTools | Out-Null
 
 Copy-Item -Path (Join-Path $NodeRuntimeDir "*") -Destination $stageRuntime -Recurse
 Copy-Item -Path (Join-Path $kioskDist "*") -Destination $stageKioskDist -Recurse
 Copy-Item -Path $bridgeServer -Destination (Join-Path $stageBridge "server.mjs") -Force
 Copy-Item -Path (Join-Path $projectRoot "workflow-bridge\package.json") -Destination (Join-Path $stageBridge "package.json") -Force
 Copy-Item -Path (Join-Path $projectRoot "workflow-bridge\package-lock.json") -Destination (Join-Path $stageBridge "package-lock.json") -Force
-Copy-Item -Path (Join-Path $projectRoot "workflow-bridge\admin") -Destination (Join-Path $stageBridge "admin") -Recurse -Force
+Copy-Item -Path (Join-Path $projectRoot "workbench\*") -Destination $stageWorkbench -Recurse -Force
 Copy-Item -Path (Join-Path $referenceDir "*") -Destination $stageReference -Recurse
 Copy-Item -Path $webHostServer -Destination (Join-Path $stageServiceHost "dashboard-web-server.mjs") -Force
 Copy-Item -Path (Join-Path $projectRoot "service-host\public") -Destination (Join-Path $stageServiceHost "public") -Recurse -Force

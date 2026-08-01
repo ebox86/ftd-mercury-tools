@@ -3,40 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Talaria Admin</title>
-<link rel="stylesheet" href="./admin.css">
+<title>Talaria Workbench</title>
+<link rel="stylesheet" href="./workbench.css">
 </head>
 <body>
-
-<div id="login-view" class="auth-screen hidden">
-  <div class="auth-card">
-    <div class="auth-brand">Talaria</div>
-    <h1>Admin sign in</h1>
-    <p class="auth-sub">Manage paired TVs and bridge settings.</p>
-    <label for="login-username">Username</label>
-    <input id="login-username" type="text" autocomplete="username" value="admin">
-    <label for="login-password">Password</label>
-    <input id="login-password" type="password" autocomplete="current-password">
-    <div class="auth-error" id="login-error"></div>
-    <button class="btn btn-primary btn-block" id="login-submit">Sign in</button>
-  </div>
-</div>
-
-<div id="change-password-view" class="auth-screen hidden">
-  <div class="auth-card">
-    <div class="auth-brand">Talaria</div>
-    <h1 id="cpw-title">Change your password</h1>
-    <p class="auth-sub" id="cpw-sub">You're using the default password &mdash; set a new one before continuing.</p>
-    <label for="cpw-current">Current password</label>
-    <input id="cpw-current" type="password" autocomplete="current-password">
-    <label for="cpw-new">New password</label>
-    <input id="cpw-new" type="password" autocomplete="new-password">
-    <div class="auth-hint">At least 6 characters.</div>
-    <div class="auth-error" id="cpw-error"></div>
-    <button class="btn btn-primary btn-block" id="cpw-submit">Save password</button>
-    <button class="btn btn-link hidden" id="cpw-cancel">Cancel</button>
-  </div>
-</div>
 
 <div id="app-shell" class="shell hidden">
   <nav class="sidebar">
@@ -44,22 +14,25 @@
       <div class="sidebar-brand-mark"><img src="./talaria-icon.jpg" alt="Talaria"></div>
       <div class="sidebar-brand-text">
         <strong>Talaria</strong>
-        <span>Admin</span>
+        <span>Workbench</span>
       </div>
     </div>
     <div class="sidebar-nav">
-      <button type="button" class="nav-item" data-view="overview">Overview</button>
-      <button type="button" class="nav-item" data-view="devices">Paired Devices</button>
-      <button type="button" class="nav-item" data-view="account">Account</button>
+      <button type="button" class="nav-item" data-view="overview" data-roles="admin">Overview</button>
+      <button type="button" class="nav-item" data-view="devices" data-roles="admin">Paired Devices</button>
+      <button type="button" class="nav-item" data-view="users" data-roles="admin">Users</button>
+      <button type="button" class="nav-item" data-view="picklist" data-roles="manager,designer,viewer">Pick List</button>
+      <button type="button" class="nav-item" data-view="orders" data-roles="manager,designer,viewer" id="nav-orders">Orders</button>
+      <button type="button" class="nav-item" data-view="account" data-roles="admin,manager,designer,viewer">Account</button>
     </div>
     <div class="sidebar-footer">
-      <div class="sidebar-user">Signed in as <strong id="sidebar-username">admin</strong></div>
+      <div class="sidebar-user">Signed in as <strong id="sidebar-username">&hellip;</strong></div>
       <button type="button" class="btn btn-ghost btn-block" id="logout-btn">Log out</button>
     </div>
   </nav>
 
   <main class="content">
-    <section id="view-overview" class="view">
+    <section id="view-overview" class="view hidden">
       <header class="view-header">
         <h1>Overview</h1>
         <p>Bridge status at a glance.</p>
@@ -126,6 +99,87 @@
       </div>
     </section>
 
+    <section id="view-users" class="view hidden">
+      <header class="view-header">
+        <h1>Users</h1>
+        <p>Staff accounts for Workbench. Each account has one role: Admin, Manager, Designer, or Viewer.</p>
+      </header>
+
+      <div class="panel">
+        <div class="add-row add-row--users">
+          <input id="new-user-username" type="text" placeholder="Username">
+          <select id="new-user-role">
+            <option value="admin">Admin</option>
+            <option value="manager">Manager</option>
+            <option value="designer">Designer</option>
+            <option value="viewer">Viewer</option>
+          </select>
+          <input id="new-user-label" type="text" placeholder="Display name (optional)">
+          <button class="btn btn-primary" id="add-user-btn">Add user</button>
+        </div>
+        <div class="banner banner-error hidden" id="users-error"></div>
+
+        <div class="token-banner hidden" id="user-token-banner">
+          <button type="button" class="btn btn-icon token-banner-dismiss" id="user-token-banner-dismiss" aria-label="Dismiss">&times;</button>
+          <div class="howto-step">
+            <div class="howto-step-num">1</div>
+            <div class="howto-step-body">
+              <strong id="user-token-banner-label"></strong>
+              <span>temporary password (shown once) &mdash; copy it now:</span>
+              <div class="token-value" id="user-token-banner-value"></div>
+            </div>
+          </div>
+          <div class="howto-step">
+            <div class="howto-step-num">2</div>
+            <div class="howto-step-body">
+              <strong>Share it with them</strong>
+              <span>They'll be asked to set their own password the first time they sign in at the site root.</span>
+            </div>
+          </div>
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr><th>Username</th><th>Role</th><th>Display name</th><th>Status</th><th>Last login</th><th></th></tr>
+          </thead>
+          <tbody id="users-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="view-picklist" class="view hidden">
+      <header class="view-header">
+        <h1>Pick List</h1>
+        <p>Coming soon.</p>
+      </header>
+      <div class="panel">
+        <div class="empty-state">Pick List &mdash; coming soon.</div>
+      </div>
+    </section>
+
+    <section id="view-orders" class="view hidden">
+      <header class="view-header">
+        <h1 id="orders-title">Orders</h1>
+        <p>A simple list of active orders for the selected day.</p>
+      </header>
+
+      <div class="panel">
+        <div class="orders-toolbar">
+          <button type="button" class="btn btn-secondary" id="orders-prev-day" aria-label="Previous day">&larr;</button>
+          <input id="orders-date" type="date">
+          <button type="button" class="btn btn-secondary" id="orders-next-day" aria-label="Next day">&rarr;</button>
+          <button type="button" class="btn btn-secondary" id="orders-today">Today</button>
+        </div>
+        <div class="banner banner-error hidden" id="orders-error"></div>
+        <table class="data-table">
+          <thead>
+            <tr><th>Order #</th><th>Recipient</th><th>Address</th><th>Status</th><th>Delivery date</th></tr>
+          </thead>
+          <tbody id="orders-body"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section id="view-account" class="view hidden">
       <header class="view-header">
         <h1>Account</h1>
@@ -146,6 +200,6 @@
   </main>
 </div>
 
-<script src="./admin.js"></script>
+<script src="./workbench.js"></script>
 </body>
 </html>

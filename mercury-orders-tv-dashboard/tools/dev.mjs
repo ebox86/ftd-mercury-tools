@@ -1,8 +1,12 @@
 // Runs a throwaway dev copy of the bridge + kiosk app, fully isolated from
 // any installed/live instance: different ports, and a separate data
-// directory (.dev-data/) so device pairing / admin login you create while
-// poking around never touches the real device-tokens.json or
-// admin-auth.json. Safe to run alongside a live installed service.
+// directory (.dev-data/) so device pairing / Workbench users you create
+// while poking around never touch the real device-tokens.json or
+// workbench-users.json. Safe to run alongside a live installed service.
+//
+// Note: this only runs the bridge + kiosk-app dev server, not the root
+// login page (that's served by dashboard-web-server.mjs) - use
+// `npm run preview` to test the login flow end-to-end.
 //
 // Usage: npm run dev   (from mercury-orders-tv-dashboard/)
 // Env overrides: DEV_BRIDGE_PORT, DEV_KIOSK_PORT, MERCURY_BASE_URL
@@ -26,7 +30,7 @@ mkdirSync(dataDir, { recursive: true });
 console.log('Starting an isolated dev instance (does not touch any live/installed service):');
 console.log(`  Bridge:     http://127.0.0.1:${bridgePort}  (data dir: ${dataDir})`);
 console.log(`  Kiosk app:  http://127.0.0.1:${kioskPort}`);
-console.log(`  Admin UI:   http://127.0.0.1:${bridgePort}/admin`);
+console.log(`  Workbench:  http://127.0.0.1:${bridgePort}/workbench  (no login page here - use "npm run preview" for that)`);
 console.log('Ctrl+C to stop both.\n');
 
 function prefixedPipe(child, label) {

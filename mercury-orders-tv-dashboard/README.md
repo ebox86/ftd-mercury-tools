@@ -6,7 +6,8 @@ A live Mercury order dashboard for TV/kiosk operations (design + delivery tracki
 
 ## Key Components
 
-- `kiosk-app/` React dashboard UI
+- `kiosk-app/` React dashboard UI (TV/kiosk, device-pairing auth)
+- `workbench/` staff app (login-gated, role-based: admin/manager/designer/viewer)
 - `workflow-bridge/server.mjs` live SOAP-to-JSON bridge
 - `reference/` Mercury API maps and schema notes
 - `start-live-mvp.*` launchers for direct API mode or SOAP bridge mode
@@ -18,7 +19,7 @@ A live Mercury order dashboard for TV/kiosk operations (design + delivery tracki
 npm run dev
 ```
 
-Runs `tools/dev.mjs`, which starts a throwaway bridge + kiosk app on their own ports (`18344`/`5180` by default, override with `DEV_BRIDGE_PORT`/`DEV_KIOSK_PORT`) against a separate `.dev-data/` directory — so any test devices or admin password changes you make while poking around never touch a real install's `artifacts/tooling-local/` (device-tokens.json, admin-auth.json, dashboard config), even when run from the same checkout as one. Ctrl+C stops both. Prints the URLs (including `/admin`) on startup.
+Runs `tools/dev.mjs`, which starts a throwaway bridge + kiosk app on their own ports (`18344`/`5180` by default, override with `DEV_BRIDGE_PORT`/`DEV_KIOSK_PORT`) against a separate `.dev-data/` directory — so any test devices or Workbench users you create while poking around never touch a real install's `artifacts/tooling-local/` (device-tokens.json, workbench-users.json, dashboard config), even when run from the same checkout as one. Ctrl+C stops both. Prints the Workbench URL on startup — note this mode doesn't serve the root login page (that's `dashboard-web-server.mjs`'s job); use `npm run preview` to test the full login flow.
 
 This never starts, stops, or otherwise touches an installed/live `Talaria Bridge` or `Talaria Web` service — those only change via a proper release + reinstall.
 
@@ -84,22 +85,31 @@ Every TV/kiosk can carry its own pairing token instead of every browser on the n
 - The bridge keeps a device registry at `mercury-orders-tv-dashboard/artifacts/tooling-local/device-tokens.json` (gitignored). It starts empty, and the bridge is fully open — exactly like before this feature existed — until you create the first device.
 - The moment a device exists, every request (dashboard data, Settings save, everything) requires a valid `X-Device-Token` header or `?deviceToken=` query param matching an *enabled* device. This stays true even if every device is later revoked — revoking your last screen locks the bridge down rather than reopening it. The only way back to a fully open bridge is deleting every device record (via the trash icon, or by wiping `device-tokens.json` and restarting the service).
 - Each device's pairing code is a 4-digit number (e.g. `4821`), chosen to be easy to type on a TV or kiosk. Wrong-code attempts are rate-limited per IP (30 per 5 minutes) specifically because a 4-digit space is small enough to brute-force otherwise — combined with the LAN-only restriction below, that keeps guessing impractical without making it a real security boundary. Don't expose this bridge to the open internet.
-- Manage devices either from **Settings → Paired Devices** in the dashboard itself, or from the standalone admin page at `/admin` (see below) — both talk to the same registry. Adding a device shows its one-time pairing code once; copy it before dismissing the banner.
+- Manage devices from **Workbench** (`/workbench`, admin role only — see below); Adding a device shows its one-time pairing code once; copy it before dismissing the banner.
 - On a new/unpaired screen, the dashboard shows a "Pair this TV" lock screen instead of the normal UI. Enter the code there; it's stored in that browser's `localStorage` and sent on every request from then on. You can also pre-seed it via `?deviceToken=4821` in the URL on first load (handy for kiosk provisioning scripts/shortcuts, since it means never typing a code on the TV itself).
 - Revoking a device (toggle in the table) immediately kicks that screen back to the lock screen on its next request/poll. Deleting removes the record entirely; re-adding a device with the same label issues a brand-new code.
 - `MERCURY_API_KEY` — an optional shared master key (checked via `X-Mercury-Key`/`X-API-Key` header or `?key=`) that bypasses per-device checks entirely, handy for curl/admin scripts. Takes priority over device tokens if both are configured.
 
-**Recovery note:** the registry is cached in memory for performance, so hand-editing `device-tokens.json` directly (e.g. to recover from a full lockout) requires restarting the `Talaria Bridge` service before the change takes effect. Changes made through the Settings UI or `/admin` take effect immediately — and since `/admin` login works independently of device pairing, it's also the easiest way to recover from a full device lockout without touching the filesystem.
+**Recovery note:** the registry is cached in memory for performance, so hand-editing `device-tokens.json` directly (e.g. to recover from a full lockout) requires restarting the `Talaria Bridge` service before the change takes effect. Changes made through Workbench take effect immediately — and since Workbench login works independently of device pairing, it's also the easiest way to recover from a full device lockout without touching the filesystem.
 
-## Admin UI (`/admin`)
+## Login + Workbench (`/workbench`)
 
-A minimal, dependency-free login page served directly by the bridge (no build step) at `http://<server-name-or-ip>:17344/admin` (or through the web service's proxy, if you have one). It's for managing paired devices without needing access to a TV's Settings panel.
+The whole product is login-gated. The site root (`/`) is a single sign-in page (served by the web host, `dashboard-web-server.mjs`) for every staff role; there's no unauthenticated landing page anymore. On success it redirects into **Workbench** at `/workbench` — a minimal, dependency-free staff app served directly by the bridge (no build step), also reachable directly at `http://<server-name-or-ip>:17344/workbench` if you're hitting the bridge without the web host in front of it (Workbench itself has no login screen of its own; without a valid session it bounces back to `/`).
+
+Four roles, each seeing different tabs:
+
+- **Admin** — Overview, Paired Devices, Users, Account.
+- **Manager** — Pick List (placeholder for now), Orders (today's active orders, with a date selector).
+- **Designer** — Pick List, My Orders (same list/component as Manager's Orders, relabeled).
+- **Viewer** — Pick List, Orders (same as Manager; read-only by role, though nothing here is mutable yet).
+
+Every role also gets an **Account** tab (self-service password change).
 
 - **Default login:** username `admin`, password `flowers`. You're forced to set a new password the first time you log in — there's no way to skip this.
-- Credentials are stored (scrypt-hashed, never plaintext) at `artifacts/tooling-local/admin-auth.json`. Sessions are in-memory cookies (12-hour expiry) and don't survive a service restart.
+- Accounts are stored (scrypt-hashed passwords, never plaintext) at `artifacts/tooling-local/workbench-users.json`. Sessions are in-memory cookies (12-hour expiry) and don't survive a service restart.
 - Login attempts are rate-limited per IP (10 per 5 minutes).
-- Once logged in, it shows the same paired-device list, add/revoke/rename/delete controls as the in-dashboard Settings panel, plus a "Change password" link.
-- If you ever get fully locked out (e.g. forgot the password after changing it), delete `artifacts/tooling-local/admin-auth.json` and restart the service — it regenerates the default `admin` / `flowers` account on next boot.
+- Admins manage other accounts from the **Users** tab: create (a one-time temporary password is shown once), change role, enable/disable, reset password, or delete. The last enabled admin account can't be disabled, deleted, or demoted, to avoid locking everyone out.
+- If you ever get fully locked out (e.g. forgot the password after changing it), delete `artifacts/tooling-local/workbench-users.json` and restart the service — it regenerates the default `admin` / `flowers` account on next boot.
 
 ## Windows Installer + Service
 
