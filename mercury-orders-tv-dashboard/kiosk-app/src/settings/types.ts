@@ -1,4 +1,4 @@
-export type SettingsSectionId = 'pages' | 'ticker' | 'shop' | 'gating' | 'audio' | 'feed' | 'api';
+export type SettingsSectionId = 'pages' | 'ticker' | 'shop' | 'gating' | 'audio' | 'feed' | 'api' | 'devices';
 
 export type SoundLibraryEntryKind = 'preset' | 'custom';
 

@@ -45,6 +45,10 @@ import {
   fetchTicketStatus,
   fetchUndeliveredOrders,
   saveDashboardServerConfig,
+  setDeviceToken,
+  getDeviceToken,
+  checkDevicePairing,
+  WorkflowApiError,
 } from './lib/api';
 import { deriveStage } from './lib/stageResolver';
 import {
@@ -72,6 +76,7 @@ import { SettingsSidebarNav } from './settings/SettingsSidebarNav';
 import { TickerPreviewPanel } from './settings/TickerPreviewPanel';
 import { GatingPreviewPanel } from './settings/GatingPreviewPanel';
 import { SoundLibraryTable } from './settings/SoundLibraryTable';
+import { DeviceInfoPanel } from './settings/DeviceInfoPanel';
 import appPackage from '../package.json';
 
 type GroupedCards = Record<StatusStage, BoardCard[]>;
@@ -290,6 +295,7 @@ const DASHBOARD_MODE_STORAGE_KEY = 'kiosk_dashboard_mode';
 const AUDIO_ALERTS_STORAGE_KEY = 'kiosk_audio_alerts';
 const DASHBOARD_CLIENT_CONFIG_STORAGE_KEY = 'kiosk_dashboard_client_config_v1';
 const DASHBOARD_CONFIG_STORAGE_KEY_LEGACY = 'kiosk_dashboard_user_config_v1';
+const DEVICE_TOKEN_STORAGE_KEY = 'kiosk_device_token_v1';
 const UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 const MARKETPLACE_REGEX = /\b(grub\s*hub|uber\s*eats|door\s*dash|doordash)\b/i;
 const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
@@ -317,7 +323,7 @@ const DEFAULT_DASHBOARD_CONFIG: DashboardUserConfig = {
   hourlyToneBeepDurationMs: 400,
   hourlyToneCustomSoundId: '',
   hourlyToneFrequencyHz: 880,
-  tickerScrollDurationSec: 22,
+  tickerScrollDurationSec: 44,
   tickerWeatherZip: '15212',
   tickerModules: normalizeTickerModuleIds(undefined),
   enabledPageIds: ['alerts_active'],
@@ -1119,6 +1125,18 @@ function initialAudioAlertsEnabled(): boolean {
     return parseToggle(saved);
   } catch {
     return false;
+  }
+}
+
+function initialDeviceToken(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    const query = new URLSearchParams(window.location.search);
+    const fromQuery = String(query.get('deviceToken') || '').trim();
+    if (fromQuery) return fromQuery;
+    return String(window.localStorage.getItem(DEVICE_TOKEN_STORAGE_KEY) || '').trim();
+  } catch {
+    return '';
   }
 }
 
@@ -3983,6 +4001,13 @@ export default function App() {
   const [activeOrderSearchQuery, setActiveOrderSearchQuery] = useState('');
   const [isAudioAlertsEnabled, setIsAudioAlertsEnabled] = useState<boolean>(() => initialAudioAlertsEnabled());
   const [isDashboardMode, setIsDashboardMode] = useState<boolean>(() => initialDashboardMode());
+  const [devicePairingChecked, setDevicePairingChecked] = useState(false);
+  const [isDevicePaired, setIsDevicePaired] = useState(true);
+  const [pairedDeviceLabel, setPairedDeviceLabel] = useState('');
+  const [pairedDeviceId, setPairedDeviceId] = useState('');
+  const [pairingError, setPairingError] = useState('');
+  const [pairingCodeDraft, setPairingCodeDraft] = useState('');
+  const [isPairingSubmitting, setIsPairingSubmitting] = useState(false);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('pages');
   const [pageSettingsPageId, setPageSettingsPageId] = useState<DashboardPageId | ''>('');
@@ -4075,7 +4100,7 @@ export default function App() {
     [config, editingConfig, isConfigOpen],
   );
   const customLogoSrc = useMemo(
-    () => (configForLogoPreview.customLogoDataUrl ? configForLogoPreview.customLogoDataUrl : '/olivers.png'),
+    () => (configForLogoPreview.customLogoDataUrl ? configForLogoPreview.customLogoDataUrl : '/talaria-icon.jpg'),
     [configForLogoPreview.customLogoDataUrl],
   );
   const dashboardTitle = useMemo(() => {
@@ -4777,6 +4802,13 @@ export default function App() {
     [selectedDate, selectedDateKey],
   );
   const nextDaySummaryCount = includeNextDay ? visibleNextDayCount : hiddenNextDayCount;
+
+  // pollBoard is defined ahead of handlePairingLost (declared further below,
+  // alongside the rest of the pairing state) but needs to call it on a 401 —
+  // routed through a ref, same pattern used elsewhere in this component
+  // (see hourlyToneConfigRef), so pollBoard's own dependency array doesn't
+  // need to churn every time the pairing handler identity changes.
+  const handlePairingLostRef = useRef<(reason: string) => void>(() => {});
 
   const pollBoard = useCallback(async () => {
     const trackActivePaneSpinner = activePaneSpinnerRequestedRef.current;
@@ -6401,8 +6433,12 @@ export default function App() {
       setLastUpdated(new Date().toLocaleTimeString());
       hasCompletedInitialPollRef.current = true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
+      if (err instanceof WorkflowApiError && err.status === 401) {
+        handlePairingLostRef.current('This TV’s pairing code was revoked. Enter a new code below.');
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+      }
     } finally {
       if (trackActivePaneSpinner) {
         activePaneSpinnerInFlightRef.current = Math.max(0, activePaneSpinnerInFlightRef.current - 1);
@@ -6473,14 +6509,91 @@ export default function App() {
     setWorkflowBaseUrlOverride(config.mercuryBaseUrl);
   }, [config.mercuryBaseUrl]);
 
+  // Shared by the mount-time pairing check and by any regular API call that
+  // comes back 401 mid-session (see pollBoard's catch below), so a screen
+  // that was already open when pairing got turned on/revoked converges on
+  // the exact same lock screen a brand-new, never-loaded TV would see —
+  // instead of just showing a generic connection-error banner until someone
+  // thinks to reload it.
+  const handlePairingLost = useCallback((reason: string) => {
+    setDeviceToken('');
+    try {
+      window.localStorage.removeItem(DEVICE_TOKEN_STORAGE_KEY);
+    } catch {
+      // localStorage unavailable (private mode, policy, etc)
+    }
+    setPairedDeviceLabel('');
+    setPairedDeviceId('');
+    setIsDevicePaired(false);
+    setPairingError(reason || 'Invalid or revoked pairing code.');
+    setDevicePairingChecked(true);
+  }, []);
+
   useEffect(() => {
+    handlePairingLostRef.current = handlePairingLost;
+  }, [handlePairingLost]);
+
+  const runPairingCheck = useCallback(async (candidateToken: string): Promise<boolean> => {
+    setDeviceToken(candidateToken);
+    const result = await checkDevicePairing(candidateToken);
+
+    if (result.ok) {
+      if (result.paired) {
+        try {
+          window.localStorage.setItem(DEVICE_TOKEN_STORAGE_KEY, candidateToken);
+        } catch {
+          // localStorage unavailable (private mode, policy, etc)
+        }
+        setPairedDeviceLabel(result.label || '');
+        setPairedDeviceId(result.deviceId || '');
+      }
+      setIsDevicePaired(true);
+      setPairingError('');
+      setDevicePairingChecked(true);
+      return true;
+    }
+
+    if (result.status === 401) {
+      handlePairingLost(result.error || 'Invalid or revoked pairing code.');
+      return false;
+    }
+
+    // Network/transport failure — don't force an already-paired screen into the
+    // lock screen just because the bridge was briefly unreachable.
+    setDevicePairingChecked(true);
+    return true;
+  }, [handlePairingLost]);
+
+  useEffect(() => {
+    void runPairingCheck(initialDeviceToken());
+    // Only run once on mount; re-pairing happens explicitly via the lock screen form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handlePairingSubmit = useCallback(async () => {
+    const candidate = pairingCodeDraft.trim();
+    if (!candidate) {
+      setPairingError('Enter this TV’s pairing code.');
+      return;
+    }
+    setIsPairingSubmitting(true);
+    try {
+      const ok = await runPairingCheck(candidate);
+      if (ok) setPairingCodeDraft('');
+    } finally {
+      setIsPairingSubmitting(false);
+    }
+  }, [pairingCodeDraft, runPairingCheck]);
+
+  useEffect(() => {
+    if (!isDevicePaired) return;
     const pollMs = clampInteger(config.pollMs, 15000, 60000, DEFAULT_POLL_MS);
     void runPoll();
     const timer = window.setInterval(() => {
       void runPoll();
     }, pollMs);
     return () => window.clearInterval(timer);
-  }, [config.pollMs, runPoll]);
+  }, [config.pollMs, runPoll, isDevicePaired]);
 
   useEffect(() => {
     audioAlertsEnabledRef.current = isAudioAlertsEnabled;
@@ -7446,9 +7559,43 @@ export default function App() {
     };
   }, [config.pageAutoRotateEnabled, config.pageAutoRotateIntervalSec, hasMultiplePages, goToNextPage, isUserActive]);
 
+  if (devicePairingChecked && !isDevicePaired) {
+    return (
+      <div className="app app--pairing-lock" ref={appRef}>
+        <div className="app__pairing-lock-card">
+          <h1>Pair this TV</h1>
+          <p>
+            This dashboard needs a pairing code before it can connect. Add this screen from
+            Settings &gt; Paired Devices on an already-paired dashboard, then enter its code below.
+          </p>
+          {pairingError ? <p className="app__pairing-lock-error">{pairingError}</p> : null}
+          <input
+            type="text"
+            inputMode="numeric"
+            value={pairingCodeDraft}
+            placeholder="0000"
+            autoFocus
+            onChange={(event) => setPairingCodeDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void handlePairingSubmit();
+            }}
+          />
+          <button
+            type="button"
+            className="app__settings-btn app__settings-btn--primary"
+            disabled={isPairingSubmitting}
+            onClick={() => void handlePairingSubmit()}
+          >
+            {isPairingSubmitting ? 'Checking…' : 'Pair this TV'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`app${isDashboardMode ? ' app--dashboard' : ''}${error ? ' app--with-error' : ''}`} style={tickerClockStyle} ref={appRef}>
-      <div className="app__version-badge" title={`Dashboard version ${APP_VERSION_LABEL}`}>
+      <div className="app__version-badge" title={`Dashboard version ${APP_VERSION_LABEL}${pairedDeviceLabel ? ` — Paired as ${pairedDeviceLabel}` : ''}`}>
         {APP_VERSION_LABEL}
       </div>
       <header className="app__header">
@@ -7589,7 +7736,7 @@ export default function App() {
       {isConfigOpen ? (
         <div className="app__settings-overlay" onClick={(e) => { if (e.target === e.currentTarget) cancelConfigChanges(); }}>
           <section className="app__settings-page">
-            <SettingsSidebarNav activeSection={settingsSection} onSelect={setSettingsSection} />
+            <SettingsSidebarNav activeSection={settingsSection} onSelect={setSettingsSection} deviceLabel={pairedDeviceLabel} />
 
             <div className="app__settings-main">
               <div className="app__settings-topbar">
@@ -7969,7 +8116,7 @@ export default function App() {
                           </div>
                           <div className="app__config-branding-preview-frame">
                             <img
-                              src={editingConfig.customLogoDataUrl || '/olivers.png'}
+                              src={editingConfig.customLogoDataUrl || '/talaria-icon.jpg'}
                               alt="Configured shop logo preview"
                             />
                           </div>
@@ -8496,6 +8643,16 @@ export default function App() {
                     </label>
                   </div>
                 </section>
+                ) : null}
+
+                {settingsSection === 'devices' ? (
+                  <DeviceInfoPanel
+                    deviceId={pairedDeviceId}
+                    deviceLabel={pairedDeviceLabel}
+                    deviceToken={getDeviceToken()}
+                    isPaired={Boolean(pairedDeviceId)}
+                    serverOrigin={typeof window !== 'undefined' ? window.location.origin : ''}
+                  />
                 ) : null}
               </div>
 

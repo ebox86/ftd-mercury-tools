@@ -1,8 +1,8 @@
 param(
   [string]$ServiceHostExePath = "",
   [string]$NodeExePath = "",
-  [string]$BridgeServiceName = "FTD Mercury Workflow Bridge",
-  [string]$WebServiceName = "FTD Mercury Dashboard Web",
+  [string]$BridgeServiceName = "Talaria Bridge",
+  [string]$WebServiceName = "Talaria Web",
   [int]$BridgePort = 17344,
   [int]$WebPort = 5173,
   [string]$MercuryBaseUrl = "http://127.0.0.1/WsMercuryWebAPI",

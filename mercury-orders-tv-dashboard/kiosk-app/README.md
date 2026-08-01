@@ -1,4 +1,4 @@
-# Mercury Kiosk App (Rotating Horizontal Board)
+# Talaria Kiosk App (Rotating Horizontal Board)
 
 This scaffold renders a kiosk-oriented board on a gray background with:
 
@@ -8,7 +8,7 @@ This scaffold renders a kiosk-oriented board on a gray background with:
 - High-visibility flashing alerts for inbound tickets not yet created as orders
 - Extra urgency styling for Uber Eats / DoorDash signals
 
-![Mercury Kiosk Dashboard Screenshot](../../public/dashboard.png)
+![Talaria Dashboard Screenshot](../../public/dashboard.png)
 
 ## Layout
 

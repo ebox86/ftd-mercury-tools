@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talaria Admin</title>
+<link rel="stylesheet" href="./admin.css">
+</head>
+<body>
+
+<div id="login-view" class="auth-screen hidden">
+  <div class="auth-card">
+    <div class="auth-brand">Talaria</div>
+    <h1>Admin sign in</h1>
+    <p class="auth-sub">Manage paired TVs and bridge settings.</p>
+    <label for="login-username">Username</label>
+    <input id="login-username" type="text" autocomplete="username" value="admin">
+    <label for="login-password">Password</label>
+    <input id="login-password" type="password" autocomplete="current-password">
+    <div class="auth-error" id="login-error"></div>
+    <button class="btn btn-primary btn-block" id="login-submit">Sign in</button>
+  </div>
+</div>
+
+<div id="change-password-view" class="auth-screen hidden">
+  <div class="auth-card">
+    <div class="auth-brand">Talaria</div>
+    <h1 id="cpw-title">Change your password</h1>
+    <p class="auth-sub" id="cpw-sub">You're using the default password &mdash; set a new one before continuing.</p>
+    <label for="cpw-current">Current password</label>
+    <input id="cpw-current" type="password" autocomplete="current-password">
+    <label for="cpw-new">New password</label>
+    <input id="cpw-new" type="password" autocomplete="new-password">
+    <div class="auth-hint">At least 6 characters.</div>
+    <div class="auth-error" id="cpw-error"></div>
+    <button class="btn btn-primary btn-block" id="cpw-submit">Save password</button>
+    <button class="btn btn-link hidden" id="cpw-cancel">Cancel</button>
+  </div>
+</div>
+
+<div id="app-shell" class="shell hidden">
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-mark"><img src="./talaria-icon.jpg" alt="Talaria"></div>
+      <div class="sidebar-brand-text">
+        <strong>Talaria</strong>
+        <span>Admin</span>
+      </div>
+    </div>
+    <div class="sidebar-nav">
+      <button type="button" class="nav-item" data-view="overview">Overview</button>
+      <button type="button" class="nav-item" data-view="devices">Paired Devices</button>
+      <button type="button" class="nav-item" data-view="account">Account</button>
+    </div>
+    <div class="sidebar-footer">
+      <div class="sidebar-user">Signed in as <strong id="sidebar-username">admin</strong></div>
+      <button type="button" class="btn btn-ghost btn-block" id="logout-btn">Log out</button>
+    </div>
+  </nav>
+
+  <main class="content">
+    <section id="view-overview" class="view">
+      <header class="view-header">
+        <h1>Overview</h1>
+        <p>Bridge status at a glance.</p>
+      </header>
+      <div class="card-grid" id="overview-cards"></div>
+    </section>
+
+    <section id="view-devices" class="view hidden">
+      <header class="view-header">
+        <h1>Paired Devices</h1>
+        <p>Every TV connects with its own 4-digit pairing code. Once at least one device exists, any browser without a valid code is refused by the bridge. Revoking or deleting a device only affects that one screen.</p>
+      </header>
+
+      <div class="panel">
+        <div class="add-row">
+          <input id="new-device-label" type="text" placeholder="e.g. Front Lobby TV">
+          <button class="btn btn-primary" id="add-device-btn">Add device</button>
+        </div>
+        <div class="banner banner-error hidden" id="devices-error"></div>
+
+        <div class="token-banner hidden" id="token-banner">
+          <button type="button" class="btn btn-icon token-banner-dismiss" id="token-banner-dismiss" aria-label="Dismiss">&times;</button>
+
+          <div class="howto-step">
+            <div class="howto-step-num">1</div>
+            <div class="howto-step-body">
+              <strong id="token-banner-label"></strong>
+              <span>pairing code (shown once) &mdash; copy it now:</span>
+              <div class="token-value" id="token-banner-value"></div>
+            </div>
+          </div>
+
+          <div class="howto-step">
+            <div class="howto-step-num">2</div>
+            <div class="howto-step-body">
+              <strong>On that TV, open a browser to:</strong>
+              <div class="howto-url-row">
+                <svg class="howto-tv-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect x="2" y="4" width="20" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M8 21h8M12 18v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+                <code class="howto-url" id="howto-url">&hellip;</code>
+                <button type="button" class="btn btn-secondary btn-copy" id="howto-url-copy">Copy</button>
+              </div>
+              <span class="howto-alt" id="howto-url-alt"></span>
+            </div>
+          </div>
+
+          <div class="howto-step">
+            <div class="howto-step-num">3</div>
+            <div class="howto-step-body">
+              <strong>Enter the code above</strong>
+              <span>The TV shows a "Pair this TV" screen &mdash; type the code and submit. It connects immediately.</span>
+            </div>
+          </div>
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr><th>Label</th><th>Status</th><th>Created</th><th>Last seen</th><th></th></tr>
+          </thead>
+          <tbody id="devices-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="view-account" class="view hidden">
+      <header class="view-header">
+        <h1>Account</h1>
+        <p>Update the password used to sign in here.</p>
+      </header>
+
+      <div class="panel panel-narrow">
+        <label for="account-current">Current password</label>
+        <input id="account-current" type="password" autocomplete="current-password">
+        <label for="account-new">New password</label>
+        <input id="account-new" type="password" autocomplete="new-password">
+        <div class="auth-hint">At least 6 characters.</div>
+        <div class="banner banner-error hidden" id="account-error"></div>
+        <div class="banner banner-success hidden" id="account-success"></div>
+        <button class="btn btn-primary" id="account-submit">Save password</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="./admin.js"></script>
+</body>
+</html>

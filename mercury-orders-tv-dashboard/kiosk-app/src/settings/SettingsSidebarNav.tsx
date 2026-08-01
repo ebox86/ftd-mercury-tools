@@ -6,16 +6,17 @@ import type { SettingsSectionId } from './types';
 interface SettingsSidebarNavProps {
   activeSection: SettingsSectionId;
   onSelect: (section: SettingsSectionId) => void;
+  deviceLabel?: string;
 }
 
-export function SettingsSidebarNav({ activeSection, onSelect }: SettingsSidebarNavProps) {
+export function SettingsSidebarNav({ activeSection, onSelect, deviceLabel }: SettingsSidebarNavProps) {
   return (
     <nav className="app__settings-sidebar" aria-label="Settings sections">
       <div className="app__settings-brand">
         <span className="app__settings-brand-icon"><FontAwesomeIcon icon={faGear} /></span>
         <span className="app__settings-brand-copy">
-          <strong>Dashboard Settings</strong>
-          <span>TV Kiosk &middot; Mercury Orders</span>
+          <strong>Talaria Settings</strong>
+          <span>TV Kiosk &middot; Talaria</span>
         </span>
       </div>
       {SETTINGS_SECTION_GROUPS.map(group => (
@@ -34,7 +35,7 @@ export function SettingsSidebarNav({ activeSection, onSelect }: SettingsSidebarN
         </div>
       ))}
       <div className="app__settings-signed-in">
-        Signed in as <strong>Store Admin</strong>
+        Signed in as <strong>{deviceLabel || 'This device'}</strong>
       </div>
     </nav>
   );

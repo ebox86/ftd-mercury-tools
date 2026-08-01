@@ -1,8 +1,13 @@
 param(
   [string]$ServiceHostExePath = "",
-  [string]$BridgeServiceName = "FTD Mercury Workflow Bridge",
-  [string]$WebServiceName = "FTD Mercury Dashboard Web"
+  [string]$BridgeServiceName = "Talaria Bridge",
+  [string]$WebServiceName = "Talaria Web"
 )
+
+# Upgrading a pre-Talaria install? Run this once first with the old names:
+#   .\uninstall-mercury-dashboard-services.ps1 -BridgeServiceName "FTD Mercury Workflow Bridge" -WebServiceName "FTD Mercury Dashboard Web"
+# before installing the new version, or you'll end up with both the old and
+# new named services registered side by side.
 
 Set-StrictMode -Version 2
 $ErrorActionPreference = "Stop"

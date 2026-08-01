@@ -9,6 +9,11 @@ export default defineConfig(function (_a) {
         || env.VITE_WORKFLOW_PROXY_TARGET
         || 'http://127.0.0.1:17344').trim();
     return {
+        // Relative (not root-absolute) asset URLs, so the same build works
+        // whether it's served from the site root (raw port, e.g. TVs hitting
+        // :5173 directly) or from a subpath behind a reverse proxy (e.g. IIS at
+        // /Talaria/) - no separate build needed per deployment target.
+        base: './',
         plugins: [react()],
         server: {
             host: true,

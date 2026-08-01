@@ -13,6 +13,11 @@ export default defineConfig(({ mode }) => {
   ).trim();
 
   return {
+    // Relative (not root-absolute) asset URLs, so the same build works
+    // whether it's served from the site root (raw port, e.g. TVs hitting
+    // :5173 directly) or from a subpath behind a reverse proxy (e.g. IIS at
+    // /Talaria/) - no separate build needed per deployment target.
+    base: './',
     plugins: [react()],
     server: {
       host: true,

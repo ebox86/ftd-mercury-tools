@@ -1,0 +1,8 @@
+{
+  "name": "talaria",
+  "private": true,
+  "scripts": {
+    "dev": "node tools/dev.mjs",
+    "preview": "node tools/preview.mjs"
+  }
+}

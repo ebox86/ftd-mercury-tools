@@ -22,7 +22,7 @@
   #define EmbeddedMapboxToken ""
 #endif
 
-#define MyAppName "FTD Mercury Orders Dashboard"
+#define MyAppName "Talaria"
 #define MyAppId "{{2CFD7D74-C9C0-4660-A8BD-70AEF2E2505E}}"
 
 [Setup]
@@ -33,14 +33,14 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-DefaultDirName=C:\FTDTools\MercuryOrdersDashboard
+DefaultDirName=C:\FTDTools\Talaria
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 DisableDirPage=yes
 Compression=lzma
 SolidCompression=yes
 OutputDir=..\dist
-OutputBaseFilename=FTD.MercuryDashboard.Setup.{#MyAppVersion}
+OutputBaseFilename=Talaria.Setup.{#MyAppVersion}
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
@@ -63,6 +63,10 @@ Filename: "{app}\service-runtime\FTD.Mercury.Dashboard.ServiceHost.exe"; \
   Parameters: "{code:GetInstallWebParameters}"; \
   StatusMsg: "Installing Mercury dashboard web service..."; \
   Flags: runhidden waituntilterminated
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
+  Parameters: "{code:GetIisSetupParameters}"; \
+  StatusMsg: "Configuring IIS reverse proxy (optional)..."; \
+  Flags: runhidden waituntilterminated
 
 [UninstallRun]
 Filename: "{app}\service-runtime\FTD.Mercury.Dashboard.ServiceHost.exe"; \
@@ -73,6 +77,10 @@ Filename: "{app}\service-runtime\FTD.Mercury.Dashboard.ServiceHost.exe"; \
   Parameters: "{code:GetUninstallBridgeParameters}"; \
   Flags: runhidden waituntilterminated; \
   RunOnceId: "FTD.MercuryDashboard.Uninstall.Bridge"
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
+  Parameters: "{code:GetIisTeardownParameters}"; \
+  Flags: runhidden waituntilterminated; \
+  RunOnceId: "Talaria.Uninstall.IisProxy"
 
 [Code]
 var
@@ -159,8 +167,8 @@ begin
   CmdWebPort := ReadSwitchValue('WEBPORT', '5173');
   CmdBridgeHost := ReadSwitchValue('BRIDGEHOST', '0.0.0.0');
   CmdWebHost := ReadSwitchValue('WEBHOST', '0.0.0.0');
-  CmdBridgeServiceName := ReadSwitchValue('BRIDGESERVICENAME', 'FTD Mercury Workflow Bridge');
-  CmdWebServiceName := ReadSwitchValue('WEBSERVICENAME', 'FTD Mercury Dashboard Web');
+  CmdBridgeServiceName := ReadSwitchValue('BRIDGESERVICENAME', 'Talaria Bridge');
+  CmdWebServiceName := ReadSwitchValue('WEBSERVICENAME', 'Talaria Web');
   CmdLocalNetworkOnly := NormalizeBool(ReadSwitchValue('LOCALNETWORKONLY', 'true'));
   CmdMapboxToken := ReadSwitchValue('MAPBOXTOKEN', '{#EmbeddedMapboxToken}');
 
@@ -267,4 +275,21 @@ begin
     '--service-uninstall ' +
     '--service-role=bridge ' +
     '--service-name=' + QuoteCmdValue(CmdBridgeServiceName);
+end;
+
+function GetIisSetupParameters(Param: string): string;
+begin
+  Result :=
+    '-NoProfile -ExecutionPolicy Bypass -File ' + QuoteCmdValue(ExpandConstant('{app}') + '\tools\setup-iis-proxy.ps1') + ' ' +
+    '-PhysicalPath ' + QuoteCmdValue(ExpandConstant('{app}') + '\iis-app') + ' ' +
+    '-UpstreamUrl ' + QuoteCmdValue('http://127.0.0.1:' + CmdWebPort) + ' ' +
+    '-Silent';
+end;
+
+function GetIisTeardownParameters(Param: string): string;
+begin
+  Result :=
+    '-NoProfile -ExecutionPolicy Bypass -File ' + QuoteCmdValue(ExpandConstant('{app}') + '\tools\teardown-iis-proxy.ps1') + ' ' +
+    '-PhysicalPath ' + QuoteCmdValue(ExpandConstant('{app}') + '\iis-app') + ' ' +
+    '-Silent';
 end;

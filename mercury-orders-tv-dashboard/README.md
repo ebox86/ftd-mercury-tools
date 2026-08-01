@@ -1,8 +1,8 @@
-# Mercury Orders TV Dashboard
+# Talaria
 
-This folder contains a live Mercury dashboard setup for kiosk operations (design + delivery tracking).
+A live Mercury order dashboard for TV/kiosk operations (design + delivery tracking).
 
-![Mercury Kiosk Dashboard Screenshot](../public/dashboard.png)
+![Talaria Dashboard Screenshot](../public/dashboard.png)
 
 ## Key Components
 
@@ -11,6 +11,16 @@ This folder contains a live Mercury dashboard setup for kiosk operations (design
 - `reference/` Mercury API maps and schema notes
 - `start-live-mvp.*` launchers for direct API mode or SOAP bridge mode
 - `start-mvp.*` launchers for local SOAP bridge + kiosk app
+
+## Local Dev / Poking Around (isolated from any live install)
+
+```powershell
+npm run dev
+```
+
+Runs `tools/dev.mjs`, which starts a throwaway bridge + kiosk app on their own ports (`18344`/`5180` by default, override with `DEV_BRIDGE_PORT`/`DEV_KIOSK_PORT`) against a separate `.dev-data/` directory — so any test devices or admin password changes you make while poking around never touch a real install's `artifacts/tooling-local/` (device-tokens.json, admin-auth.json, dashboard config), even when run from the same checkout as one. Ctrl+C stops both. Prints the URLs (including `/admin`) on startup.
+
+This never starts, stops, or otherwise touches an installed/live `Talaria Bridge` or `Talaria Web` service — those only change via a proper release + reinstall.
 
 ## Start (Preferred)
 
@@ -65,15 +75,41 @@ Environment variables:
 - `MERCURY_SQL_SERVER` / `MERCURY_SQL_DATABASE` — default `localhost` / `store`
 - `MERCURY_SQLCMD_PATH` — override if `sqlcmd.exe` isn't in one of the default SQL Server Client SDK locations
 
+## Device Pairing
+
+Every TV/kiosk can carry its own pairing token instead of every browser on the network being able to hit the bridge with equal access — useful when the volume of polling from the live dashboard would otherwise let a stray browser tab overload the API.
+
+**How it works:**
+
+- The bridge keeps a device registry at `mercury-orders-tv-dashboard/artifacts/tooling-local/device-tokens.json` (gitignored). It starts empty, and the bridge is fully open — exactly like before this feature existed — until you create the first device.
+- The moment a device exists, every request (dashboard data, Settings save, everything) requires a valid `X-Device-Token` header or `?deviceToken=` query param matching an *enabled* device. This stays true even if every device is later revoked — revoking your last screen locks the bridge down rather than reopening it. The only way back to a fully open bridge is deleting every device record (via the trash icon, or by wiping `device-tokens.json` and restarting the service).
+- Each device's pairing code is a 4-digit number (e.g. `4821`), chosen to be easy to type on a TV or kiosk. Wrong-code attempts are rate-limited per IP (30 per 5 minutes) specifically because a 4-digit space is small enough to brute-force otherwise — combined with the LAN-only restriction below, that keeps guessing impractical without making it a real security boundary. Don't expose this bridge to the open internet.
+- Manage devices either from **Settings → Paired Devices** in the dashboard itself, or from the standalone admin page at `/admin` (see below) — both talk to the same registry. Adding a device shows its one-time pairing code once; copy it before dismissing the banner.
+- On a new/unpaired screen, the dashboard shows a "Pair this TV" lock screen instead of the normal UI. Enter the code there; it's stored in that browser's `localStorage` and sent on every request from then on. You can also pre-seed it via `?deviceToken=4821` in the URL on first load (handy for kiosk provisioning scripts/shortcuts, since it means never typing a code on the TV itself).
+- Revoking a device (toggle in the table) immediately kicks that screen back to the lock screen on its next request/poll. Deleting removes the record entirely; re-adding a device with the same label issues a brand-new code.
+- `MERCURY_API_KEY` — an optional shared master key (checked via `X-Mercury-Key`/`X-API-Key` header or `?key=`) that bypasses per-device checks entirely, handy for curl/admin scripts. Takes priority over device tokens if both are configured.
+
+**Recovery note:** the registry is cached in memory for performance, so hand-editing `device-tokens.json` directly (e.g. to recover from a full lockout) requires restarting the `Talaria Bridge` service before the change takes effect. Changes made through the Settings UI or `/admin` take effect immediately — and since `/admin` login works independently of device pairing, it's also the easiest way to recover from a full device lockout without touching the filesystem.
+
+## Admin UI (`/admin`)
+
+A minimal, dependency-free login page served directly by the bridge (no build step) at `http://<server-name-or-ip>:17344/admin` (or through the web service's proxy, if you have one). It's for managing paired devices without needing access to a TV's Settings panel.
+
+- **Default login:** username `admin`, password `flowers`. You're forced to set a new password the first time you log in — there's no way to skip this.
+- Credentials are stored (scrypt-hashed, never plaintext) at `artifacts/tooling-local/admin-auth.json`. Sessions are in-memory cookies (12-hour expiry) and don't survive a service restart.
+- Login attempts are rate-limited per IP (10 per 5 minutes).
+- Once logged in, it shows the same paired-device list, add/revoke/rename/delete controls as the in-dashboard Settings panel, plus a "Change password" link.
+- If you ever get fully locked out (e.g. forgot the password after changing it), delete `artifacts/tooling-local/admin-auth.json` and restart the service — it regenerates the default `admin` / `flowers` account on next boot.
+
 ## Windows Installer + Service
 
 The repository includes a release workflow that builds a Windows installer and configures auto-start services using a compiled `.NET` Windows service host executable (no PowerShell required for installer setup):
 
 - Workflow: `.github/workflows/mercury-dashboard-release.yml`
-- Installer output: `mercury-orders-tv-dashboard/dist/FTD.MercuryDashboard.Setup.<version>.exe`
+- Installer output: `mercury-orders-tv-dashboard/dist/Talaria.Setup.<version>.exe`
 - Services created by installer:
-  - `FTD Mercury Workflow Bridge` (default port `17344`)
-  - `FTD Mercury Dashboard Web` (default port `5173`)
+  - `Talaria Bridge` (default port `17344`)
+  - `Talaria Web` (default port `5173`)
 - Service host executable installed at: `service-runtime/FTD.Mercury.Dashboard.ServiceHost.exe`
 
 Optional installer switches:

@@ -1,5 +1,6 @@
 # Generated installer/package build outputs
 /mercury-orders-tv-dashboard/artifacts/
+/mercury-orders-tv-dashboard/.dev-data/
 /mercury-orders-tv-dashboard/dist/
 /mercury-orders-tv-dashboard/service-host/FTD.Mercury.Dashboard.ServiceHost/bin/
 /mercury-orders-tv-dashboard/service-host/FTD.Mercury.Dashboard.ServiceHost/obj/

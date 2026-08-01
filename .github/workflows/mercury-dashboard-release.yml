@@ -1,4 +1,4 @@
-name: Mercury Dashboard Release
+name: Talaria Release
 
 on:
   workflow_dispatch:
@@ -315,7 +315,7 @@ jobs:
         id: hash
         run: |
           $version = "${{ steps.meta.outputs.version }}"
-          $installer = Join-Path $PWD "mercury-orders-tv-dashboard\dist\FTD.MercuryDashboard.Setup.$version.exe"
+          $installer = Join-Path $PWD "mercury-orders-tv-dashboard\dist\Talaria.Setup.$version.exe"
           if (-not (Test-Path $installer)) {
             throw "Installer not found: $installer"
           }
@@ -332,7 +332,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: Mercury Dashboard ${{ steps.meta.outputs.version }}
+          name: Talaria ${{ steps.meta.outputs.version }}
           make_latest: false
           files: |
             ${{ steps.hash.outputs.installer }}

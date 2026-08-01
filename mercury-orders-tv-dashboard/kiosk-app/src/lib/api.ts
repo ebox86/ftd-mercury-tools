@@ -82,10 +82,47 @@ export function setWorkflowBaseUrlOverride(raw: string): void {
   runtimeBaseUrlOverride = normalizeBaseUrl(raw);
 }
 
+const DEVICE_TOKEN_HEADER = 'X-Device-Token';
+let runtimeDeviceToken = '';
+
+export function setDeviceToken(raw: string): void {
+  runtimeDeviceToken = String(raw || '').trim();
+}
+
+export function getDeviceToken(): string {
+  return runtimeDeviceToken;
+}
+
+function requestHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { Accept: 'application/json', ...(extra || {}) };
+  if (runtimeDeviceToken) headers[DEVICE_TOKEN_HEADER] = runtimeDeviceToken;
+  return headers;
+}
+
+export class WorkflowApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'WorkflowApiError';
+    this.status = status;
+  }
+}
+
+function currentPageBasePath(): string {
+  // Same-origin requests (no explicit base URL override) need to target
+  // wherever this page actually lives, not always the site root - e.g.
+  // behind an IIS reverse proxy at /Talaria/, "/api/..." must become
+  // "/Talaria/api/...", or it silently misses the proxy and 404s at the
+  // site root instead. This app never changes window.location.pathname
+  // itself (no client-side router), so the current pathname IS the base.
+  if (typeof window === 'undefined') return '';
+  return String(window.location.pathname || '').replace(/\/+$/, '');
+}
+
 export function buildRequestUrl(path: string): string {
   const baseUrl = effectiveBaseUrl();
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  if (!baseUrl) return normalizedPath;
+  if (!baseUrl) return `${currentPageBasePath()}${normalizedPath}`;
 
   if (baseUrl.endsWith('/api/workflow') && normalizedPath.startsWith('/api/workflow/')) {
     return `${baseUrl}${normalizedPath.slice('/api/workflow'.length)}`;
@@ -120,7 +157,7 @@ async function getJson<T>(path: string): Promise<T> {
   try {
     const response = await fetch(requestUrl, {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: requestHeaders(),
     });
     if (!response.ok) {
       let detail = '';
@@ -138,10 +175,11 @@ async function getJson<T>(path: string): Promise<T> {
       } catch {
         detail = '';
       }
-      throw new Error(`Request failed: ${requestUrl} (${response.status})${detail ? `. ${detail}` : ''}`);
+      throw new WorkflowApiError(`Request failed: ${requestUrl} (${response.status})${detail ? `. ${detail}` : ''}`, response.status);
     }
     return response.json() as Promise<T>;
   } catch (error) {
+    if (error instanceof WorkflowApiError) throw error;
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`Cannot reach workflow API at ${requestUrl}. ${reason}`);
   }
@@ -151,14 +189,32 @@ async function putJson<T>(path: string, payload: unknown): Promise<T> {
   const requestUrl = buildRequestUrl(path);
   const response = await fetch(requestUrl, {
     method: 'PUT',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
+    headers: requestHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload || {}),
   });
   if (!response.ok) {
-    throw new Error(`Request failed: ${requestUrl} (${response.status})`);
+    throw new WorkflowApiError(`Request failed: ${requestUrl} (${response.status})`, response.status);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function mutateJson<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, payload?: unknown): Promise<T> {
+  const requestUrl = buildRequestUrl(path);
+  const response = await fetch(requestUrl, {
+    method,
+    headers: requestHeaders({ 'Content-Type': 'application/json' }),
+    body: payload === undefined ? undefined : JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const bodyText = await response.text();
+      const body = bodyText ? (JSON.parse(bodyText) as { error?: unknown }) : {};
+      detail = String(body.error || '').trim();
+    } catch {
+      detail = '';
+    }
+    throw new WorkflowApiError(`Request failed: ${requestUrl} (${response.status})${detail ? `. ${detail}` : ''}`, response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -488,4 +544,91 @@ export async function fetchLifecycleByServiceMsg(serviceMsgNum: string): Promise
     return pickLifecycleSignal(rows);
   }
   return null;
+}
+
+// ── Device pairing ──────────────────────────────────────────────────────────
+// Each physical TV/kiosk carries its own long-lived token (issued from the
+// Settings > Paired Devices panel on an already-paired screen) instead of one
+// secret shared by every client, so a lost or decommissioned screen can be
+// revoked individually. The bridge only enforces this once at least one
+// device has been created; until then every call below behaves as if
+// pairing were not required.
+
+export interface PairedDevice {
+  id: string;
+  label: string;
+  enabled: boolean;
+  createdAt: string | null;
+  lastSeenAt: string | null;
+}
+
+export interface PairDeviceResult {
+  ok: boolean;
+  paired: boolean;
+  deviceId?: string;
+  label?: string;
+  status: number;
+  error?: string;
+}
+
+export async function checkDevicePairing(candidateToken: string): Promise<PairDeviceResult> {
+  const token = String(candidateToken || '').trim();
+  const requestUrl = buildRequestUrl('/api/workflow/device/pair');
+  try {
+    const response = await fetch(requestUrl, {
+      method: 'GET',
+      headers: token ? { Accept: 'application/json', [DEVICE_TOKEN_HEADER]: token } : { Accept: 'application/json' },
+    });
+    const bodyText = await response.text().catch(() => '');
+    let body: Record<string, unknown> = {};
+    try {
+      body = bodyText ? (JSON.parse(bodyText) as Record<string, unknown>) : {};
+    } catch {
+      body = {};
+    }
+    if (!response.ok) {
+      return { ok: false, paired: false, status: response.status, error: String(body.error || 'Invalid pairing code') };
+    }
+    return {
+      ok: true,
+      paired: Boolean(body.paired),
+      deviceId: typeof body.deviceId === 'string' ? body.deviceId : undefined,
+      label: typeof body.label === 'string' ? body.label : undefined,
+      status: response.status,
+    };
+  } catch (error) {
+    return { ok: false, paired: false, status: 0, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function fetchDevices(): Promise<PairedDevice[]> {
+  const result = await getJson<{ devices: PairedDevice[] }>('/api/workflow/devices');
+  return Array.isArray(result?.devices) ? result.devices : [];
+}
+
+export async function createDeviceToken(label: string): Promise<(PairedDevice & { token: string }) | null> {
+  try {
+    const result = await mutateJson<{ device: PairedDevice & { token: string } }>('POST', '/api/workflow/devices', { label });
+    return result?.device || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function updateDeviceRecord(id: string, patch: { label?: string; enabled?: boolean }): Promise<PairedDevice | null> {
+  try {
+    const result = await mutateJson<{ device: PairedDevice }>('PATCH', `/api/workflow/devices/${encodeURIComponent(id)}`, patch);
+    return result?.device || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteDeviceRecord(id: string): Promise<boolean> {
+  try {
+    await mutateJson<{ ok: boolean }>('DELETE', `/api/workflow/devices/${encodeURIComponent(id)}`);
+    return true;
+  } catch {
+    return false;
+  }
 }

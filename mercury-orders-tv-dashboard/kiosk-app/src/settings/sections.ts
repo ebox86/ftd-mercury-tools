@@ -14,6 +14,7 @@ export const SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'audio', label: 'Audio Alerts', group: 'Operations' },
   { id: 'feed', label: 'Feed & Timing', group: 'Advanced' },
   { id: 'api', label: 'API & Mercury', group: 'Advanced' },
+  { id: 'devices', label: 'Device Info', group: 'Advanced' },
 ];
 
 export const SETTINGS_SECTION_GROUPS: string[] = ['Dashboard', 'Operations', 'Advanced'];

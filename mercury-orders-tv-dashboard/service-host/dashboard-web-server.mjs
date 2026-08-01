@@ -11,6 +11,8 @@ const webHost = String(process.env.WEB_HOST || '0.0.0.0').trim() || '0.0.0.0';
 const webPort = Number(process.env.WEB_PORT || 5173);
 const workflowApiBaseUrl = String(process.env.WORKFLOW_API_BASE_URL || 'http://127.0.0.1:17344').trim().replace(/\/+$/, '');
 const distDir = join(__dirname, '..', 'kiosk-app', 'dist');
+const publicDir = join(__dirname, 'public');
+const dashboardPrefix = '/dashboard';
 
 if (!Number.isFinite(webPort) || webPort <= 0 || webPort > 65535) {
   throw new Error(`WEB_PORT must be a valid port. Got: ${process.env.WEB_PORT}`);
@@ -56,10 +58,10 @@ function normalizeClientPath(pathname) {
   return candidate;
 }
 
-function safeFilePath(pathname) {
+function safeFilePath(rootDir, pathname) {
   const rel = normalizeClientPath(pathname);
-  const fullPath = join(distDir, rel);
-  const normalizedRoot = normalize(`${distDir}\\`).toLowerCase();
+  const fullPath = join(rootDir, rel);
+  const normalizedRoot = normalize(`${rootDir}\\`).toLowerCase();
   const normalizedTarget = normalize(fullPath).toLowerCase();
 
   if (!normalizedTarget.startsWith(normalizedRoot)) {
@@ -74,7 +76,7 @@ function safeFilePath(pathname) {
     return null;
   }
 
-  const fallback = join(distDir, 'index.html');
+  const fallback = join(rootDir, 'index.html');
   if (existsSync(fallback) && statSync(fallback).isFile()) {
     return fallback;
   }
@@ -90,8 +92,8 @@ function sendJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload, null, 2));
 }
 
-function proxyApiRequest(req, res, targetBaseUrl) {
-  const targetUrl = new URL(req.url || '/', targetBaseUrl);
+function proxyApiRequest(req, res, targetBaseUrl, pathAndSearchOverride) {
+  const targetUrl = new URL(pathAndSearchOverride || req.url || '/', targetBaseUrl);
   const useHttps = targetUrl.protocol === 'https:';
   const transport = useHttps ? httpsRequest : httpRequest;
 
@@ -137,23 +139,68 @@ const server = createServer((req, res) => {
     });
   }
 
-  if (pathname === '/health' || pathname.startsWith('/api/')) {
+  // Bridge-hosted: the admin UI and the raw /api + /health surface. Proxied
+  // through unchanged so /admin works identically whether hit directly on
+  // this service's own port or via an upstream reverse proxy (e.g. IIS).
+  if (pathname === '/health' || pathname.startsWith('/api/') || pathname === '/admin' || pathname.startsWith('/admin/')) {
     proxyApiRequest(req, res, workflowApiBaseUrl);
     return;
   }
 
-  const filePath = safeFilePath(pathname);
-  if (!filePath) {
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Not found');
+  // Landing page: logo + Dashboard/Admin buttons.
+  if (pathname === '/') {
+    const filePath = safeFilePath(publicDir, '/');
+    if (filePath) {
+      res.writeHead(200, { 'Content-Type': contentTypeFor(filePath), 'Cache-Control': 'no-cache' });
+      createReadStream(filePath).pipe(res);
+      return;
+    }
+  }
+
+  // Any other top-level static file (e.g. the logo image) served from public/.
+  const publicFilePath = pathname !== '/' ? safeFilePath(publicDir, pathname) : null;
+  if (publicFilePath && extname(pathname)) {
+    res.writeHead(200, {
+      'Content-Type': contentTypeFor(publicFilePath),
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    });
+    createReadStream(publicFilePath).pipe(res);
     return;
   }
 
-  res.writeHead(200, {
-    'Content-Type': contentTypeFor(filePath),
-    'Cache-Control': filePath.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
-  });
-  createReadStream(filePath).pipe(res);
+  // Kiosk-app TV dashboard, mounted at /dashboard - redirect the bare path
+  // (no trailing slash) so its own relative asset/API URLs resolve correctly.
+  if (pathname === dashboardPrefix) {
+    res.writeHead(301, { Location: `${dashboardPrefix}/` });
+    res.end();
+    return;
+  }
+
+  if (pathname === `${dashboardPrefix}/` || pathname.startsWith(`${dashboardPrefix}/`)) {
+    const innerPath = pathname.slice(dashboardPrefix.length) || '/';
+
+    if (innerPath === '/health' || innerPath.startsWith('/api/')) {
+      proxyApiRequest(req, res, workflowApiBaseUrl, `${innerPath}${reqUrl.search}`);
+      return;
+    }
+
+    const filePath = safeFilePath(distDir, innerPath);
+    if (!filePath) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Not found');
+      return;
+    }
+
+    res.writeHead(200, {
+      'Content-Type': contentTypeFor(filePath),
+      'Cache-Control': filePath.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
+    });
+    createReadStream(filePath).pipe(res);
+    return;
+  }
+
+  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('Not found');
 });
 
 server.listen(webPort, webHost, () => {
