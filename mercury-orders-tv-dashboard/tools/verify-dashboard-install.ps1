@@ -1,6 +1,6 @@
 param(
   [string]$BaseUrl = "http://127.0.0.1:5173",
-  [string]$InstallRoot = "C:\FTDTools\MercuryOrdersDashboard",
+  [string]$InstallRoot = "C:\FTDTools\Talaria",
   [switch]$Strict
 )
 

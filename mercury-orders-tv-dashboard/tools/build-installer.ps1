@@ -37,6 +37,8 @@ $bridgeServer = Join-Path $projectRoot "workflow-bridge\server.mjs"
 $webHostServer = Join-Path $projectRoot "service-host\dashboard-web-server.mjs"
 $serviceInstallScript = Join-Path $projectRoot "service\install-mercury-dashboard-services.ps1"
 $serviceUninstallScript = Join-Path $projectRoot "service\uninstall-mercury-dashboard-services.ps1"
+$iisSetupScript = Join-Path $projectRoot "tools\setup-iis-proxy.ps1"
+$iisTeardownScript = Join-Path $projectRoot "tools\teardown-iis-proxy.ps1"
 $referenceDir = Join-Path $projectRoot "reference"
 
 if (-not (Test-Path (Join-Path $kioskDist "index.html"))) {
@@ -70,18 +72,23 @@ $stageBridge = Join-Path $stageRoot "workflow-bridge"
 $stageReference = Join-Path $stageRoot "reference"
 $stageServiceHost = Join-Path $stageRoot "service-host"
 $stageService = Join-Path $stageRoot "service"
+$stageTools = Join-Path $stageRoot "tools"
 
-New-Item -ItemType Directory -Path $stageRuntime, $stageServiceRuntime, $stageKioskDist, $stageBridge, $stageReference, $stageServiceHost, $stageService | Out-Null
+New-Item -ItemType Directory -Path $stageRuntime, $stageServiceRuntime, $stageKioskDist, $stageBridge, $stageReference, $stageServiceHost, $stageService, $stageTools | Out-Null
 
 Copy-Item -Path (Join-Path $NodeRuntimeDir "*") -Destination $stageRuntime -Recurse
 Copy-Item -Path (Join-Path $kioskDist "*") -Destination $stageKioskDist -Recurse
 Copy-Item -Path $bridgeServer -Destination (Join-Path $stageBridge "server.mjs") -Force
 Copy-Item -Path (Join-Path $projectRoot "workflow-bridge\package.json") -Destination (Join-Path $stageBridge "package.json") -Force
 Copy-Item -Path (Join-Path $projectRoot "workflow-bridge\package-lock.json") -Destination (Join-Path $stageBridge "package-lock.json") -Force
+Copy-Item -Path (Join-Path $projectRoot "workflow-bridge\admin") -Destination (Join-Path $stageBridge "admin") -Recurse -Force
 Copy-Item -Path (Join-Path $referenceDir "*") -Destination $stageReference -Recurse
 Copy-Item -Path $webHostServer -Destination (Join-Path $stageServiceHost "dashboard-web-server.mjs") -Force
+Copy-Item -Path (Join-Path $projectRoot "service-host\public") -Destination (Join-Path $stageServiceHost "public") -Recurse -Force
 Copy-Item -Path $serviceInstallScript -Destination (Join-Path $stageService "install-mercury-dashboard-services.ps1") -Force
 Copy-Item -Path $serviceUninstallScript -Destination (Join-Path $stageService "uninstall-mercury-dashboard-services.ps1") -Force
+Copy-Item -Path $iisSetupScript -Destination (Join-Path $stageTools "setup-iis-proxy.ps1") -Force
+Copy-Item -Path $iisTeardownScript -Destination (Join-Path $stageTools "teardown-iis-proxy.ps1") -Force
 
 Write-Host "Publishing dashboard service host ($ServiceHostRuntimeIdentifier self-contained)..."
 & dotnet publish $serviceHostProject -c Release -r $ServiceHostRuntimeIdentifier --self-contained true -o $stageServiceRuntime
@@ -310,18 +317,35 @@ if ($MapboxToken) {
   )
 }
 
-$iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
-if (-not $iscc) {
-  throw "iscc.exe (Inno Setup compiler) was not found on PATH."
+function Find-IsccPath {
+  $onPath = Get-Command iscc.exe -ErrorAction SilentlyContinue
+  if ($onPath) { return $onPath.Source }
+
+  # winget's default (per-user, non-elevated) install doesn't touch PATH at
+  # all, so also check the well-known install locations directly.
+  $candidates = @(
+    (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe"
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) { return $candidate }
+  }
+  return $null
 }
 
-Write-Host "Compiling Mercury dashboard installer with Inno Setup..."
-& $iscc.Source @compileArgs
+$isccPath = Find-IsccPath
+if (-not $isccPath) {
+  throw "iscc.exe (Inno Setup compiler) was not found on PATH or in the usual install locations. Install it: winget install JRSoftware.InnoSetup"
+}
+
+Write-Host "Compiling Talaria installer with Inno Setup..."
+& $isccPath @compileArgs
 if ($LASTEXITCODE -ne 0) {
   throw "Inno Setup compile failed with exit code $LASTEXITCODE"
 }
 
-$installerPath = Join-Path $distRoot "FTD.MercuryDashboard.Setup.$Version.exe"
+$installerPath = Join-Path $distRoot "Talaria.Setup.$Version.exe"
 if (-not (Test-Path $installerPath)) {
   throw "Expected installer output not found: $installerPath"
 }
