@@ -22,3 +22,5 @@ artifacts/
 node_modules/
 opos-bridge/dist/
 opos-bridge/service/
+.DS_Store
+

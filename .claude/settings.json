@@ -140,7 +140,13 @@
       "Bash(exit 0)",
       "PowerShell(Stop-Process -Name \"FaxParserConfig\" -Force -ErrorAction SilentlyContinue)",
       "Bash(where sqlcmd *)",
-      "Bash(where osql *)"
+      "Bash(where osql *)",
+      "Bash(open -a Docker)",
+      "Bash(npx prisma *)",
+      "Bash(curl -s \"http://localhost:17444/trpc/activity.pendingWaves\")",
+      "Bash(lsof -nP -iTCP:17444 -sTCP:LISTEN)",
+      "Bash(curl -sv \"http://localhost:17444/health\")",
+      "Bash(git diff *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Florist\\Downloads\\avatars - ccef\\ccef",
