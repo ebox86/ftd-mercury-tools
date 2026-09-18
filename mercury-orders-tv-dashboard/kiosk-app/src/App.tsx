@@ -33,6 +33,7 @@ import {
   fetchAddressSuggestions,
   fetchEventsNow,
   fetchDistanceEstimate,
+  fetchFeedHealth,
   fetchLifecycleByServiceMsg,
   fetchLifecycleLatest,
   fetchMessageDetail,
@@ -2930,6 +2931,12 @@ function formatCityStateZip(city: string, state: string, zip: string): string {
   return left || zipPart;
 }
 
+function formatClockTime(raw: string): string {
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return 'earlier';
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
 function formatDateOnly(raw: string): string {
   if (!raw) return '';
   const date = new Date(raw);
@@ -3992,6 +3999,12 @@ export default function App() {
   const [, setLastUpdated] = useState<string>("");
   const [tickerNow, setTickerNow] = useState<Date>(() => new Date());
   const [error, setError] = useState<string>('');
+  // Set when the bridge is answering /events-now from a stale cache because the
+  // live Mercury call is failing. The intake lane is built entirely from that
+  // feed, so without this the board shows a frozen snapshot (already-answered
+  // messages still listed, new ones missing) with no visible sign anything is
+  // wrong. Incident 2026-09-18: frozen for over an hour, unnoticed.
+  const [staleEventsSince, setStaleEventsSince] = useState<string>('');
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
   const [todayAnchorKey, setTodayAnchorKey] = useState<string>(() => currentLocalDateKey());
   const [dateOffsetDays, setDateOffsetDays] = useState(0);
@@ -4977,6 +4990,15 @@ export default function App() {
 
       const feedStaggerMs = MERCURY_FEED_STAGGER_MS;
       const events = await getCrossPollCached('events-now', () => fetchEventsNow());
+      void fetchFeedHealth().then(health => {
+        const eventsFeed = health?.feeds?.find(feed => feed.scope.startsWith('events-now'));
+        setStaleEventsSince(
+          eventsFeed && !eventsFeed.healthy && eventsFeed.lastGoodAt ? eventsFeed.lastGoodAt : '',
+        );
+      }).catch(() => {
+        // Health endpoint missing (older bridge) — leave the banner off rather
+        // than crying wolf.
+      });
       await sleep(feedStaggerMs);
       const undelivered = await getCrossPollCached('undelivered-orders', () => fetchUndeliveredOrders().catch(() => ({
         dataset: 'DashboardEventDataset',
@@ -8947,6 +8969,14 @@ export default function App() {
                 <h2>New Orders + Unanswered Messages</h2>
                 <span className="lane__count">{pendingTickets.length}</span>
               </header>
+              {staleEventsSince ? (
+                <div className="lane__stale-warning" role="alert">
+                  <FontAwesomeIcon className="lane__stale-warning-icon" icon={faTriangleExclamation} />
+                  <span>
+                    {`Mercury message feed is down — frozen since ${formatClockTime(staleEventsSince)}. This list is not live.`}
+                  </span>
+                </div>
+              ) : null}
               <div className="lane__cards" ref={pendingListRef}>
                 {pendingTickets.length === 0 ? (
                   <div className="lane__empty">

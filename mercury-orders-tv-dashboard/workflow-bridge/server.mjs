@@ -495,6 +495,10 @@ const liveApiCacheMaxEntries = Number(process.env.MERCURY_LIVE_CACHE_MAX_ENTRIES
 const liveApiCacheBypassParam = String(process.env.MERCURY_LIVE_CACHE_BYPASS_PARAM || 'nocache').trim() || 'nocache';
 const liveApiResponseCache = new Map();
 const liveApiInFlight = new Map();
+// Per-scope health, so a feed that is only ever answered from a stale cache
+// (e.g. the dashboard truncation bug killing GetDashboardEventsNow) can be
+// surfaced instead of masquerading as live data behind an HTTP 200.
+const liveApiFeedHealth = new Map();
 const mapboxToken = normalizeAccessToken(process.env.MAPBOX_TOKEN || process.env.MAPBOX_ACCESS_TOKEN || '');
 const mapboxApiBaseUrl = String(process.env.MAPBOX_API_BASE_URL || 'https://api.mapbox.com').trim().replace(/\/+$/, '') || 'https://api.mapbox.com';
 const mapboxProfileRaw = String(process.env.MAPBOX_DIRECTIONS_PROFILE || 'driving').trim();
@@ -922,12 +926,63 @@ function enforceLiveCacheSizeLimit() {
   }
 }
 
+function feedHealthEntry(cacheKey) {
+  let entry = liveApiFeedHealth.get(cacheKey);
+  if (!entry) {
+    entry = { lastGoodAt: null, lastErrorAt: null, lastError: '', consecutiveFailures: 0 };
+    liveApiFeedHealth.set(cacheKey, entry);
+  }
+  return entry;
+}
+
+function recordFeedSuccess(cacheKey) {
+  const entry = feedHealthEntry(cacheKey);
+  if (entry.consecutiveFailures > 0) {
+    console.warn(`Live refresh recovered for ${cacheKey} after ${entry.consecutiveFailures} failure(s).`);
+  }
+  entry.lastGoodAt = Date.now();
+  entry.lastErrorAt = null;
+  entry.lastError = '';
+  entry.consecutiveFailures = 0;
+}
+
+function recordFeedFailure(cacheKey, error) {
+  const entry = feedHealthEntry(cacheKey);
+  entry.lastErrorAt = Date.now();
+  entry.lastError = String(error?.message || error).slice(0, 500);
+  entry.consecutiveFailures += 1;
+}
+
+function feedHealthSnapshot() {
+  const now = Date.now();
+  const feeds = Array.from(liveApiFeedHealth.entries()).map(([cacheKey, entry]) => ({
+    scope: cacheKey,
+    healthy: entry.consecutiveFailures === 0,
+    consecutiveFailures: entry.consecutiveFailures,
+    lastGoodAt: entry.lastGoodAt ? new Date(entry.lastGoodAt).toISOString() : null,
+    staleForMs: entry.consecutiveFailures > 0 && entry.lastGoodAt ? now - entry.lastGoodAt : 0,
+    lastErrorAt: entry.lastErrorAt ? new Date(entry.lastErrorAt).toISOString() : null,
+    lastError: entry.lastError || ''
+  }));
+  feeds.sort((a, b) => a.scope.localeCompare(b.scope));
+  const degraded = feeds.filter(feed => !feed.healthy);
+  return {
+    ok: degraded.length === 0,
+    checkedAt: new Date(now).toISOString(),
+    degradedCount: degraded.length,
+    feeds
+  };
+}
+
 async function getLiveCachedPayload(cacheKey, ttlMs, loader, bypass = false) {
   const effectiveTtlMs = clampCacheTtlMs(ttlMs);
   if (bypass || effectiveTtlMs <= 0) {
     try {
-      return { payload: await loader(), cacheStatus: 'BYPASS' };
+      const payload = await loader();
+      recordFeedSuccess(cacheKey);
+      return { payload, cacheStatus: 'BYPASS' };
     } catch (error) {
+      recordFeedFailure(cacheKey, error);
       const stale = liveApiResponseCache.get(cacheKey);
       if (stale) {
         console.warn(`Live fetch failed for ${cacheKey}, serving stale cache: ${String(error?.message || error)}`);
@@ -962,8 +1017,10 @@ async function getLiveCachedPayload(cacheKey, ttlMs, loader, bypass = false) {
   liveApiInFlight.set(cacheKey, pending);
   try {
     const payload = await pending;
+    recordFeedSuccess(cacheKey);
     return { payload, cacheStatus: 'MISS' };
   } catch (error) {
+    recordFeedFailure(cacheKey, error);
     // A Mercury SOAP fault (e.g. the dashboard truncation bug) shouldn't blank out
     // the dashboard if we still have a previous good response for this scope.
     if (cached) {
@@ -992,9 +1049,13 @@ async function sendLiveCachedJson(res, url, options) {
       loader,
       isCacheBypassRequested(url)
     );
-    return sendJson(res, 200, payload, {
-      'X-Mercury-Cache': cacheStatus
-    });
+    const health = liveApiFeedHealth.get(cacheKey);
+    const extraHeaders = { 'X-Mercury-Cache': cacheStatus };
+    if (cacheStatus === 'STALE-ERROR' && health?.lastGoodAt) {
+      extraHeaders['X-Mercury-Stale-Since'] = new Date(health.lastGoodAt).toISOString();
+      extraHeaders['X-Mercury-Stale-Failures'] = String(health.consecutiveFailures);
+    }
+    return sendJson(res, 200, payload, extraHeaders);
   } catch (error) {
     return sendJson(res, 502, { error: String(error?.message || error), endpoint });
   }
@@ -3564,6 +3625,10 @@ async function getLiveTicketSearch(params = {}) {
 }
 
 async function routeJson(req, res, url, pathname, auth) {
+  if (pathname === '/api/workflow/feed-health') {
+    return sendJson(res, 200, feedHealthSnapshot());
+  }
+
   if (pathname === '/health') {
     return sendJson(res, 200, {
       ok: true,
@@ -4764,6 +4829,9 @@ const ticketGuardFields = ['SPECIAL_INST', 'DELIVERY_INST'];
 
 const ticketGuardAuditDir = join(process.env['PROGRAMDATA'] || 'C:\\ProgramData', 'FTD', 'MercuryDashboardBridge');
 const ticketGuardAuditPath = join(ticketGuardAuditDir, 'ticket-text-guard-audit.log');
+// ticketId|field|length values whose original text is already preserved in the
+// audit log this process, so a repeatedly failing trim doesn't re-log it.
+const ticketGuardAttempted = new Set();
 
 function findSqlcmdPath() {
   const candidates = [
@@ -4786,7 +4854,11 @@ function runSqlcmd(query) {
   return new Promise((resolve, reject) => {
     execFile(
       ticketGuardSqlcmdPath,
-      ['-S', ticketGuardSqlServer, '-E', '-d', ticketGuardSqlDatabase, '-W', '-h', '-1', '-s', '|', '-Q', query],
+      // -b is REQUIRED: without it sqlcmd exits 0 even when the statement
+      // failed (e.g. UPDATE denied because the service runs as LocalSystem and
+      // NT AUTHORITY\SYSTEM only has SELECT on FTD), so every failure looked
+      // like a success and the guard silently did nothing for days.
+      ['-S', ticketGuardSqlServer, '-E', '-d', ticketGuardSqlDatabase, '-W', '-h', '-1', '-s', '|', '-b', '-Q', query],
       { timeout: 20000, windowsHide: true },
       (error, stdout, stderr) => {
         if (error) {
@@ -4833,27 +4905,74 @@ async function runTicketTextGuardOnce() {
       const len = Number(lens[i]);
       if (!Number.isFinite(len) || len <= ticketGuardMaxLen) continue;
 
+      const attemptKey = `${ticketId}|${field}|${len}`;
+      // Only keep the full original text once per ticket/field/length per
+      // process. A guard that cannot write used to re-log the entire order
+      // text every 5 minutes forever (5,072 copies of one ticket by
+      // 2026-09-18, a 4 MB audit log of identical entries).
+      const alreadyAttempted = ticketGuardAttempted.has(attemptKey);
+
       try {
-        const original = await runSqlcmd(`SET NOCOUNT ON; SELECT ${field} FROM FTD.TICKET WHERE ID = ${ticketId};`);
-        appendTicketGuardAudit({
-          ticketId,
-          saleId: saleIdRaw,
-          userReference,
-          field,
-          originalLength: len,
-          truncatedToLength: ticketGuardTruncateLen,
-          originalValue: original.trim()
-        });
+        if (!alreadyAttempted) {
+          // Preserve the original BEFORE touching the row, so the text can
+          // never be lost - but record it as an attempt, not an outcome.
+          const original = await runSqlcmd(`SET NOCOUNT ON; SELECT ${field} FROM FTD.TICKET WHERE ID = ${ticketId};`);
+          appendTicketGuardAudit({
+            event: 'truncate-attempt',
+            ticketId,
+            saleId: saleIdRaw,
+            userReference,
+            field,
+            originalLength: len,
+            truncateToLength: ticketGuardTruncateLen,
+            originalValue: original.trim()
+          });
+          ticketGuardAttempted.add(attemptKey);
+        }
 
         await runSqlcmd(
           `SET NOCOUNT ON; UPDATE FTD.TICKET SET ${field} = LEFT(${field}, ${ticketGuardTruncateLen}) WHERE ID = ${ticketId} AND LEN(${field}) > ${ticketGuardMaxLen};`
         );
 
-        console.warn(
-          `[TicketGuard] Truncated ${field} on ticket ${ticketId} (order ${saleIdRaw}/${userReference}): ${len} -> ${ticketGuardTruncateLen} chars. Full original text saved to ${ticketGuardAuditPath}`
+        // Never trust the UPDATE: read the length back and confirm it shrank.
+        const verifyRows = parseSqlcmdRows(
+          await runSqlcmd(`SET NOCOUNT ON; SELECT ISNULL(LEN(${field}),0) FROM FTD.TICKET WHERE ID = ${ticketId};`)
         );
+        const newLen = Number(verifyRows[0]?.[0]);
+
+        if (Number.isFinite(newLen) && newLen <= ticketGuardTruncateLen) {
+          appendTicketGuardAudit({
+            event: 'truncate-applied',
+            ticketId,
+            saleId: saleIdRaw,
+            userReference,
+            field,
+            originalLength: len,
+            newLength: newLen
+          });
+          ticketGuardAttempted.delete(attemptKey);
+          console.warn(
+            `[TicketGuard] Truncated ${field} on ticket ${ticketId} (order ${saleIdRaw}/${userReference}): ${len} -> ${newLen} chars. Full original text saved to ${ticketGuardAuditPath}`
+          );
+        } else {
+          throw new Error(`UPDATE reported success but ${field} is still ${Number.isFinite(newLen) ? newLen : 'unknown'} chars`);
+        }
       } catch (error) {
-        console.warn(`[TicketGuard] Failed to truncate ${field} on ticket ${ticketId}: ${String(error?.message || error)}`);
+        if (!alreadyAttempted) {
+          appendTicketGuardAudit({
+            event: 'truncate-failed',
+            ticketId,
+            saleId: saleIdRaw,
+            userReference,
+            field,
+            originalLength: len,
+            error: String(error?.message || error)
+          });
+        }
+        console.error(
+          `[TicketGuard] FAILED to truncate ${field} on ticket ${ticketId} (order ${saleIdRaw}/${userReference}, ${len} chars). ` +
+          `Mercury's dashboard feed will stay broken until this is fixed: ${String(error?.message || error)}`
+        );
       }
     }
   }

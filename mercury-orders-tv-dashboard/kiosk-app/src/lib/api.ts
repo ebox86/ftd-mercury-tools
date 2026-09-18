@@ -274,6 +274,31 @@ export async function fetchEventsNow(): Promise<DashboardEventsDataset> {
   return getJson<DashboardEventsDataset>('/api/workflow/events-now');
 }
 
+export interface FeedHealthEntry {
+  scope: string;
+  healthy: boolean;
+  consecutiveFailures: number;
+  lastGoodAt: string | null;
+  staleForMs: number;
+  lastErrorAt: string | null;
+  lastError: string;
+}
+
+export interface FeedHealthResponse {
+  ok: boolean;
+  checkedAt: string;
+  degradedCount: number;
+  feeds: FeedHealthEntry[];
+}
+
+// The bridge answers a failed Mercury call with its last good payload behind a
+// normal HTTP 200 (see getLiveCachedPayload), so a dead feed is invisible to
+// the app unless it asks. This is how the board finds out it is showing a
+// frozen snapshot rather than live data.
+export async function fetchFeedHealth(): Promise<FeedHealthResponse | null> {
+  return getJsonOrNull<FeedHealthResponse>('/api/workflow/feed-health');
+}
+
 export async function fetchUndeliveredOrders(): Promise<DashboardEventsDataset> {
   return getJson<DashboardEventsDataset>('/api/workflow/undelivered-orders');
 }
