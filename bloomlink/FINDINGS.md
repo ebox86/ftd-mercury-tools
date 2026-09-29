@@ -256,10 +256,22 @@ is accepted, no token needed, coexists with the running desktop client.
   `specialInstruction`, full `recipient`, `wireServiceCode` (e.g. BMT),
   `containsPerishables`, `pickupCode`. Message-body text (inquiry/reply/reject
   reason) needs the **detailed messages** audit, not the order audit.
-- **Write path (reply/reject): NOT yet sent.** A self-addressed test message was
-  correctly blocked as a real-world transaction — sending any live wire message
-  needs explicit user approval. Verify the write path with the user before
-  building reply/reject UI on top of it.
+- **Write path (reply/reject): reachable, but no self-test possible.** With user
+  approval we attempted a self-addressed test send. Auth passed and the server
+  parsed our request; it rejected the *content*, which taught us the real rules:
+  - `postmessages` only counts messages under **`<messagesOnOrder>`** (a top-level
+    `messageMesg` gives `3002 does not contain any messages`).
+  - `messagesOnOrder` accepts only **order-related** types — `messageInqr`,
+    `messageResp`, `messageInfo`, `messageRjct`, `messageDeni`, `messageConf`,
+    `messagePchg`, `messageDisp`/`Dsp*`, delivery/ack types. `messageMesg` is
+    rejected (`3000 unable to find FieldDescriptor for messageMesg`).
+  - **So there is no general/self-addressed message.** Every send is tied to a
+    real order + counterparty shop. The first live send must be a genuine
+    reply/reject on an actual inbound message (do it with the user watching).
+  - Answer to "does Bloom support a test send to ourselves?" — **no.**
+  - Client updated accordingly: `urlInquiry`/`urlRespond`/`urlInfo` (reply),
+    `urlReject` (4), `urlDenyCancellation` (6), `urlConfirmCancellation` (11), all
+    under `messagesOnOrder`; the old generic `urlMesg` was removed.
 
 ## 10. Message classification taxonomy (from the Bloom web "Send Message" form)
 

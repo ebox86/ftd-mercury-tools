@@ -116,6 +116,13 @@ export function urlAuditOrdersByDate(c, date, direction = 'Inbound') {
     `</auditOrdersByDate></auditSearchOptions></auditRequest></auditInterface>`;
   return buildUrl(c, 'getAuditInfo', xml);
 }
+export function urlAuditDetailedMessagesByDate(c, date, direction = 'Both') {
+  const xml =
+    `<auditInterface><auditRequest>${security(c)}<auditSearchOptions><auditDetailedInfoOnMessagesByDate>` +
+    tag('messageDirection', wireDirection(direction)) + tag('date', date) +
+    `</auditDetailedInfoOnMessagesByDate></auditSearchOptions></auditRequest></auditInterface>`;
+  return buildUrl(c, 'getAuditInfo', xml);
+}
 export function urlAuditMessagesByDate(c, date, direction = 'Both') {
   const xml =
     `<auditInterface><auditRequest>${security(c)}<auditSearchOptions><auditMessagesByDate>` +
@@ -139,53 +146,49 @@ export function urlAuditOrderByOrderNumber(c, orderNumber, direction = 'Both') {
 }
 
 // ---- OUTBOUND builders (postmessages). These SEND real wire messages. --------
+// Live-confirmed: postmessages ONLY processes messages under <messagesOnOrder>,
+// and that container accepts only order-related types (messageInqr, messageResp,
+// messageInfo, messageRjct, messageDeni, messageConf, messagePchg, messageDisp,
+// delivery/ack types...). There is NO general/free-standing message
+// (messageMesg is rejected: 3000 "unable to find FieldDescriptor for messageMesg
+// in ClassDescriptor of messagesOnOrder"), so a self-addressed test send is not
+// possible — the first live send is a real reply/reject on a genuine inbound
+// message, keyed to that order + the sending shop.
 
 function generalIdentifiers({ bmtOrderNumber = '', bmtSeqNumberOfOrder = '', bmtSeqNumberOfMessage = '', externalShopMessageNumber = '' } = {}) {
   return `<identifiers><generalIdentifiers>${tag('bmtOrderNumber', bmtOrderNumber)}${tag('bmtSeqNumberOfOrder', bmtSeqNumberOfOrder)}${tag('bmtSeqNumberOfMessage', bmtSeqNumberOfMessage)}${tag('externalShopMessageNumber', externalShopMessageNumber)}</generalIdentifiers></identifiers>`;
 }
 
 /**
- * Reject an inbound order. Live audit shows the shop's own rejects go out as
- * messageType 4 (Rejection) via <messageRjct>, keyed to the order, with the
- * reason in messageText (Bloom's reason enum is web-side; free text works).
- * o: { receivingShopCode(original sender), bmtOrderNumber, bmtSeqNumberOfOrder, externalShopMessageNumber, reason }
- * UNVERIFIED wire shape (no outbound RJCT builder in the decompiled client) —
- * confirm against a real reject before automating.
+ * Generic order-related message under <messagesOnOrder>. `element` is one of the
+ * messagesOnOrder children; `body` is inner XML (usually a <messageText>).
+ * o: { receivingShopCode, bmtOrderNumber, bmtSeqNumberOfOrder, bmtSeqNumberOfMessage, externalShopMessageNumber }
+ * All wire shapes here are inferred from the schema + audit; verify each against
+ * a real message the first time it is sent.
  */
-export function urlReject(c, o) {
+function urlOrderMessage(c, element, messageType, o, body = '') {
   const xml =
     `<foreignSystemInterface${FSI_XSI}>${security(c)}<errors/><messagesOnOrder>` +
-    tag('messageCount', 1) + `<messageRjct>` + tag('messageType', MessageType.Rejection) +
+    tag('messageCount', 1) + `<${element}>` + tag('messageType', messageType) +
     tag('sendingShopCode', c.shopCode) + tag('receivingShopCode', o.receivingShopCode) + tag('fulfillingShopCode', c.shopCode) +
-    tag('systemType', 'GENERAL') + generalIdentifiers(o) + tag('messageCreateTimestamp', stamp()) +
-    tag('messageText', escapeText(o.reason)) +
-    `</messageRjct></messagesOnOrder></foreignSystemInterface>`;
+    tag('systemType', 'GENERAL') + generalIdentifiers(o) + tag('messageCreateTimestamp', stamp()) + body +
+    `</${element}></messagesOnOrder></foreignSystemInterface>`;
   return buildUrl(c, 'postmessages', xml);
 }
 
-/** Deny a CANCELLATION request (not an order reject). messageType 6 / <messageDeni>. */
-export function urlDenyCancellation(c, o) {
-  const xml =
-    `<foreignSystemInterface${FSI_XSI}>${security(c)}<errors/><messagesOnOrder>` +
-    tag('messageCount', 1) + `<messageDeni>` + tag('messageType', MessageType.Denial) +
-    tag('sendingShopCode', c.shopCode) + tag('receivingShopCode', o.receivingShopCode) + tag('fulfillingShopCode', c.shopCode) +
-    tag('systemType', 'GENERAL') + generalIdentifiers(o) + tag('messageCreateTimestamp', stamp()) +
-    tag('messageText', escapeText(o.reason)) +
-    `</messageDeni></messagesOnOrder></foreignSystemInterface>`;
-  return buildUrl(c, 'postmessages', xml);
-}
-
-/** Free-text reply / message on an order. o: { receivingShopCode, bmtOrderNumber, bmtSeqNumberOfMessage, text } */
-export function urlMesg(c, o) {
-  const xml =
-    `<foreignSystemInterface${FSI_XSI}>${security(c)}<errors/><messageMesg>` +
-    tag('messageType', MessageType.Message) +
-    tag('sendingShopCode', c.shopCode) + tag('receivingShopCode', o.receivingShopCode) + tag('systemType', 'GENERAL') +
-    `<identifiers><generalIdentifiers>${tag('bmtOrderNumber', o.bmtOrderNumber)}${tag('bmtSeqNumberOfMessage', o.bmtSeqNumberOfMessage)}</generalIdentifiers></identifiers>` +
-    tag('messageCreateTimestamp', stamp()) + tag('messageText', escapeText(o.text)) +
-    `</messageMesg></foreignSystemInterface>`;
-  return buildUrl(c, 'postmessages', xml);
-}
+/** Reject an inbound order (messageType 4 / messageRjct). o adds { reason }. */
+export const urlReject = (c, o) => urlOrderMessage(c, 'messageRjct', MessageType.Rejection, o, tag('messageText', escapeText(o.reason)));
+/** Inquiry on an order — "require a response" (INQR, 1). o adds { text }. */
+export const urlInquiry = (c, o) => urlOrderMessage(c, 'messageInqr', MessageType.Inquiry, o, tag('messageText', escapeText(o.text)));
+/** Respond to an inquiry (RESP, 2). o adds { text }. */
+export const urlRespond = (c, o) => urlOrderMessage(c, 'messageResp', MessageType.Response, o, tag('messageText', escapeText(o.text)));
+/** Status update — "no response needed" (INFO, 12). o adds { text } (classification per FINDINGS §10 rides in text for now). */
+export const urlInfo = (c, o) => urlOrderMessage(c, 'messageInfo', MessageType.Information, o, tag('messageText', escapeText(o.text)));
+/** Deny a CANCELLATION request (DENI, 6) — not an order reject. o adds { reason }. */
+export const urlDenyCancellation = (c, o) => urlOrderMessage(c, 'messageDeni', MessageType.Denial, o, tag('messageText', escapeText(o.reason)));
+/** Confirm a cancellation (CONF, 11). o adds { text }. */
+export const urlConfirmCancellation = (c, o) =>
+  urlOrderMessage(c, 'messageConf', MessageType.Confirmation, o, tag('messageText', escapeText(o.text ?? 'This Message is to confirm that we have cancelled this order.')));
 
 // ---- transport --------------------------------------------------------------
 
