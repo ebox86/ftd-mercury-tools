@@ -299,3 +299,28 @@ on the FSI wire they most likely ride in `messageText` (to confirm when we pull 
 detailed message audit or send a test). For **order rejects**, reuse the existing
 Dove/FTD reject-reason dropdown and send the reason as `messageText` (default
 "Other" + free text), since Bloom's own reason list is web-side.
+
+## 11. platform-api integration (built, mirrors Dove)
+
+Lives in the **Talaria** repo, not here: `services/platform-api/src/main/java/com/talaria/platform/bloom/`
+(`BloomFsiClient`, `BloomSyncer`, `BloomMessenger`, `BloomVerifier`, `BloomProperties`,
+`BloomCredentials`, `BloomMessage`/`BloomOrder`, `BloomMessageTypes`, `BloomExceptions`),
+plus `WireNetwork.BLOOM` and a `talaria.bloom` config block. Compiles clean
+(`./gradlew compileJava` + `compileTestJava`).
+
+- **Read/visibility:** `BloomSyncer` (a `NetworkSyncer`) polls the non-consuming
+  `getAuditInfo` detailed-messages range on the shared 1-min `NetworkSyncScheduler`
+  and upserts `NetworkTransaction` rows — the same table Dove uses, so Bloom
+  orders/messages and the **Sent tab** surface in the Messages page generically.
+  **No order pipeline / no second source of truth** — Mercury stays the order
+  system of record.
+- **Actions:** `BloomMessenger` (a `NetworkMessenger`) sends `messageRjct(4)`
+  (refuse), `messageConf(11)`/`messageDeni(6)` (cancel response), `messageInfo(12)`
+  (reply) — all reading the order first for identifiers, all `postmessages`.
+  Delivery confirmation, date-change, suspend/resume return "not supported" (the
+  desktop client / web app own those).
+- **To go live:** set `NETWORK_SYNC_ENABLED=true` + credential store, then connect
+  a BloomNet `NetworkAccount` (memberCode `X2110000`, username `DIALER`, password)
+  via the same flow Dove uses. Frontend follow-ups: a BloomNet connect card in
+  Settings and adding `bloom` to the Messages network filter/compose. No live
+  outbound message has been sent yet.
