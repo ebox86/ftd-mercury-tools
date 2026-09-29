@@ -94,7 +94,8 @@ env var at runtime.
 |---|---|---|---|---|
 | **Poll for pending messages** | `getmessages` | `foreignSystemInterfaceOutboundRequest` | — | returns general + ackf + order buckets, capped by `maxNumOf*` |
 | Acknowledge (consume) a received msg | `postmessages` | `messageAckf` | 24 | **the consuming step** — removes the msg from the pending queue |
-| **Deny / reject a received order** | `postmessages` | `messageDeni` | 6 | carries `messageText` (reason). This is how you reject an order. |
+| **Reject a received order** | `postmessages` | `messageRjct` | **4** | live audit confirms the shop's own rejects go OUT as type 4; reason in `messageText` (wire shape unverified — no RJCT builder in the client) |
+| Deny a **cancellation** request | `postmessages` | `messageDeni` | 6 | this is "DENI-Deny Cancellation", not an order reject |
 | **Free-text reply / message** | `postmessages` | `messageMesg` | 19 | carries `messageText`; keyed by order + `bmtSeqNumberOfMessage` |
 | Inquiry / Response (msg thread) | `postmessages` | `messageInqr` / `messageResp` | 1 / 2 | |
 | Cancellation / Confirm cancellation | `postmessages` | `messageCanc` / `messageConf` | 3 / 11 | |
@@ -112,8 +113,10 @@ Information=12, New_Tracking_Number=13, Dispute_Confirmed=14, Dispute_Denied=15,
 Dispute_Rescinded=16, Dispute_Upheld=17, Price_Change=18, Message=19,
 Acknowledgement_Bloomlink=23, Acknowledgement_Fulfiller=24, Delivery_Attempted=26`
 
-> To **reject an inbound order we send `Denial` (6)**. `Rejection` (4) is a type we
-> *receive*; there is no outbound RJCT builder in the client.
+> Correction from live data: **rejecting an order goes OUT as `Rejection` (4)**
+> (`messageRjct`), not Denial. `Denial` (6) is "DENI-Deny Cancellation". The
+> decompiled client has no RJCT builder because this shop rejects via the Bloom
+> website today — so the exact type-4 XML is inferred, not decompiled.
 
 Other enums: `Occasions` (Funeral=1..Other=8), `WireServiceCode`
 (BMT, FTD, TEL, AFS, FFX, PNH, RED), `MessageDirection`
@@ -221,3 +224,66 @@ Not yet decompiled: `BloomlinkClient.exe` (GUI + `ServerPoller` + Socket.IO push
 4. Decide whether to keep observing via audit forever, or eventually become the
    order-taker (would require taking over `getmessages`/`ackf` and stopping the
    desktop client — a deliberate cutover, like Mercury/Dove).
+
+---
+
+## 9. Live verification (2026-09-29, shop X2110000, Production)
+
+**Read path fully working end-to-end** with the real `DIALER` credentials — auth
+is accepted, no token needed, coexists with the running desktop client.
+
+- **Wire-format gotchas (learned live):**
+  - `getAuditInfo` single-date (`auditOrdersByDate`, `auditMessagesByDate`) wants
+    **`MM/dd/yyyy`**.
+  - `getAuditInfo` range (`auditMessagesByDateRange`) wants **`YYYYMMDDHHMMSS`**.
+  - `messageDirection` wire value is **`Inbound` / `Outbound` / `Both`** (NOT the
+    enum name `Inbound_and_Outbound` — server rejects it).
+  - "no data" comes back as `errorCode 62 / detailedErrorCode 7004`.
+  - `getmessages` returns `<pendingMessages><total>…` counts and does **not**
+    consume — safe to peek. (Was `total=0` — desktop client had already consumed.)
+- **30-day message history (Both):** 88 orders(0), 8 inquiries(1), 1 response(2),
+  8 cancellations(3), **15 rejections(4, all OUTbound — us rejecting)**, 75 delivery
+  confirmations(7, OUT), 12 disputes(9, IN), 1 confirmation(11, OUT),
+  1 price-change(18, IN), 7 messages(19, IN). This is the visibility we want.
+- **Direction insight:** we SEND types 4/7/11; we RECEIVE 0/1/2/3/9/18/19. So the
+  order-reject verb is **type 4** (`messageRjct`), corrected in §4.
+- General (non-order) messages carry **`bmtOrderNumber = -100`**.
+- **`auditDetailedInfoOnOrderByOrderNumber`** returns the full order only (not the
+  message thread). Confirmed real order fields include: `originalSendingShop`,
+  `inwireSequenceNo`, multi-line `orderProductInfoDetails`
+  (`units/costOfSingleProduct/productDescription/productSecondChoice/productCode/recipe/perishable`),
+  `orderCardMessage`, `deliveryDate` (MM/dd/yyyy) + `deliveryDateTime`,
+  `specialInstruction`, full `recipient`, `wireServiceCode` (e.g. BMT),
+  `containsPerishables`, `pickupCode`. Message-body text (inquiry/reply/reject
+  reason) needs the **detailed messages** audit, not the order audit.
+- **Write path (reply/reject): NOT yet sent.** A self-addressed test message was
+  correctly blocked as a real-world transaction — sending any live wire message
+  needs explicit user approval. Verify the write path with the user before
+  building reply/reject UI on top of it.
+
+## 10. Message classification taxonomy (from the Bloom web "Send Message" form)
+
+BloomLink's "enhanced messaging" wraps a message in a **classification**. The web
+form first asks **"Do you require a response to this message?"** — **Yes** = an
+inquiry-style message (INQR), **No** = pivots to an **INFO-Status Update**. Then a
+type dropdown, and (for some types) a sub-category, then free text. Types:
+
+- **INQR** – Inquiry on Order (free text)
+- **RESP** – Respond to Inquiry (free text)
+- **INFO** – Status Update, sub-category dropdown:
+  - Product Not Available · Recipient Address · Recipient Contact ·
+    Facility - Hospital *(→ Patient in ICU · Patient is gone)* ·
+    Delivery Related Issue *(→ Attempted Delivery/Tagged Door · Recipient Not at Work)* ·
+    Facility - Funeral/Service · Price Change Request · Other *(free text)*
+- **DISP** – Dispute on Order (sub-categories + Other/free text)
+- **CONF** – Confirm Cancellation (prefilled: "This Message is to confirm that we
+  have cancelled this order.")
+- **DENI** – Deny Cancellation (free text)
+- **RFP** – Ready For Pickup (free text)
+
+Mapping to FSI message types: INQR→1, RESP→2, INFO→12, DISP→9, CONF→11, DENI→6,
+plus generic MESG→19. The sub-categories/"require response" flag look web-side;
+on the FSI wire they most likely ride in `messageText` (to confirm when we pull a
+detailed message audit or send a test). For **order rejects**, reuse the existing
+Dove/FTD reject-reason dropdown and send the reason as `messageText` (default
+"Other" + free text), since Bloom's own reason list is web-side.

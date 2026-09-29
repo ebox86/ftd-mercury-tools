@@ -44,6 +44,15 @@ function stamp(d = new Date()) {
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
+// getAuditInfo by-date wants MM/dd/yyyy (the server rejects yyyyMMdd).
+function auditDate(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())}/${d.getFullYear()}`;
+}
+// The wire value for "both" is "Both", not the enum name Inbound_and_Outbound.
+function wireDirection(dir) {
+  return dir === 'Inbound_and_Outbound' ? 'Both' : dir;
+}
 // The desktop client encodes newlines and & inside message text this way.
 function escapeText(s = '') {
   return String(s).replace(/&/g, '&amp;').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
@@ -103,21 +112,28 @@ export function urlGetMessages(c, { systemType = 'GENERAL', maxGeneral = 25, max
 export function urlAuditOrdersByDate(c, date, direction = 'Inbound') {
   const xml =
     `<auditInterface><auditRequest>${security(c)}<auditSearchOptions><auditOrdersByDate>` +
-    tag('messageDirection', direction) + tag('date', date) +
+    tag('messageDirection', wireDirection(direction)) + tag('date', date) +
     `</auditOrdersByDate></auditSearchOptions></auditRequest></auditInterface>`;
   return buildUrl(c, 'getAuditInfo', xml);
 }
-export function urlAuditMessagesByDateRange(c, startDate, endDate, direction = 'Inbound_and_Outbound') {
+export function urlAuditMessagesByDate(c, date, direction = 'Both') {
+  const xml =
+    `<auditInterface><auditRequest>${security(c)}<auditSearchOptions><auditMessagesByDate>` +
+    tag('messageDirection', wireDirection(direction)) + tag('date', date) +
+    `</auditMessagesByDate></auditSearchOptions></auditRequest></auditInterface>`;
+  return buildUrl(c, 'getAuditInfo', xml);
+}
+export function urlAuditMessagesByDateRange(c, startDate, endDate, direction = 'Both') {
   const xml =
     `<auditInterface><auditRequest>${security(c)}<auditSearchOptions><auditMessagesByDateRange>` +
-    tag('messageDirection', direction) + tag('startDate', startDate) + tag('endDate', endDate) +
+    tag('messageDirection', wireDirection(direction)) + tag('startDate', startDate) + tag('endDate', endDate) +
     `</auditMessagesByDateRange></auditSearchOptions></auditRequest></auditInterface>`;
   return buildUrl(c, 'getAuditInfo', xml);
 }
-export function urlAuditOrderByOrderNumber(c, orderNumber, direction = 'Inbound_and_Outbound') {
+export function urlAuditOrderByOrderNumber(c, orderNumber, direction = 'Both') {
   const xml =
     `<auditInterface><auditRequest>${security(c)}<auditSearchOptions><auditDetailedInfoOnOrderByOrderNumber>` +
-    tag('messageDirection', direction) + tag('orderNumberType', 'Internal') + tag('orderNumber', orderNumber) +
+    tag('messageDirection', wireDirection(direction)) + tag('orderNumberType', 'Internal') + tag('orderNumber', orderNumber) +
     `</auditDetailedInfoOnOrderByOrderNumber></auditSearchOptions></auditRequest></auditInterface>`;
   return buildUrl(c, 'getAuditInfo', xml);
 }
@@ -128,8 +144,27 @@ function generalIdentifiers({ bmtOrderNumber = '', bmtSeqNumberOfOrder = '', bmt
   return `<identifiers><generalIdentifiers>${tag('bmtOrderNumber', bmtOrderNumber)}${tag('bmtSeqNumberOfOrder', bmtSeqNumberOfOrder)}${tag('bmtSeqNumberOfMessage', bmtSeqNumberOfMessage)}${tag('externalShopMessageNumber', externalShopMessageNumber)}</generalIdentifiers></identifiers>`;
 }
 
-/** Deny (reject) an inbound order. o: { receivingShopCode(original sender), bmtOrderNumber, bmtSeqNumberOfOrder, externalShopMessageNumber, reason } */
-export function urlDeny(c, o) {
+/**
+ * Reject an inbound order. Live audit shows the shop's own rejects go out as
+ * messageType 4 (Rejection) via <messageRjct>, keyed to the order, with the
+ * reason in messageText (Bloom's reason enum is web-side; free text works).
+ * o: { receivingShopCode(original sender), bmtOrderNumber, bmtSeqNumberOfOrder, externalShopMessageNumber, reason }
+ * UNVERIFIED wire shape (no outbound RJCT builder in the decompiled client) —
+ * confirm against a real reject before automating.
+ */
+export function urlReject(c, o) {
+  const xml =
+    `<foreignSystemInterface${FSI_XSI}>${security(c)}<errors/><messagesOnOrder>` +
+    tag('messageCount', 1) + `<messageRjct>` + tag('messageType', MessageType.Rejection) +
+    tag('sendingShopCode', c.shopCode) + tag('receivingShopCode', o.receivingShopCode) + tag('fulfillingShopCode', c.shopCode) +
+    tag('systemType', 'GENERAL') + generalIdentifiers(o) + tag('messageCreateTimestamp', stamp()) +
+    tag('messageText', escapeText(o.reason)) +
+    `</messageRjct></messagesOnOrder></foreignSystemInterface>`;
+  return buildUrl(c, 'postmessages', xml);
+}
+
+/** Deny a CANCELLATION request (not an order reject). messageType 6 / <messageDeni>. */
+export function urlDenyCancellation(c, o) {
   const xml =
     `<foreignSystemInterface${FSI_XSI}>${security(c)}<errors/><messagesOnOrder>` +
     tag('messageCount', 1) + `<messageDeni>` + tag('messageType', MessageType.Denial) +
@@ -185,13 +220,18 @@ export async function postMessage(url, { confirm = false } = {}) {
 //   node fsi-client.mjs audit-order <orderNumber>
 //   node fsi-client.mjs messages            (getmessages read; does NOT ack)
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('fsi-client.mjs')) {
-  const [cmd, arg] = process.argv.slice(2);
+  const [cmd, arg, arg2] = process.argv.slice(2);
   const c = loadCredentials();
-  const today = stamp().slice(0, 8);
   const run = async () => {
     switch (cmd) {
       case 'audit-today':
-        console.log(await fetchFsi(urlAuditOrdersByDate(c, today, arg || 'Inbound')));
+        console.log(await fetchFsi(urlAuditOrdersByDate(c, auditDate(), arg || 'Both')));
+        break;
+      case 'audit-msgs-today':
+        console.log(await fetchFsi(urlAuditMessagesByDate(c, auditDate(), arg || 'Both')));
+        break;
+      case 'audit-date': // audit-date MM/dd/yyyy [direction]  (orders)
+        console.log(await fetchFsi(urlAuditOrdersByDate(c, arg, arg2 || 'Both')));
         break;
       case 'audit-order':
         if (!arg) throw new Error('audit-order needs an order number');
@@ -201,7 +241,7 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
         console.log(await fetchFsi(urlGetMessages(c)));
         break;
       default:
-        console.log('commands: audit-today [direction] | audit-order <n> | messages');
+        console.log('commands: audit-today [dir] | audit-msgs-today [dir] | audit-date MM/dd/yyyy [dir] | audit-order <n> | messages');
         console.log(`shop ${c.shopCode} @ ${c.address} (env ${c.environment})`);
     }
   };
