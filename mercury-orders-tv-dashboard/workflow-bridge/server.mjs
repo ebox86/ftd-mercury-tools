@@ -634,7 +634,16 @@ function parseSoapStringResponse(xmlText, operationName, fallback = '') {
 
 function buildSoapEnvelope(operationName, params = {}) {
   const nsWithSlash = normalizeSoapNamespace(liveSoapNamespace, true);
+  // Empty values are dropped here, exactly as toLiveParams already drops them
+  // from the query string - CONFIRMED LIVE 2026-09-25. Mercury types these
+  // parameters (StoreID is an int), so an empty <StoreID></StoreID> fails
+  // .NET's own deserializer with "Input string was not in a correct format"
+  // and returns a SOAP 500. That sent every TicketSearch poll down the
+  // form-post -> query-get fallback and logged an Event 1309 on each one,
+  // ~57 an hour. An absent element simply takes the parameter default, which
+  // is what the query-string path has always relied on.
   const payload = Object.entries(params)
+    .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
     .map(([key, value]) => `<${key}>${xmlEscape(value)}</${key}>`)
     .join('');
   return `<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><${operationName} xmlns="${xmlEscape(nsWithSlash)}">${payload}</${operationName}></soap:Body></soap:Envelope>`;
@@ -775,13 +784,25 @@ async function callLiveMercury(serviceName, operationName, params = {}) {
     if (!base) throw new Error('MERCURY_BASE_URL is empty');
     const servicePath = `${trimSlashes(serviceName)}.asmx`;
     const url = `${base}/${servicePath}/${operationName}`;
+    // CONFIRMED LIVE (2026-09-21): a SOAP 1.1 envelope must POST to the bare
+    // .asmx - never .asmx/MethodName. ASP.NET routes the latter to its
+    // HTTP-GET/POST protocols instead, which most operations here survive
+    // only by accident, because HttpPostLocalhost is on by default and these
+    // calls come from 127.0.0.1. TicketSearch is not exposed over those, so
+    // every call fell all the way through soap -> form-post -> query-get, and
+    // the GET logged an Event 1309 "Request format is unrecognized for URL
+    // unexpectedly ending in '/TicketSearch'" every single time: 2,796 of the
+    // Application log's 8,617 records, enough to cut its retention to ~2 days.
+    // The two fallbacks below genuinely do need the method appended; only the
+    // SOAP attempt does not. (callLiveMercurySoap11/12 already got this right.)
+    const soapUrl = `${base}/${servicePath}`;
     const soapAction = `"${normalizeSoapNamespace(liveSoapNamespace, false)}/${operationName}"`;
     const encodedParams = toLiveParams(params).toString();
 
     const attempts = [
       {
         label: 'soap',
-        url,
+        url: soapUrl,
         init: {
           method: 'POST',
           headers: {
